@@ -99,9 +99,16 @@ import CoreText
 }
 
 MainActor.assumeIsolated {
+if CommandLine.arguments.contains("--self-test") {
+    runSelfTests()
+} else if CommandLine.arguments.contains("--integration-test") {
+    Task { await runIntegrationTest() }
+    RunLoop.main.run()
+} else {
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate
     app.run()
 }
 
+}
