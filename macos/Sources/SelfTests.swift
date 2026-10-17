@@ -15,6 +15,7 @@ import Foundation
     precondition(client.song.paused && client.elapsed >= 80 && client.elapsed < 81)
     precondition(parseLRC("[ar:Artist]\nplain text").isEmpty)
     client.stop()
+    testPlayerSetup()
     print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, Pear song/state/seek messages")
 }
 
@@ -46,4 +47,36 @@ import Foundation
         client.stop(); try? FileManager.default.removeItem(at: directory)
         exit(0)
     } catch { fputs("Integration failed: \(error)\n", stderr); exit(1) }
+}
+
+func testPlayerSetup() {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pear-setup-test-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("config.json")
+        let original = Data(#"{"theme":"dark","plugins":{"unrelated":{"enabled":true},"api-server":{"enabled":false,"authStrategy":"AUTH_AT_FIRST","useHttps":true,"custom":"keep"}}}"#.utf8)
+        try original.write(to: file)
+        let result = try PlayerSetup.apply(to: file, port: 26538)
+        precondition(result.changed && result.backup != nil)
+        let backedUp = try Data(contentsOf: result.backup!)
+        precondition(backedUp == original)
+        let updated = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        let plugins = updated["plugins"] as! [String: Any]
+        let api = plugins["api-server"] as! [String: Any]
+        precondition(updated["theme"] as? String == "dark" && plugins["unrelated"] != nil)
+        precondition(api["enabled"] as? Bool == true && api["hostname"] as? String == "127.0.0.1" && api["port"] as? Int == 26538)
+        precondition(api["authStrategy"] as? String == "AUTH_AT_FIRST" && api["custom"] as? String == "keep" && api["useHttps"] as? Bool == false)
+        let second = try PlayerSetup.apply(to: file, port: 26538)
+        precondition(!second.changed && second.backup == nil)
+        let invalid = Data(#"{"plugins":[]}"#.utf8)
+        try invalid.write(to: file)
+        do {
+            _ = try PlayerSetup.apply(to: file, port: 26538)
+            preconditionFailure("Invalid config should not be replaced")
+        } catch PlayerSetup.SetupError.invalidConfig { }
+        let unchanged = try Data(contentsOf: file)
+        precondition(unchanged == invalid)
+        print("PASS: API setup preserves preferences/auth, creates exact backup, applies loopback settings, is idempotent and rejects invalid config")
+    } catch { preconditionFailure("Player setup test failed: \(error)") }
 }

@@ -9,6 +9,7 @@ import CoreText
     var item: NSStatusItem!
     var subscriptions = Set<AnyCancellable>()
     var screenObserver: NSObjectProtocol?
+    var setupTask: Task<Void, Never>?
     let preview = CommandLine.arguments.contains("--preview")
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -40,7 +41,7 @@ import CoreText
             if let url = Bundle.main.url(forResource: name, withExtension: "ttf") { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
         }
     }
-    func applicationWillTerminate(_ notification: Notification) { client.stop(); hotkeys.unregister(); if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) } }
+    func applicationWillTerminate(_ notification: Notification) { setupTask?.cancel(); client.stop(); hotkeys.unregister(); if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) } }
     func add(_ menu: NSMenu, _ title: String, _ action: Selector?, state: Bool = false, represented: Any? = nil) {
         let entry = NSMenuItem(title: title, action: action, keyEquivalent: ""); entry.target = self
         entry.state = state ? .on : .off; entry.representedObject = represented; menu.addItem(entry)
@@ -91,7 +92,65 @@ import CoreText
     @objc func previous() { client.control("previous") }
     @objc func togglePlay() { client.control("toggle-play") }
     @objc func next() { client.control("next") }
-    @objc func retry() { client.retryAuth() }
+    @objc func retry() {
+        guard setupTask == nil else { return }
+        setupTask = Task {
+            defer { setupTask = nil }
+            do {
+                let configURL = try PlayerSetup.configURL()
+                let result = try PlayerSetup.apply(to: configURL, port: client.settings.port)
+                client.retryAuth()
+                // Give the running player a chance to observe the external config change.
+                for _ in 0..<8 {
+                    if await apiAvailable() { return }
+                    try await Task.sleep(for: .milliseconds(500))
+                }
+                let alert = NSAlert()
+                alert.messageText = result.changed ? "API 서버 설정을 저장했습니다" : "음악 앱의 API 서버가 응답하지 않습니다"
+                alert.informativeText = "설정을 반영하려면 YouTube Music/Pear Desktop을 다시 시작해야 합니다. 재생 중인 음악이 잠시 멈춥니다."
+                alert.addButton(withTitle: "음악 앱 다시 시작")
+                alert.addButton(withTitle: "나중에")
+                NSApp.activate(ignoringOtherApps: true)
+                if alert.runModal() == .alertFirstButtonReturn {
+                    try await restartPlayer()
+                    client.retryAuth()
+                }
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Pear 연결 설정을 적용하지 못했습니다"
+                alert.informativeText = error.localizedDescription
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+            }
+        }
+    }
+    func apiAvailable() async -> Bool {
+        var request = URLRequest(url: client.baseURL.appendingPathComponent("api/v1/song"))
+        request.timeoutInterval = 1
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+        guard let (_, response) = try? await session.data(for: request), let response = response as? HTTPURLResponse else { return false }
+        return [200, 401, 403].contains(response.statusCode)
+    }
+    func restartPlayer() async throws {
+        let names = ["YouTube Music", "Pear Desktop", "Pear Desktop Music", "pear-desktop"]
+        let running = NSWorkspace.shared.runningApplications.first { names.contains($0.localizedName ?? "") }
+        let candidates = ["/Applications/YouTube Music.app", "/Applications/Pear Desktop.app", NSHomeDirectory() + "/Applications/YouTube Music.app", NSHomeDirectory() + "/Applications/Pear Desktop.app"]
+        guard let url = running?.bundleURL ?? candidates.first(where: { FileManager.default.fileExists(atPath: $0) }).map({ URL(fileURLWithPath: $0) }) else { throw PlayerSetup.SetupError.configNotFound }
+        if let running {
+            guard running.terminate() else { throw NSError(domain: "PlayerSetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "음악 앱을 종료할 수 없습니다. 직접 종료 후 다시 실행해 주세요."]) }
+            for _ in 0..<50 {
+                if running.isTerminated { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            guard running.isTerminated else { throw NSError(domain: "PlayerSetup", code: 2, userInfo: [NSLocalizedDescriptionKey: "음악 앱이 아직 종료되지 않았습니다. 직접 종료 후 다시 실행해 주세요."]) }
+        }
+        // Some versions save in-memory preferences on quit; reapply after termination.
+        _ = try PlayerSetup.apply(to: PlayerSetup.configURL(), port: client.settings.port)
+        _ = try await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
     @objc func openPlayer() { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/YouTube Music.app")) }
     @objc func openConfig() { NSWorkspace.shared.open(Settings.file) }
     @objc func reload() { client.reload(); overlay.show(); updateMenu() }
