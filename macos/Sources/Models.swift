@@ -30,11 +30,15 @@ struct Settings: Codable {
     }
 }
 struct Song: Equatable {
-    var title = "", artist = "", album = "", imageSrc = "", videoId = ""
+    var title = "", alternativeTitle = "", artist = "", album = "", imageSrc = "", videoId = ""
+    var tags: [String] = []
     var duration: Double = 0, elapsed: Double = 0
     var paused = true
     init(_ d: [String: Any] = [:]) {
-        title = d["title"] as? String ?? d["alternativeTitle"] as? String ?? ""
+        alternativeTitle = d["alternativeTitle"] as? String ?? ""
+        title = d["title"] as? String ?? ""
+        if title.isEmpty { title = alternativeTitle }
+        tags = d["tags"] as? [String] ?? []
         artist = d["artist"] as? String ?? ""; album = d["album"] as? String ?? ""
         imageSrc = d["imageSrc"] as? String ?? ""; videoId = d["videoId"] as? String ?? ""
         duration = (d["songDuration"] as? NSNumber)?.doubleValue ?? 0
@@ -49,22 +53,33 @@ struct LyricLine: Identifiable, Equatable {
     let text: String
 }
 func parseLRC(_ source: String) -> [LyricLine] {
-    let regex = try! NSRegularExpression(pattern: #"\[(\d+):(\d+(?:\.\d+)?)\]"#)
-    var result: [(Double, String)] = []
+    let stamp = try! NSRegularExpression(pattern: #"^\[(\d+):(\d+)(?:[.:](\d+))?\]"#)
+    let offsetTag = try! NSRegularExpression(pattern: #"^\[offset:\s*([+-]?\d+)\s*\]$"#)
+    var entries: [(Double, String)] = []
     var offset: Double = 0
-    let offsetPattern = try! NSRegularExpression(pattern: #"\[offset:([+-]?\d+)\]"#)
-    if let match = offsetPattern.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
-       let range = Range(match.range(at: 1), in: source) { offset = (Double(source[range]) ?? 0) / 1000 }
-    for line in source.components(separatedBy: .newlines) {
-        let matches = regex.matches(in: line, range: NSRange(line.startIndex..., in: line))
-        guard let last = matches.last, let textRange = Range(NSRange(location: NSMaxRange(last.range), length: (line as NSString).length - NSMaxRange(last.range)), in: line) else { continue }
-        let text = String(line[textRange]).replacingOccurrences(of: #"<\d+:\d+(?:[.:]\d+)?>"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
-        for match in matches {
-            let minute = Double((line as NSString).substring(with: match.range(at: 1))) ?? 0
-            let second = Double((line as NSString).substring(with: match.range(at: 2))) ?? 0
-            result.append((max(0, minute * 60 + second + offset), text.isEmpty ? "♪" : text))
+    for raw in source.replacingOccurrences(of: "\r", with: "").components(separatedBy: "\n") {
+        var line = raw.trimmingCharacters(in: .whitespaces)
+        var times: [Double] = []
+        while let match = stamp.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
+            let ns = line as NSString
+            let minute = Double(ns.substring(with: match.range(at: 1))) ?? 0
+            let second = Double(ns.substring(with: match.range(at: 2))) ?? 0
+            var fraction: Double = 0
+            if match.range(at: 3).location != NSNotFound {
+                let digits = String(ns.substring(with: match.range(at: 3)).prefix(3))
+                fraction = (Double(digits) ?? 0) / pow(10, Double(digits.count))
+            }
+            let time = minute * 60 + second + fraction
+            if time.isFinite { times.append(time) }
+            line = ns.substring(from: NSMaxRange(match.range))
         }
+        if times.isEmpty {
+            if let match = offsetTag.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)), let range = Range(match.range(at: 1), in: line) { offset = (Double(line[range]) ?? 0) / 1000 }
+            continue
+        }
+        let text = line.replacingOccurrences(of: #"<\d+:\d+(?:[.:]\d+)?>\s*"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+        entries += times.map { ($0, text.isEmpty ? "♪" : text) }
     }
-    return result.sorted { $0.0 < $1.0 }.enumerated().map { LyricLine(id: $0.offset, time: $0.element.0, text: $0.element.1) }
+    return entries.map { (max(0, $0.0 + offset), $0.1) }.sorted { $0.0 < $1.0 }.enumerated().map { LyricLine(id: $0.offset, time: $0.element.0, text: $0.element.1) }
 }
 func activeLyric(_ lines: [LyricLine], at time: Double) -> Int? { lines.lastIndex { $0.time <= time } }

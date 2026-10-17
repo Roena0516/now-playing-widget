@@ -54,6 +54,7 @@ import CoreText
         add(menu, "곡 정보 계속 표시    ⌃⌥P", #selector(togglePinned), state: client.settings.alwaysShow)
         add(menu, "가사 표시    ⌃⌥L", #selector(toggleLyrics), state: client.settings.showLyrics)
         add(menu, "가사 다시 찾기", #selector(findLyrics))
+        add(menu, "가사 진단 기록 열기", #selector(openLyricsLog))
         let timing = NSMenu(); for delta in [-1000, -500, -100, 0, 100, 500, 1000] {
             let title = delta == 0 ? "보정 초기화" : (delta > 0 ? "\(delta)ms 빠르게" : "\(-delta)ms 늦게")
             add(timing, title, #selector(offset(_:)), represented: delta)
@@ -83,7 +84,8 @@ import CoreText
     @objc func show() { overlay.show() }
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
     @objc func toggleLyrics() { client.settings.showLyrics.toggle(); save() }
-    @objc func findLyrics() { client.findLyrics() }
+    @objc func findLyrics() { client.findLyrics(force: true) }
+    @objc func openLyricsLog() { LyricsLog.write("진단 기록 열기"); NSWorkspace.shared.open(LyricsLog.file) }
     @objc func position(_ sender: NSMenuItem) { client.settings.position = sender.representedObject as! String; save() }
     @objc func size(_ sender: NSMenuItem) { client.settings.scale = sender.representedObject as! Double; save() }
     @objc func offset(_ sender: NSMenuItem) { let delta = sender.representedObject as! Int; client.settings.lyricsOffsetMs = delta == 0 ? 0 : client.settings.lyricsOffsetMs + Double(delta); save() }
@@ -156,7 +158,13 @@ import CoreText
 }
 
 MainActor.assumeIsolated {
-if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
+if CommandLine.arguments.contains("--lyrics-tests") {
+    Task { await runLyricsTests() }
+    RunLoop.main.run()
+} else if let index = CommandLine.arguments.firstIndex(of: "--audit-lyrics"), CommandLine.arguments.count > index + 2 {
+    do { try auditLyricCandidates(songFile: CommandLine.arguments[index + 1], resultsFile: CommandLine.arguments[index + 2]) }
+    catch { fputs("Lyrics audit failed: \(error)\n", stderr); exit(1) }
+} else if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
     do { try renderNativePreview(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
     catch { fputs("Preview failed: \(error)\n", stderr); exit(1) }
 } else if CommandLine.arguments.contains("--self-test") {

@@ -15,6 +15,8 @@ jobs:
         run: ./macos/build.sh
       - name: Test LRC and player state
         run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --self-test'
+      - name: Test original lyric search and matching
+        run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --lyrics-tests'
       - name: Test Pear authentication, WebSocket and controls
         run: python3 macos/Tests/mock_pear.py
       - name: Package app

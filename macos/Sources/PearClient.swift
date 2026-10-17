@@ -14,6 +14,7 @@ import Combine
     private var socket: URLSessionWebSocketTask?
     private var anchor = Date()
     private var token: String?
+    private let lyricsProvider = LyricsProvider(log: LyricsLog.write)
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.connectionProxyDictionary = [:]
@@ -120,51 +121,36 @@ import Combine
             if let (data, response) = try? await session.data(from: url), (response as? HTTPURLResponse)?.statusCode == 200, !Task.isCancelled, song.identity == identity { artwork = data }
         }
     }
-    func findLyrics() {
+    func findLyrics(force: Bool = false) {
         lyricTask?.cancel(); lines = []; lyricsStatus = "가사 검색 중"
         let track = song
         guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; return }
+        if force { lyricsProvider.forget(track) }
         lyricTask = Task {
-            for delay in [0, 3, 10, 30] {
+            for (attempt, delay) in [0, 3, 10, 30].enumerated() {
                 do {
                     if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                     try Task.checkCancellation()
-                    var url = URLComponents(string: "https://lrclib.net/api/get")!
-                    url.queryItems = [URLQueryItem(name: "track_name", value: track.title), URLQueryItem(name: "artist_name", value: track.artist), URLQueryItem(name: "album_name", value: track.album), URLQueryItem(name: "duration", value: String(Int(track.duration)))]
-                    var req = URLRequest(url: url.url!); req.timeoutInterval = 15
-                    req.setValue("PearNowPlaying-macOS/1.0", forHTTPHeaderField: "User-Agent")
-                    let (data, response) = try await session.data(for: req)
+                    let result = try await lyricsProvider.find(track)
                     try Task.checkCancellation()
-                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard code == 200 || code == 404 else { throw URLError(.badServerResponse) }
-                    if code == 200,
-                       let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any], let lrc = obj["syncedLyrics"] as? String, !lrc.isEmpty {
-                        lines = parseLRC(lrc); lyricsStatus = lines.isEmpty ? "싱크 가사 없음" : "싱크 가사 연결됨"; return
+                    guard song.identity == track.identity else { return }
+                    switch result {
+                    case .synced(let found, _): lines = found; lyricsStatus = "싱크 가사 있음 · LRCLIB · \(found.count)줄"
+                    case .instrumental: lyricsStatus = "연주곡 · 가사 없음"
+                    case .plainOnly: lyricsStatus = "일반 가사만 있음 · 싱크 가사 없음"
+                    case .notFound: lyricsStatus = "싱크 가사를 찾지 못함"
                     }
-                    // Search fallback tolerates artist aliases when title and duration match.
-                    var search = URLComponents(string: "https://lrclib.net/api/search")!
-                    search.queryItems = [URLQueryItem(name: "track_name", value: track.title)]
-                    var searchRequest = URLRequest(url: search.url!); searchRequest.timeoutInterval = 15
-                    searchRequest.setValue("PearNowPlaying-macOS/1.0", forHTTPHeaderField: "User-Agent")
-                    let (results, searchResponse) = try await session.data(for: searchRequest)
-                    guard (searchResponse as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-                    try Task.checkCancellation()
-                    let candidates = (try JSONSerialization.jsonObject(with: results) as? [[String: Any]]) ?? []
-                    if let match = candidates.first(where: {
-                        ($0["trackName"] as? String)?.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) == track.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-                        && abs((($0["duration"] as? NSNumber)?.doubleValue ?? -100) - track.duration) <= 3
-                        && !(($0["syncedLyrics"] as? String) ?? "").isEmpty
-                    }), let lrc = match["syncedLyrics"] as? String { lines = parseLRC(lrc); lyricsStatus = "싱크 가사 연결됨"; return }
-                    lyricsStatus = "싱크 가사를 찾지 못함"
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    lyricsStatus = "가사 서버 연결 재시도 중"
+                    LyricsLog.write("가사 검색 실패 (\(attempt + 1)/4): \(track.artist) - \(track.title): \(error.localizedDescription)")
+                    lyricsStatus = "가사 서버 연결 재시도 중 (\(attempt + 1)/4)"
                 }
             }
-            lyricsStatus = "가사 서버 연결 실패 · 메뉴에서 다시 검색"
+            lyricsStatus = "가사 서버 연결 실패 · 가사 진단 기록 확인"
         }
     }
+
 }
 
 // Pear versions using Hono JWT middleware authenticate the WebSocket HTTP upgrade
