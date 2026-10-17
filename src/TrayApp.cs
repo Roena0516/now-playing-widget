@@ -232,7 +232,7 @@ namespace PearNowPlaying
             Task.Run(async () =>
             {
                 // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
-                var waits = new[] { 0, 3000, 10000, 30000 };
+                var waits = new[] { 0, 15000, 45000 };
                 LyricsResult r = null;
                 for (int i = 0; i < waits.Length; i++)
                 {
