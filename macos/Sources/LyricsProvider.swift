@@ -59,19 +59,33 @@ struct LyricRecord: Decodable {
         var best: LyricRecord?
         var how = "get"
         var sawPlain = false
+        var lastError: Error?
+        func attemptSearch(_ query: [URLQueryItem]) async throws -> [LyricRecord] {
+            do { return try await search(query) }
+            catch {
+                if Task.isCancelled { throw CancellationError() }
+                lastError = error; log("검색 요청 실패, 다음 검색 방식 시도: \(error.localizedDescription)")
+                return []
+            }
+        }
         if !song.title.isEmpty && !song.artist.isEmpty && song.duration > 0 {
+            do {
             let (data, status) = try await fetch("get", [URLQueryItem(name: "artist_name", value: song.artist), URLQueryItem(name: "track_name", value: song.title), URLQueryItem(name: "album_name", value: song.album), URLQueryItem(name: "duration", value: String(Int(song.duration.rounded(.toNearestOrEven))))])
             if status != 404 {
                 let record = try JSONDecoder().decode(LyricRecord.self, from: data)
                 sawPlain = !(record.plainLyrics ?? "").isEmpty
                 if record.hasSynced || record.instrumental == true { best = record }
             }
+            } catch {
+                if Task.isCancelled { throw CancellationError() }
+                lastError = error; log("정확 조회 실패, 검색 방식 시도: \(error.localizedDescription)")
+            }
         }
         var seen: [LyricRecord] = []
         if best == nil {
             var query = [URLQueryItem(name: "artist_name", value: song.artist), URLQueryItem(name: "track_name", value: song.title)]
             if !song.album.isEmpty { query.append(URLQueryItem(name: "album_name", value: song.album)) }
-            let records = try await search(query); seen += records
+            let records = try await attemptSearch(query); seen += records
             best = Self.pick(records, song: song); how = "search"
         }
         if best == nil {
@@ -81,11 +95,12 @@ struct LyricRecord: Decodable {
             for query in [alt + " " + artist, Self.cleanTitle(song.title) + " " + artist, Self.cleanTitle(alt)] {
                 let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !query.isEmpty, attempted.insert(query).inserted else { continue }
-                let records = try await search([URLQueryItem(name: "q", value: query)]); seen += records
+                let records = try await attemptSearch([URLQueryItem(name: "q", value: query)]); seen += records
                 if let match = Self.pick(records, song: song) { best = match; how = "q=" + query; break }
             }
         }
         if best == nil { best = Self.pickByTitle(seen, song: song); how = "title match" }
+        if best == nil, let lastError { throw lastError }
         let result: LyricsLookup
         if let best {
             if best.instrumental == true { result = .instrumental; log("연주곡: \(song.artist) - \(song.title)") }

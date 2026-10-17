@@ -38,16 +38,24 @@ import Foundation
             return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
         if case .plainOnly = try await plainProvider.find(track) {} else { preconditionFailure("Plain lyrics must be distinguished from synced lyrics") }
+        let resilient = LyricsProvider(transport: { request in
+            let get = request.url!.path.hasSuffix("/get")
+            let body = get ? "{}" : #"[{"trackName":"Original Song","artistName":"Artist","duration":100,"syncedLyrics":"[00:01.00]Recovered"}]"#
+            return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: get ? 503 : 200, httpVersion: nil, headerFields: nil)!)
+        })
+        if case .synced = try await resilient.find(track) {} else { preconditionFailure("One failed endpoint must not prevent another search from succeeding") }
         var failures = 0
         let failingProvider = LyricsProvider(transport: { request in
             failures += 1
             return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
         })
-        for _ in 0..<2 {
+        var firstFailures = 0
+        for iteration in 0..<2 {
             do { _ = try await failingProvider.find(track); preconditionFailure("503 must propagate for retry") }
             catch { }
+            if iteration == 0 { firstFailures = failures }
         }
-        precondition(failures == 2, "Server failures must not be cached")
+        precondition(firstFailures > 0 && failures == firstFailures * 2, "Server failures must not be cached")
         let cancelled = Task { try await provider.find(track) }; cancelled.cancel()
         do { _ = try await cancelled.value; preconditionFailure("Cancelled lookups must not publish results") } catch { }
         print("PASS: original artist/tag matching, title normalization, duration selection, fallback chain, cache eviction, plain-only diagnosis, 503 retries and cancellation")
