@@ -158,7 +158,13 @@ import CoreText
 }
 
 MainActor.assumeIsolated {
-if CommandLine.arguments.contains("--lyrics-tests") {
+if CommandLine.arguments.contains("--ytmusic-tests") {
+    Task { await runYTMusicTests() }
+    RunLoop.main.run()
+} else if let index = CommandLine.arguments.firstIndex(of: "--audit-ytmusic"), CommandLine.arguments.count > index + 1 {
+    do { try auditYTMusic(CommandLine.arguments[index + 1]) }
+    catch { fputs("YTMusic audit failed: \(error)\n", stderr); exit(1) }
+} else if CommandLine.arguments.contains("--lyrics-tests") {
     Task { await runLyricsTests() }
     RunLoop.main.run()
 } else if let index = CommandLine.arguments.firstIndex(of: "--audit-lyrics"), CommandLine.arguments.count > index + 2 {

@@ -15,6 +15,7 @@ import Combine
     private var anchor = Date()
     private var token: String?
     private let lyricsProvider = LyricsProvider(log: LyricsLog.write)
+    private let ytMusicProvider = YTMusicProvider(log: LyricsLog.write)
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.connectionProxyDictionary = [:]
@@ -125,12 +126,25 @@ import Combine
         lyricTask?.cancel(); lines = []; lyricsStatus = "가사 검색 중"
         let track = song
         guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; return }
-        if force { lyricsProvider.forget(track) }
+        if force { lyricsProvider.forget(track); ytMusicProvider.forget(track) }
         lyricTask = Task {
             for (attempt, delay) in [0, 3, 10, 30].enumerated() {
                 do {
                     if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                     try Task.checkCancellation()
+                    var youtubePlain = false
+                    do {
+                        let youtube = try await ytMusicProvider.find(track)
+                        try Task.checkCancellation()
+                        if case .synced(let found, _) = youtube {
+                            guard song.identity == track.identity else { return }
+                            lines = found; lyricsStatus = "싱크 가사 있음 · YTMusic · \(found.count)줄"; return
+                        }
+                        if case .plainOnly = youtube { youtubePlain = true }
+                    } catch {
+                        if Task.isCancelled { return }
+                        LyricsLog.write("YTMusic 조회 실패, LRCLIB 시도: \(error.localizedDescription)")
+                    }
                     let result = try await lyricsProvider.find(track)
                     try Task.checkCancellation()
                     guard song.identity == track.identity else { return }
@@ -138,7 +152,7 @@ import Combine
                     case .synced(let found, _): lines = found; lyricsStatus = "싱크 가사 있음 · LRCLIB · \(found.count)줄"
                     case .instrumental: lyricsStatus = "연주곡 · 가사 없음"
                     case .plainOnly: lyricsStatus = "일반 가사만 있음 · 싱크 가사 없음"
-                    case .notFound: lyricsStatus = "싱크 가사를 찾지 못함"
+                    case .notFound: lyricsStatus = youtubePlain ? "YTMusic 일반 가사만 있음 · 싱크 가사 없음" : "싱크 가사를 찾지 못함"
                     }
                     return
                 } catch {
