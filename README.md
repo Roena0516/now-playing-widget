@@ -31,6 +31,10 @@
 
 ---
 
+## macOS 네이티브 포트
+
+macOS 13 이상에서는 Swift/AppKit으로 만든 [macOS 버전의 빌드·실행 안내](macos/README.md)를 사용하세요. 곡 정보·싱크 가사 오버레이, 메뉴 막대 제어, 전역 단축키를 제공합니다.
+
 ## 설치
 
 ### 1. Pear Desktop 설정 (처음 한 번)
