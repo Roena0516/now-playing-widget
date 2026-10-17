@@ -41,6 +41,7 @@ namespace PearNowPlaying
         string lyricsKey;
         CancellationTokenSource lyricsCts;
         bool lyricPaused;
+        string announceKey;   // set by a manual retry: say how it went when that song's lookup finishes
         string lyricsLayoutKey;
 
         // local playback clock: Pear reports whole seconds, so we interpolate between reports
@@ -258,6 +259,14 @@ namespace PearNowPlaying
                     lyricsInfoItem.Text = result.HasSynced ? "가사: 싱크 가사 있음 (LRCLIB)"
                                         : result.Instrumental ? "가사: 연주곡"
                                         : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
+                    if (announceKey == key)
+                    {
+                        announceKey = null;
+                        if (result.Failed) ShowInfo("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요");
+                        else if (result.Instrumental) ShowInfo("연주곡이에요");
+                        else if (!result.HasSynced) ShowInfo("이 곡은 싱크 가사를 찾지 못했어요");
+                        else ShowNow(CurrentKind());   // lyrics card appears under the song card
+                    }
                     TickLyrics(true);
                 }, null);
             });
@@ -317,9 +326,11 @@ namespace PearNowPlaying
         void RetryLyrics()
         {
             var song = pear.Current;
-            if (!song.HasData) return;
+            if (!song.HasData) { ShowInfo("재생 중인 곡이 없어요"); return; }
             lyricsProvider.Forget(song);
             lyricsKey = null;
+            announceKey = song.VideoId + "|" + song.Title;
+            ShowInfo("가사를 다시 찾는 중이에요");
             EnsureLyrics(song);
         }
 

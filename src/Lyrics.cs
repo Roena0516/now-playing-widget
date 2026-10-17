@@ -107,7 +107,7 @@ namespace PearNowPlaying
         {
             BaseUrl = (baseUrl ?? "https://lrclib.net").TrimEnd('/');
             http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.4.3 (+https://github.com/Roena0516/pear-now-playing)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.4.4 (+https://github.com/Roena0516/pear-now-playing)");
         }
 
         public async Task<LyricsResult> Find(SongInfo song, CancellationToken ct)
