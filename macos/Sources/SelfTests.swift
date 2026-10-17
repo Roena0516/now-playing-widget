@@ -15,6 +15,9 @@ import Foundation
     precondition(client.song.paused && client.elapsed >= 80 && client.elapsed < 81)
     precondition(parseLRC("[ar:Artist]\nplain text").isEmpty)
     client.stop()
+    let socketRequest = makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: "test-token")
+    precondition(socketRequest.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+    precondition(socketRequest.url?.query == nil)
     testPlayerSetup()
     print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, Pear song/state/seek messages")
 }

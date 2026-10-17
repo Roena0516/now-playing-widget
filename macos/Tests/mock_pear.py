@@ -46,8 +46,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/test-controls':
             self.reply(200, controls)
             return
-        if not self.path.startswith('/api/v1/ws?token='):
+        if self.path != '/api/v1/ws':
             self.reply(404, {})
+            return
+        if not self.headers.get('Authorization', '').startswith('Bearer '):
+            self.reply(401, {})
             return
         key = self.headers['Sec-WebSocket-Key']
         accept = base64.b64encode(hashlib.sha1((key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
@@ -56,7 +59,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Connection', 'Upgrade')
         self.send_header('Sec-WebSocket-Accept', accept)
         self.end_headers()
-        if not self.path.endswith('token=' + TOKEN):
+        if self.headers.get('Authorization') != 'Bearer ' + TOKEN:
             self.frame(struct.pack('!H', 1008), 8)
             self.close_connection = True
             return

@@ -56,8 +56,9 @@ import Combine
                     token = value; try persistToken(value)
                 }
                 var components = URLComponents(url: baseURL.appendingPathComponent("api/v1/ws"), resolvingAgainstBaseURL: false)!
-                components.scheme = "ws"; components.queryItems = [URLQueryItem(name: "token", value: token)]
-                let ws = session.webSocketTask(with: components.url!); socket = ws; ws.resume()
+                components.scheme = "ws"
+                let request = makeWebSocketRequest(url: components.url!, token: token)
+                let ws = session.webSocketTask(with: request); socket = ws; ws.resume()
                 do {
                     while !Task.isCancelled {
                         let message = try await ws.receive()
@@ -72,7 +73,7 @@ import Combine
                 }
             } catch {
                 if Task.isCancelled { return }
-                status = "Pear Desktop 기다리는 중 · API 서버 \(settings.port) 확인"
+                status = "Pear 연결 실패 · 서버/연결 권한 확인 (\((error as NSError).code))"
                 if !song.paused { song.elapsed = elapsed; song.paused = true; anchor = Date() }
             }
             try? await Task.sleep(for: .seconds(3))
@@ -164,4 +165,12 @@ import Combine
             lyricsStatus = "가사 서버 연결 실패 · 메뉴에서 다시 검색"
         }
     }
+}
+
+// Pear versions using Hono JWT middleware authenticate the WebSocket HTTP upgrade
+// with a bearer header. A token query parameter alone is not accepted.
+func makeWebSocketRequest(url: URL, token: String?) -> URLRequest {
+    var request = URLRequest(url: url)
+    if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+    return request
 }
