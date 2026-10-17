@@ -23,6 +23,8 @@ namespace PearNowPlaying
         public static readonly LyricsResult None = new LyricsResult { Lines = new List<LyricLine>() };
         public List<LyricLine> Lines;
         public bool Instrumental;
+        /// <summary>The lookup failed (timeout, server error). Not cached, worth retrying.</summary>
+        public bool Failed;
         public string Source = "";
         public bool HasSynced { get { return Lines != null && Lines.Count > 0; } }
 
@@ -104,8 +106,8 @@ namespace PearNowPlaying
         public LyricsProvider(string baseUrl)
         {
             BaseUrl = (baseUrl ?? "https://lrclib.net").TrimEnd('/');
-            http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.4 (+https://github.com/Roena0516/pear-now-playing)");
+            http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.4.1 (+https://github.com/Roena0516/pear-now-playing)");
         }
 
         public async Task<LyricsResult> Find(SongInfo song, CancellationToken ct)
@@ -114,27 +116,46 @@ namespace PearNowPlaying
             lock (gate) { LyricsResult hit; if (cache.TryGetValue(key, out hit)) return hit; }
 
             LyricsResult result = LyricsResult.None;
+            string how = "not found";
             try
             {
-                var q = new List<KeyValuePair<string, string>>
-                {
-                    new KeyValuePair<string, string>("artist_name", song.Artist),
-                    new KeyValuePair<string, string>("track_name", song.Title),
-                };
-                if (!string.IsNullOrEmpty(song.Album)) q.Add(new KeyValuePair<string, string>("album_name", song.Album));
-                var items = await Search(q, ct);
-                var best = Pick(items, song);
+                // 1) exact signature lookup (artist + title + album + duration): one row, usually fast
+                var best = await Get(song, ct);
+                if (best != null) how = "get";
 
+                // 2) search like Pear does, then looser free-text searches
+                var seen = new List<IDictionary<string, object>>();
                 if (best == null)
                 {
-                    // looser second pass: free-text query with the original-language title, then a cleaned title
-                    var alt = string.IsNullOrEmpty(song.AltTitle) ? song.Title : song.AltTitle;
-                    foreach (var text in new[] { alt + " " + FirstArtist(song.Artist), CleanTitle(song.Title) + " " + FirstArtist(song.Artist) }.Distinct())
+                    var q = new List<KeyValuePair<string, string>>
                     {
-                        items = await Search(new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("q", text.Trim()) }, ct);
+                        new KeyValuePair<string, string>("artist_name", song.Artist),
+                        new KeyValuePair<string, string>("track_name", song.Title),
+                    };
+                    if (!string.IsNullOrEmpty(song.Album)) q.Add(new KeyValuePair<string, string>("album_name", song.Album));
+                    var items = await Search(q, ct);
+                    seen.AddRange(items);
+                    best = Pick(items, song);
+                    if (best != null) how = "search";
+                }
+                if (best == null)
+                {
+                    var alt = string.IsNullOrEmpty(song.AltTitle) ? song.Title : song.AltTitle;
+                    foreach (var text in new[] { alt + " " + FirstArtist(song.Artist), CleanTitle(song.Title) + " " + FirstArtist(song.Artist), CleanTitle(alt) }.Distinct())
+                    {
+                        if (string.IsNullOrWhiteSpace(text)) continue;
+                        var items = await Search(new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("q", text.Trim()) }, ct);
+                        seen.AddRange(items);
                         best = Pick(items, song);
-                        if (best != null) break;
+                        if (best != null) { how = "q=" + text.Trim(); break; }
                     }
+                }
+
+                // 3) artist written differently (e.g. "Kenshi Yonezu" vs "米津玄師"): same title and nearly the same length
+                if (best == null)
+                {
+                    best = PickByTitle(seen, song);
+                    if (best != null) how = "title match (" + Str(best, "artistName") + ")";
                 }
 
                 if (best != null)
@@ -143,14 +164,41 @@ namespace PearNowPlaying
                     else result = new LyricsResult { Lines = Lrc.Parse(Str(best, "syncedLyrics")), Source = "LRCLIB" };
                 }
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }   // song changed
             catch (Exception ex)
             {
-                Log.Error("lyrics lookup", ex);
-                return LyricsResult.None;   // don't cache network errors
+                // timeouts land here too (HttpClient reports them as TaskCanceledException)
+                Log.Write("WARN lyrics lookup failed for " + song.Artist + " - " + song.Title + ": "
+                          + (ex is OperationCanceledException ? "timeout" : ex.GetType().Name + ": " + ex.Message));
+                return new LyricsResult { Lines = new List<LyricLine>(), Failed = true };   // don't cache
             }
+            Log.Info("lyrics " + (result.HasSynced ? "found via " + how : result.Instrumental ? "instrumental" : "not found")
+                     + ": " + song.Artist + " - " + song.Title + " (" + (int)song.Duration + "s)");
             lock (gate) cache[key] = result;
             return result;
+        }
+
+        /// <summary>Drop the cached result for a song so the next Find asks LRCLIB again.</summary>
+        public void Forget(SongInfo song)
+        {
+            lock (gate) cache.Remove(song.VideoId + "|" + song.Title);
+        }
+
+        async Task<IDictionary<string, object>> Get(SongInfo song, CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(song.Title) || string.IsNullOrEmpty(song.Artist) || song.Duration <= 0) return null;
+            var url = BaseUrl + "/api/get?artist_name=" + Uri.EscapeDataString(song.Artist)
+                    + "&track_name=" + Uri.EscapeDataString(song.Title)
+                    + "&album_name=" + Uri.EscapeDataString(song.Album ?? "")
+                    + "&duration=" + ((int)Math.Round(song.Duration)).ToString(CultureInfo.InvariantCulture);
+            using (var resp = await http.GetAsync(url, ct))
+            {
+                if ((int)resp.StatusCode == 404) return null;
+                if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB get " + (int)resp.StatusCode);
+                var d = json.DeserializeObject(await resp.Content.ReadAsStringAsync()) as IDictionary<string, object>;
+                if (d == null) return null;
+                return !string.IsNullOrEmpty(Str(d, "syncedLyrics")) || Bool(d, "instrumental") ? d : null;
+            }
         }
 
         async Task<List<IDictionary<string, object>>> Search(List<KeyValuePair<string, string>> query, CancellationToken ct)
@@ -163,7 +211,7 @@ namespace PearNowPlaying
             }
             using (var resp = await http.GetAsync(sb.ToString(), ct))
             {
-                if (!resp.IsSuccessStatusCode) return new List<IDictionary<string, object>>();
+                if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB search " + (int)resp.StatusCode);
                 var body = await resp.Content.ReadAsStringAsync();
                 var arr = json.DeserializeObject(body) as IEnumerable;
                 var list = new List<IDictionary<string, object>>();
@@ -192,6 +240,33 @@ namespace PearNowPlaying
             // prefer entries that actually have timestamps
             return candidates.FirstOrDefault(c => !string.IsNullOrEmpty(Str(c, "syncedLyrics")))
                 ?? candidates.FirstOrDefault(c => Bool(c, "instrumental"));
+        }
+
+        /// <summary>
+        /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces
+        /// and punctuation) and the length within 3 seconds, which together are very unlikely to collide.
+        /// </summary>
+        static IDictionary<string, object> PickByTitle(List<IDictionary<string, object>> items, SongInfo song)
+        {
+            if (song.Duration <= 0) return null;
+            var titles = new HashSet<string> { Norm(song.Title), Norm(CleanTitle(song.Title)) };
+            if (!string.IsNullOrEmpty(song.AltTitle)) { titles.Add(Norm(song.AltTitle)); titles.Add(Norm(CleanTitle(song.AltTitle))); }
+            titles.Remove("");
+            return items
+                .Where(it => !string.IsNullOrEmpty(Str(it, "syncedLyrics")))
+                .Where(it => titles.Contains(Norm(Str(it, "trackName"))))
+                .Where(it => Math.Abs(Num(it, "duration") - song.Duration) <= 3)
+                .OrderBy(it => Math.Abs(Num(it, "duration") - song.Duration))
+                .FirstOrDefault();
+        }
+
+        static string Norm(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new StringBuilder();
+            foreach (var ch in s.Normalize(NormalizationForm.FormKC).ToLowerInvariant())
+                if (char.IsLetterOrDigit(ch)) sb.Append(ch);
+            return sb.ToString();
         }
 
         /// <summary>"비비 (BIBI) & 윤하" -> {"비비 (bibi)", "비비", "bibi", "윤하"}</summary>

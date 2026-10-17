@@ -19,7 +19,7 @@ namespace PearNowPlaying
         readonly Hotkeys hotkeys;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu;
+        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, retryLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly SynchronizationContext ui;
         readonly double dpiScale;
@@ -65,6 +65,7 @@ namespace PearNowPlaying
             lyricsInfoItem = new ToolStripMenuItem("가사: -") { Enabled = false };
             pinItem = new ToolStripMenuItem("곡 정보 계속 표시", null, (s, e) => TogglePin());
             lyricsItem = new ToolStripMenuItem("가사 표시", null, (s, e) => ToggleLyrics());
+            retryLyricsItem = new ToolStripMenuItem("가사 다시 찾기", null, (s, e) => RetryLyrics());
             offsetMenu = new ToolStripMenuItem("가사 타이밍");
             foreach (var pair in new[] { Tuple.Create("1초 빠르게", 1300), Tuple.Create("0.5초 빠르게", 800), Tuple.Create("기본", 300),
                                          Tuple.Create("0.5초 늦게", -200), Tuple.Create("1초 늦게", -700) })
@@ -90,6 +91,7 @@ namespace PearNowPlaying
             menu.Items.Add(new ToolStripMenuItem("지금 곡 보기", null, (s, e) => ShowNow(CurrentKind())));
             menu.Items.Add(pinItem);
             menu.Items.Add(lyricsItem);
+            menu.Items.Add(retryLyricsItem);
             menu.Items.Add(offsetMenu);
             menu.Items.Add(posMenu);
             menu.Items.Add(sizeMenu);
@@ -229,16 +231,33 @@ namespace PearNowPlaying
             var snapshot = song;
             Task.Run(async () =>
             {
-                LyricsResult r;
-                try { r = await lyricsProvider.Find(snapshot, ct); }
-                catch (OperationCanceledException) { return; }
+                // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
+                var waits = new[] { 0, 3000, 10000, 30000 };
+                LyricsResult r = null;
+                for (int i = 0; i < waits.Length; i++)
+                {
+                    try
+                    {
+                        if (waits[i] > 0)
+                        {
+                            int attempt = i;
+                            ui.Post(_ => { if (key == lyricsKey) lyricsInfoItem.Text = "가사: 연결 실패, 다시 시도 중 (" + attempt + "/" + (waits.Length - 1) + ")"; }, null);
+                            await Task.Delay(waits[i], ct);
+                        }
+                        r = await lyricsProvider.Find(snapshot, ct);
+                    }
+                    catch (OperationCanceledException) { return; }
+                    if (!r.Failed) break;
+                }
+                var result = r;
                 ui.Post(_ =>
                 {
                     if (ct.IsCancellationRequested || key != lyricsKey) return;
-                    lyrics = r;
+                    lyrics = result;
                     lyricsLayoutKey = null;
-                    lyricsInfoItem.Text = r.HasSynced ? "가사: 싱크 가사 있음 (LRCLIB)"
-                                        : r.Instrumental ? "가사: 연주곡" : "가사: 찾지 못함";
+                    lyricsInfoItem.Text = result.HasSynced ? "가사: 싱크 가사 있음 (LRCLIB)"
+                                        : result.Instrumental ? "가사: 연주곡"
+                                        : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
                     TickLyrics(true);
                 }, null);
             });
@@ -295,12 +314,22 @@ namespace PearNowPlaying
             if (!lyricsView.Animating) frameTimer.Stop();
         }
 
+        void RetryLyrics()
+        {
+            var song = pear.Current;
+            if (!song.HasData) return;
+            lyricsProvider.Forget(song);
+            lyricsKey = null;
+            EnsureLyrics(song);
+        }
+
         void ToggleLyrics()
         {
             cfg.ShowLyrics = !cfg.ShowLyrics;
             cfg.Save();
             if (cfg.ShowLyrics) TickLyrics(true); else lyricsWin.Dismiss();
             if (!cfg.ShowLyrics) ShowInfo("가사 표시를 껐어요");
+            else if (lyrics != null && lyrics.Failed) ShowInfo("가사 서버에 연결하지 못했어요");
             else if (lyrics != null && !lyrics.HasSynced) ShowInfo("이 곡은 싱크 가사를 찾지 못했어요");
         }
 
