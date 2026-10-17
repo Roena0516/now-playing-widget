@@ -3,3 +3,8 @@ obj/
 *.zip
 .vs/
 *.user
+
+# local only
+/PearNowPlaying.exe
+/PretendardJP-OFL.txt
+_capture/

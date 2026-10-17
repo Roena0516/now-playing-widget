@@ -25,6 +25,8 @@ namespace PearNowPlaying
         public string Album = "";
         public string ImageSrc = "";
         public string VideoId = "";
+        /// <summary>AUDIO, ORIGINAL_MUSIC_VIDEO, USER_GENERATED_CONTENT, PODCAST_EPISODE, OTHER_VIDEO (Pear's MediaType)</summary>
+        public string MediaType = "";
         public double Duration;
         public double Elapsed;
         public bool IsPaused;
@@ -274,6 +276,7 @@ namespace PearNowPlaying
             s.Album = Str(d, "album");
             s.ImageSrc = Str(d, "imageSrc");
             s.VideoId = Str(d, "videoId");
+            s.MediaType = Str(d, "mediaType");
             s.Duration = Num(d, "songDuration");
             s.Elapsed = Num(d, "elapsedSeconds");
             s.IsPaused = Bool(d, "isPaused");
@@ -309,6 +312,51 @@ namespace PearNowPlaying
                 }
                 catch (Exception ex) { Log.Error("control " + path, ex); }
             });
+        }
+
+        /// <summary>
+        /// The next song in Pear's queue (GET /api/v1/queue/next): title, artist, video ID and length only.
+        /// Null when there is no next song or Pear can't be asked.
+        /// </summary>
+        public async Task<SongInfo> GetNextSong(CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(token)) return null;
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            using (var req = new HttpRequestMessage(HttpMethod.Get, cfg.BaseHttp + "/api/v1/queue/next"))
+            {
+                timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using (var resp = await http.SendAsync(req, timeout.Token))
+                {
+                    if (resp.StatusCode != HttpStatusCode.OK) return null;   // 204 = nothing queued
+                    var d = json.DeserializeObject(await resp.Content.ReadAsStringAsync()) as IDictionary<string, object>;
+                    if (d == null) return null;
+                    var s = new SongInfo { Title = Str(d, "title"), VideoId = Str(d, "videoId") };
+                    s.Artist = FirstRun(d, "shortBylineText");
+                    s.Duration = YtmLyrics.ParseClock(FirstRun(d, "lengthText"));
+                    s.MediaType = "UNKNOWN";   // the queue doesn't say; cover detection goes by the title only
+                    return string.IsNullOrEmpty(s.VideoId) || string.IsNullOrEmpty(s.Title) ? null : s;
+                }
+            }
+        }
+
+        static string FirstRun(IDictionary<string, object> d, string key)
+        {
+            object node;
+            if (!d.TryGetValue(key, out node)) return "";
+            var nd = node as IDictionary<string, object>;
+            if (nd == null) return "";
+            object simple;
+            if (nd.TryGetValue("simpleText", out simple) && simple is string) return (string)simple;
+            object runs;
+            if (nd.TryGetValue("runs", out runs) && runs is IEnumerable)
+                foreach (var r in (IEnumerable)runs)
+                {
+                    var rd = r as IDictionary<string, object>;
+                    object t;
+                    if (rd != null && rd.TryGetValue("text", out t) && t is string && ((string)t).Trim().Length > 0) return ((string)t).Trim();
+                }
+            return "";
         }
 
         // ---- helpers ---------------------------------------------------------

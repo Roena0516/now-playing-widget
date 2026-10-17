@@ -19,7 +19,7 @@ namespace PearNowPlaying
         readonly Hotkeys hotkeys;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, retryLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu;
+        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, retryLyricsItem, ytmLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly SynchronizationContext ui;
         readonly double dpiScale;
@@ -27,6 +27,9 @@ namespace PearNowPlaying
         readonly System.Windows.Forms.Timer frameTimer = new System.Windows.Forms.Timer { Interval = 15 };
         readonly LyricsView lyricsView = new LyricsView();
         readonly System.Windows.Forms.Timer cardFrameTimer = new System.Windows.Forms.Timer { Interval = 16 };
+        // a short message card (ShowInfo) temporarily takes the song card's place; this brings the song back
+        readonly System.Windows.Forms.Timer infoTimer = new System.Windows.Forms.Timer();
+        DateTime infoUntil = DateTime.MinValue;
         readonly Stopwatch marquee = new Stopwatch();
         CardFrame cardFrame;
 
@@ -40,6 +43,7 @@ namespace PearNowPlaying
         LyricsResult lyrics;
         string lyricsKey;
         CancellationTokenSource lyricsCts;
+        CancellationTokenSource prefetchCts;
         bool lyricPaused;
         string announceKey;   // set by a manual retry: say how it went when that song's lookup finishes
         string lyricsLayoutKey;
@@ -67,6 +71,7 @@ namespace PearNowPlaying
             pinItem = new ToolStripMenuItem("곡 정보 계속 표시", null, (s, e) => TogglePin());
             lyricsItem = new ToolStripMenuItem("가사 표시", null, (s, e) => ToggleLyrics());
             retryLyricsItem = new ToolStripMenuItem("가사 다시 찾기", null, (s, e) => RetryLyrics());
+            ytmLyricsItem = new ToolStripMenuItem("YouTube Music 가사 먼저 찾기", null, (s, e) => ToggleYtmLyrics());
             offsetMenu = new ToolStripMenuItem("가사 타이밍");
             foreach (var pair in new[] { Tuple.Create("1초 빠르게", 1300), Tuple.Create("0.5초 빠르게", 800), Tuple.Create("기본", 300),
                                          Tuple.Create("0.5초 늦게", -200), Tuple.Create("1초 늦게", -700) })
@@ -93,6 +98,7 @@ namespace PearNowPlaying
             menu.Items.Add(pinItem);
             menu.Items.Add(lyricsItem);
             menu.Items.Add(retryLyricsItem);
+            menu.Items.Add(ytmLyricsItem);
             menu.Items.Add(offsetMenu);
             menu.Items.Add(posMenu);
             menu.Items.Add(sizeMenu);
@@ -121,11 +127,13 @@ namespace PearNowPlaying
             hotkeys = new Hotkeys();
             RegisterHotkeys();
 
-            lyricsProvider = new LyricsProvider(cfg.LyricsServer);
+            lyricsProvider = new LyricsProvider(cfg.LyricsServer) { Ytm = new YtmLyrics() };
+            ApplyLyricsSources();
             lyricsTimer.Tick += (s, e) => TickLyrics();
             lyricsTimer.Start();
             frameTimer.Tick += (s, e) => LyricsFrame();
             cardFrameTimer.Tick += (s, e) => CardFrameTick();
+            infoTimer.Tick += (s, e) => EndInfo();
 
             pear = new PearClient(ui, cfg);
             pear.StatusChanged += OnStatus;
@@ -227,6 +235,7 @@ namespace PearNowPlaying
             lyricsInfoItem.Text = "가사: 찾는 중";
             lyricsWin.Dismiss();
             if (lyricsCts != null) lyricsCts.Cancel();
+            if (prefetchCts != null) prefetchCts.Cancel();
             lyricsCts = new CancellationTokenSource();
             var ct = lyricsCts.Token;
             var snapshot = song;
@@ -256,9 +265,10 @@ namespace PearNowPlaying
                     if (ct.IsCancellationRequested || key != lyricsKey) return;
                     lyrics = result;
                     lyricsLayoutKey = null;
-                    lyricsInfoItem.Text = result.HasSynced ? "가사: 싱크 가사 있음 (LRCLIB)"
+                    lyricsInfoItem.Text = result.HasSynced ? ("가사: 싱크 가사 있음 (" + result.Source + ")")
                                         : result.Instrumental ? "가사: 연주곡"
                                         : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
+                    if (!result.Failed) PrefetchNext(key);
                     if (announceKey == key)
                     {
                         announceKey = null;
@@ -323,11 +333,37 @@ namespace PearNowPlaying
             if (!lyricsView.Animating) frameTimer.Stop();
         }
 
+        /// <summary>
+        /// While this song plays, look up the next one in Pear's queue so its lyrics are ready when it starts.
+        /// Waits a little first so quickly skipped songs don't trigger lookups.
+        /// </summary>
+        void PrefetchNext(string forKey)
+        {
+            if (!cfg.ShowLyrics) return;
+            if (prefetchCts != null) prefetchCts.Cancel();
+            prefetchCts = new CancellationTokenSource();
+            var ct = prefetchCts.Token;
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(10000, ct);
+                    var next = await pear.GetNextSong(ct);
+                    if (next == null || ct.IsCancellationRequested) return;
+                    if (next.VideoId + "|" + next.Title == forKey) return;
+                    await lyricsProvider.Prefetch(next, ct);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { Log.Write("INFO fetching ahead failed: " + ex.Message); }
+            });
+        }
+
         void RetryLyrics()
         {
             var song = pear.Current;
             if (!song.HasData) { ShowInfo("재생 중인 곡이 없어요"); return; }
             lyricsProvider.Forget(song);
+            lyricsProvider.Ytm.ResetPause();
             lyricsKey = null;
             announceKey = song.VideoId + "|" + song.Title;
             ShowInfo("가사를 다시 찾는 중이에요");
@@ -367,6 +403,8 @@ namespace PearNowPlaying
                 return;
             }
             lastKind = kind;
+            infoTimer.Stop();
+            infoUntil = DateTime.MinValue;
             song.Elapsed = PlaybackPositionFor(song);
             if (!cardWin.IsPresent || kind == CardKind.NowPlaying) marquee.Restart();
             SetCardFrame(CardRenderer.BuildCard(song, kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
@@ -381,15 +419,30 @@ namespace PearNowPlaying
             marquee.Restart();
             SetCardFrame(CardRenderer.BuildCard(null, CardKind.Info, text, null, false, Scale, cfg.Opacity, PanelWidth, true));
             var bmp = cardFrame.Compose(MarqueeOffset());
-            cardWin.ShowCard(bmp, PlaceCard(bmp.Size), Math.Max(3, cfg.ShowSeconds));
+            // While "always show" keeps the song card up, the message only borrows its place for a few seconds
+            // and the song card comes back; otherwise the message fades out like a normal card.
+            bool restore = cfg.AlwaysShow && pear.Current.HasData;
+            double secs = restore ? 3.5 : Math.Max(3, cfg.ShowSeconds);
+            cardWin.ShowCard(bmp, PlaceCard(bmp.Size), restore ? (double?)null : secs);
+            infoUntil = DateTime.Now.AddSeconds(secs);
+            infoTimer.Stop();
+            if (restore) { infoTimer.Interval = (int)(secs * 1000); infoTimer.Start(); }
             Reposition();
             StartMarquee();
+        }
+
+        void EndInfo()
+        {
+            infoTimer.Stop();
+            infoUntil = DateTime.MinValue;
+            if (cfg.AlwaysShow && pear.Current.HasData) ShowNow(CurrentKind());
         }
 
         void Rerender()
         {
             var song = pear.Current;
             if (!song.HasData) return;
+            if (DateTime.Now < infoUntil) return;   // a message card is up; don't paint the song over it
             var kind = lastKind;
             if (cardWin.IsPinned && kind == CardKind.Resumed) kind = CardKind.NowPlaying;
             song.Elapsed = PlaybackPositionFor(song);
@@ -552,12 +605,28 @@ namespace PearNowPlaying
             ShowNow(CurrentKind());
         }
 
+        void ApplyLyricsSources()
+        {
+            lyricsProvider.UseYtm = cfg.YtmLyrics;
+            lyricsProvider.Ytm.ProxyBase = string.IsNullOrWhiteSpace(cfg.YtmLyricsProxy) ? YtmLyrics.DefaultProxy : cfg.YtmLyricsProxy.Trim();
+        }
+
+        void ToggleYtmLyrics()
+        {
+            cfg.YtmLyrics = !cfg.YtmLyrics;
+            cfg.Save();
+            ApplyLyricsSources();
+            lyricsProvider.Ytm.ResetPause();
+            ShowInfo(cfg.YtmLyrics ? "YouTube Music 가사를 먼저 찾아요" : "LRCLIB에서만 가사를 찾아요");
+        }
+
         void ReloadConfig()
         {
             var old = cfg;
             cfg = Config.Load();
             RegisterHotkeys();
             lyricsProvider.BaseUrl = (cfg.LyricsServer ?? "https://lrclib.net").TrimEnd('/');
+            ApplyLyricsSources();
             if (old.Host != cfg.Host || old.Port != cfg.Port || old.Https != cfg.Https) pear.Reconnect(cfg);
             TickLyrics(true);
             ShowNow(CurrentKind());
@@ -582,6 +651,7 @@ namespace PearNowPlaying
         {
             pinItem.Checked = cfg.AlwaysShow;
             lyricsItem.Checked = cfg.ShowLyrics;
+            ytmLyricsItem.Checked = cfg.YtmLyrics;
             foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
             foreach (ToolStripMenuItem it in posMenu.DropDownItems) it.Checked = (OverlayPosition)it.Tag == cfg.Position;
             foreach (ToolStripMenuItem it in sizeMenu.DropDownItems) it.Checked = Math.Abs((double)it.Tag - cfg.Scale) < 0.01;
@@ -632,7 +702,7 @@ namespace PearNowPlaying
         protected override void ExitThreadCore()
         {
             try { tray.Visible = false; } catch { }
-            try { lyricsTimer.Stop(); frameTimer.Stop(); cardFrameTimer.Stop(); if (lyricsCts != null) lyricsCts.Cancel(); } catch { }
+            try { lyricsTimer.Stop(); frameTimer.Stop(); cardFrameTimer.Stop(); infoTimer.Stop(); if (lyricsCts != null) lyricsCts.Cancel(); if (prefetchCts != null) prefetchCts.Cancel(); } catch { }
             try { pear.Dispose(); } catch { }
             try { hotkeys.Dispose(); } catch { }
             try { cardWin.Close(); cardWin.Dispose(); lyricsWin.Close(); lyricsWin.Dispose(); } catch { }

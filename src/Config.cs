@@ -39,6 +39,8 @@ namespace PearNowPlaying
         public bool LyricsShowNext = true;
         public int LyricsOffsetMs = 300;
         public string LyricsServer = "https://lrclib.net";
+        public bool YtmLyrics = true;
+        public string YtmLyricsProxy = PearNowPlaying.YtmLyrics.DefaultProxy;
 
         // Hotkeys ("없음" or empty = disabled)
         public string HotkeyLyrics = "Ctrl+Alt+L";
@@ -84,6 +86,8 @@ namespace PearNowPlaying
                 c.LyricsShowNext = GetBool(map, "lyricsShowNext", c.LyricsShowNext);
                 c.LyricsOffsetMs = Math.Max(-10000, Math.Min(10000, GetInt(map, "lyricsOffsetMs", c.LyricsOffsetMs)));
                 c.LyricsServer = Get(map, "lyricsServer", c.LyricsServer);
+                c.YtmLyrics = GetBool(map, "ytmLyrics", c.YtmLyrics);
+                c.YtmLyricsProxy = Get(map, "ytmLyricsProxy", c.YtmLyricsProxy);
                 c.HotkeyLyrics = Get(map, "hotkeyLyrics", c.HotkeyLyrics);
                 c.HotkeyShow = Get(map, "hotkeyShow", c.HotkeyShow);
                 c.HotkeyToggle = Get(map, "hotkeyToggle", c.HotkeyToggle);
@@ -138,6 +142,10 @@ namespace PearNowPlaying
                 sb.AppendLine("# 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다.");
                 sb.AppendLine("lyricsOffsetMs=" + LyricsOffsetMs.ToString(inv));
                 sb.AppendLine("lyricsServer=" + LyricsServer);
+                sb.AppendLine("# YouTube Music 가사를 먼저 찾고, 실패하면 LRCLIB로 찾기 (Pear Desktop의 YTMusic 가사 제공자와 같은 방식)");
+                sb.AppendLine("ytmLyrics=" + B(YtmLyrics));
+                sb.AppendLine("# YouTube Music 가사 중계 서버 (Pear Desktop이 쓰는 외부 서버)");
+                sb.AppendLine("ytmLyricsProxy=" + YtmLyricsProxy);
                 sb.AppendLine();
                 sb.AppendLine("# 단축키 (예: Ctrl+Alt+Right, Ctrl+Shift+F9, 비워두면 사용 안 함)");
                 sb.AppendLine("hotkeyShow=" + HotkeyShow);

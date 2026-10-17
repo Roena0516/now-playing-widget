@@ -95,6 +95,11 @@ namespace PearNowPlaying
     /// synced-lyrics plugin also uses. Matching follows Pear's provider: artist similarity
     /// (Jaro-Winkler &gt; 0.9, tags as a fallback) and the closest duration within 15 seconds.
     /// </summary>
+    internal sealed class LrclibBusyException : HttpRequestException
+    {
+        public LrclibBusyException(string message) : base(message) { }
+    }
+
     internal sealed class LyricsProvider : IDisposable
     {
         readonly HttpClient http;
@@ -107,21 +112,236 @@ namespace PearNowPlaying
         {
             BaseUrl = (baseUrl ?? "https://lrclib.net").TrimEnd('/');
             http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.4.4 (+https://github.com/Roena0516/pear-now-playing)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.5.0 (+https://github.com/Roena0516/pear-now-playing)");
         }
+
+        /// <summary>YouTube Music lyrics (tried first when UseYtm is on); null = LRCLIB only.</summary>
+        public YtmLyrics Ytm;
+        public bool UseYtm;
 
         public async Task<LyricsResult> Find(SongInfo song, CancellationToken ct)
         {
             var key = song.VideoId + "|" + song.Title;
-            lock (gate) { LyricsResult hit; if (cache.TryGetValue(key, out hit)) return hit; }
+            lock (gate)
+            {
+                LyricsResult hit;
+                if (cache.TryGetValue(key, out hit)) return hit;
+                // fetched ahead while the previous song played (the queue's title can differ slightly, so by video ID)
+                if (!string.IsNullOrEmpty(song.VideoId) && prefetched.TryGetValue(song.VideoId, out hit))
+                {
+                    prefetched.Remove(song.VideoId);
+                    cache[key] = hit;
+                    Log.Info("lyrics ready (fetched ahead): " + song.Artist + " - " + song.Title);
+                    return hit;
+                }
+            }
 
+            Log.Info("looking up lyrics: " + song.Artist + " - " + song.Title + " [" + (string.IsNullOrEmpty(song.MediaType) ? "type?" : song.MediaType)
+                     + ", " + song.VideoId + ", " + (int)song.Duration + "s]");
+
+            // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
+            bool ytmError = false;
+            if (UseYtm && Ytm != null && !string.IsNullOrEmpty(song.VideoId))
+            {
+                if (Ytm.Paused) { ytmError = true; Log.Info("YouTube Music skipped (relay paused after repeated failures) -> LRCLIB"); }
+                else
+                {
+                    try
+                    {
+                        var info = await Ytm.Lookup(song.VideoId, ct);
+                        var y = info.Lyrics;
+                        if (y != null && y.HasSynced)
+                        {
+                            Log.Info("lyrics found via YouTube Music: " + song.Artist + " - " + song.Title + " (" + (int)song.Duration + "s)");
+                            lock (gate) cache[key] = y;
+                            return y;
+                        }
+                        // a music video: YouTube Music has timed lyrics only on the official audio track
+                        var audio = await AudioTrackLyrics(info, ct);
+                        if (audio != null)
+                        {
+                            audio.Source = "YouTube Music · 공식 음원";
+                            Log.Info("lyrics found via the official audio track on YouTube Music: " + song.Artist + " - " + song.Title);
+                            lock (gate) cache[key] = audio;
+                            return audio;
+                        }
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception ex)
+                    {
+                        ytmError = true;
+                        Log.Write("WARN YouTube Music lyrics failed for " + song.Artist + " - " + song.Title + ": "
+                                  + (ex is OperationCanceledException ? "timeout" : ex.GetType().Name + ": " + ex.Message) + " -> LRCLIB");
+                    }
+                }
+            }
+
+            // 2) covers: the original song linked in the description, if the music wasn't changed
+            // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics=false)
+            if (Ytm != null && !Ytm.Paused && !string.IsNullOrEmpty(song.VideoId) && song.Duration > 0
+                && CoverLyrics.MayBeCover(song))
+            {
+                var original = await FromOriginal(song, ct);
+                if (original != null && original.Failed) return original;   // LRCLIB busy: retried later, not cached
+                if (original != null)
+                {
+                    lock (gate) cache[key] = original;
+                    return original;
+                }
+            }
+
+            // 3) LRCLIB
+            var result = await FindLrclib(song, ct);
+            // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
+            if (!result.Failed && (!ytmError || result.HasSynced || result.Instrumental))
+                lock (gate) cache[key] = result;
+            return result;
+        }
+
+        /// <summary>
+        /// Synced lyrics of the original song for a cover: follow the YouTube links in the cover's description, take
+        /// the first linked video whose length is within a few seconds of the cover, and use its YouTube Music
+        /// lyrics (or LRCLIB with the original's title/artist). Covers that say they are remixes/arrangements and
+        /// candidates whose length differs are skipped, since the timing would drift. Null = not usable.
+        /// </summary>
+        async Task<LyricsResult> FromOriginal(SongInfo song, CancellationToken ct)
+        {
+            if (CoverLyrics.LooksArranged(song.Title) || CoverLyrics.LooksArranged(song.AltTitle))
+            {
+                Log.Info("cover: title says arranged/remixed, original's lyrics not used: " + song.Title);
+                return null;
+            }
+            try
+            {
+                VideoDescription desc = null;
+                try { desc = await Ytm.Description(song.VideoId, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex) { Log.Write("INFO cover: description unavailable (" + ex.Message + "), using the title only"); }
+                HashSet<string> hinted;
+                var ids = CoverLyrics.OriginalCandidates(desc, song.VideoId, out hinted);
+                if (ids.Count == 0) Log.Info("cover: no YouTube links in the description of " + song.VideoId);
+                foreach (var id in ids)
+                {
+                    var orig = await Ytm.Lookup(id, ct, UseYtm);
+                    var label = id + " (" + orig.Artist + " - " + orig.Title + ", " + (int)orig.Duration + "s)";
+                    if (orig.Duration <= 0) { Log.Info("cover: original candidate " + id + " has no known length, skipped"); continue; }
+                    if (CoverLyrics.LooksArranged(orig.Title)) { Log.Info("cover: candidate " + label + " is an arrangement, skipped"); continue; }
+                    // links without an "原曲 / original" label are often the singer's other videos: the title must fit
+                    if (!hinted.Contains(id) && !CoverLyrics.TitleMatchesCover(song, orig))
+                    {
+                        Log.Info("cover: candidate " + label + " is a different song, skipped");
+                        continue;
+                    }
+                    double diff = Math.Abs(orig.Duration - song.Duration);
+                    if (diff > CoverLyrics.MaxLengthDiff)
+                    {
+                        Log.Info("cover: candidate " + label + " differs from the cover by " + (int)diff + "s, skipped");
+                        continue;
+                    }
+                    if (orig.Lyrics != null && orig.Lyrics.HasSynced)
+                    {
+                        orig.Lyrics.Source = "YouTube Music · 원곡";
+                        Log.Info("lyrics found via original " + label + " on YouTube Music: " + song.Artist + " - " + song.Title);
+                        return orig.Lyrics;
+                    }
+                    if (UseYtm)
+                    {
+                        // the link is usually the original's music video; its official audio track has the timed lyrics
+                        // the cover may call it differently ("帝国少女" for "Imperial Girl")
+                        var coverName = CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null).Item1;
+                        var audio = await AudioTrackLyrics(orig, ct, coverName);
+                        if (audio != null)
+                        {
+                            audio.Source = "YouTube Music · 원곡";
+                            Log.Info("lyrics found via original " + label + "'s official audio on YouTube Music: " + song.Artist + " - " + song.Title);
+                            return audio;
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(orig.Title))
+                    {
+                        // "ビノミ - Binomi": also try the title without the romanized/translated half
+                        var primary = CoverLyrics.PrimaryTitle(orig.Title, orig.Artist);
+                        var l = await FindLrclib(new SongInfo { Title = orig.Title, AltTitle = primary != orig.Title ? primary : "",
+                                                                Artist = orig.Artist, Duration = orig.Duration, VideoId = id }, ct);
+                        if (l.HasSynced)
+                        {
+                            l.Source = "LRCLIB · 원곡";
+                            Log.Info("lyrics found via original " + label + " on LRCLIB: " + song.Artist + " - " + song.Title);
+                            return l;
+                        }
+                        if (l.Failed) return l;   // LRCLIB busy: retried later
+                    }
+                    Log.Info("cover: original " + label + " has no synced lyrics on LRCLIB under that name");
+                    break;   // the first usable link decides; don't wander through unrelated links
+                }
+
+                // no usable link: work out the song from the title / description and look it up on LRCLIB
+                return await FromSearch(song, desc, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Write("WARN cover -> original lookup failed for " + song.Title + ": "
+                          + (ex is OperationCanceledException ? "timeout" : ex.GetType().Name + ": " + ex.Message));
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// No usable link: read the song title (and original artist, if given) from the cover's title or description
+        /// and look the original up on LRCLIB. (YouTube Music's own search doesn't list songs without signing in,
+        /// so it can't be used for this.) The original must be within a few seconds of the cover's length.
+        /// </summary>
+        async Task<LyricsResult> FromSearch(SongInfo song, VideoDescription desc, CancellationToken ct)
+        {
+            var guess = CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null);
+            string title = guess.Item1, artist = guess.Item2;
+            if (title.Length == 0) { Log.Info("cover: couldn't tell the song title from \"" + song.Title + "\""); return null; }
+            Log.Info("cover: looking up the original on LRCLIB: \"" + title + "\"" + (artist.Length > 0 ? " by \"" + artist + "\"" : " (artist unknown)"));
+
+            var l = await FindLrclib(new SongInfo { Title = title, Artist = artist, Duration = song.Duration, VideoId = song.VideoId + "#original" }, ct,
+                                     CoverLyrics.MaxLengthDiff);
+            if (l.HasSynced)
+            {
+                l.Source = "LRCLIB · 원곡 검색";
+                Log.Info("lyrics found via original \"" + title + "\" on LRCLIB: " + song.Artist + " - " + song.Title);
+                return l;
+            }
+            return l.Failed ? l : null;   // LRCLIB busy: let the caller retry later
+        }
+
+        async Task<LyricsResult> FindLrclib(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3)
+        {
             LyricsResult result = LyricsResult.None;
             string how = "not found";
             try
             {
+                // A request that fails for a reason other than "server busy" (bad response, 500 …) doesn't end
+                // the lookup: the next way of searching is tried, and the error only counts if nothing turns up.
+                // Busy answers and timeouts end it, since the following requests would hit the same wall.
+                Exception lastError = null;
+                Func<Func<Task<List<IDictionary<string, object>>>>, Task<List<IDictionary<string, object>>>> attempt = async call =>
+                {
+                    try { return await call(); }
+                    catch (OperationCanceledException) { throw; }
+                    catch (LrclibBusyException) { throw; }
+                    catch (Exception ex) { lastError = ex; Log.Write("INFO LRCLIB request failed (" + ex.Message + "), trying the next search"); return new List<IDictionary<string, object>>(); }
+                };
+
                 // 1) exact signature lookup (artist + title + album + duration): one row, usually fast
-                var best = await Get(song, ct);
-                if (best != null) how = "get";
+                IDictionary<string, object> best = null;
+                // also under the alternative / cleaned-up title ("ビノミ - Binomi" -> "ビノミ"): exact lookups are cheap
+                var getTitles = new List<string> { song.Title };
+                if (!string.IsNullOrEmpty(song.AltTitle)) getTitles.Add(song.AltTitle);
+                getTitles.Add(CleanTitle(song.Title));
+                foreach (var gt in getTitles.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(3))
+                {
+                    try { best = await Get(new SongInfo { Title = gt, Artist = song.Artist, Album = song.Album, Duration = song.Duration }, ct); }
+                    catch (OperationCanceledException) { throw; }
+                    catch (LrclibBusyException) { throw; }
+                    catch (Exception ex) { lastError = ex; Log.Write("INFO LRCLIB get failed (" + ex.Message + "), trying search"); }
+                    if (best != null) { how = gt == song.Title ? "get" : "get \"" + gt + "\""; break; }
+                }
 
                 // 2) search like Pear does, then looser free-text searches
                 var seen = new List<IDictionary<string, object>>();
@@ -133,7 +353,7 @@ namespace PearNowPlaying
                         new KeyValuePair<string, string>("track_name", song.Title),
                     };
                     if (!string.IsNullOrEmpty(song.Album)) q.Add(new KeyValuePair<string, string>("album_name", song.Album));
-                    var items = await Search(q, ct);
+                    var items = await attempt(() => Search(q, ct));
                     seen.AddRange(items);
                     best = Pick(items, song);
                     if (best != null) how = "search";
@@ -144,7 +364,8 @@ namespace PearNowPlaying
                     foreach (var text in new[] { alt + " " + FirstArtist(song.Artist), CleanTitle(song.Title) + " " + FirstArtist(song.Artist), CleanTitle(alt) }.Distinct())
                     {
                         if (string.IsNullOrWhiteSpace(text)) continue;
-                        var items = await Search(new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("q", text.Trim()) }, ct);
+                        var qText = text.Trim();
+                        var items = await attempt(() => Search(new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("q", qText) }, ct));
                         seen.AddRange(items);
                         best = Pick(items, song);
                         if (best != null) { how = "q=" + text.Trim(); break; }
@@ -154,9 +375,10 @@ namespace PearNowPlaying
                 // 3) artist written differently (e.g. "Kenshi Yonezu" vs "米津玄師"): same title and nearly the same length
                 if (best == null)
                 {
-                    best = PickByTitle(seen, song);
+                    best = PickByTitle(seen, song, titleMatchTolerance);
                     if (best != null) how = "title match (" + Str(best, "artistName") + ")";
                 }
+                if (best == null && lastError != null) throw lastError;
 
                 if (best != null)
                 {
@@ -172,22 +394,71 @@ namespace PearNowPlaying
                           + (ex is OperationCanceledException ? "timeout" : ex.GetType().Name + ": " + ex.Message));
                 return new LyricsResult { Lines = new List<LyricLine>(), Failed = true };   // don't cache
             }
-            Log.Info("lyrics " + (result.HasSynced ? "found via " + how : result.Instrumental ? "instrumental" : "not found")
+            Log.Info("lyrics " + (result.HasSynced ? "found via LRCLIB " + how : result.Instrumental ? "instrumental" : "not found")
                      + ": " + song.Artist + " - " + song.Title + " (" + (int)song.Duration + "s)");
-            lock (gate) cache[key] = result;
             return result;
+        }
+
+        readonly Dictionary<string, LyricsResult> prefetched = new Dictionary<string, LyricsResult>();
+
+        /// <summary>
+        /// Look the next song up ahead of time. Only a found result is kept for it; if nothing turns up, the song
+        /// is looked up again normally when it starts (with Pear's fuller song info).
+        /// </summary>
+        public async Task Prefetch(SongInfo next, CancellationToken ct)
+        {
+            lock (gate)
+            {
+                if (cache.ContainsKey(next.VideoId + "|" + next.Title) || prefetched.ContainsKey(next.VideoId)) return;
+            }
+            Log.Info("fetching lyrics ahead for the next song: " + next.Artist + " - " + next.Title);
+            var r = await Find(next, ct);
+            if (r.HasSynced || r.Instrumental)
+                lock (gate)
+                {
+                    if (prefetched.Count > 20) prefetched.Clear();
+                    prefetched[next.VideoId] = r;
+                }
+        }
+
+        /// <summary>
+        /// For a music video / upload: find the official audio track (artist page -> single/album) and get its
+        /// YouTube Music lyrics. Null when there is none or it has no timed lyrics. Failures are logged, not thrown.
+        /// </summary>
+        async Task<LyricsResult> AudioTrackLyrics(TrackInfo video, CancellationToken ct, params string[] otherNames)
+        {
+            if (video == null || video.VideoType == "MUSIC_VIDEO_TYPE_ATV") return null;
+            try
+            {
+                var audioId = await Ytm.FindAudioTrack(video, ct, otherNames);
+                if (string.IsNullOrEmpty(audioId) || audioId == video.VideoId) return null;
+                var audio = await Ytm.Lookup(audioId, ct);
+                return audio.Lyrics != null && audio.Lyrics.HasSynced ? audio.Lyrics : null;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Write("INFO official audio lookup failed for " + video.VideoId + ": " + (ex is OperationCanceledException ? "timeout" : ex.Message));
+                return null;
+            }
         }
 
         /// <summary>Drop the cached result for a song so the next Find asks LRCLIB again.</summary>
         public void Forget(SongInfo song)
         {
-            lock (gate) cache.Remove(song.VideoId + "|" + song.Title);
+            lock (gate) { cache.Remove(song.VideoId + "|" + song.Title); prefetched.Remove(song.VideoId ?? ""); }
         }
 
         /// <summary>
         /// GET with one quick retry when LRCLIB is busy (429/502/503/504). It is a free, volunteer-run
         /// service whose search endpoint answers 503 fairly often under load; keep the request count low.
         /// </summary>
+        static bool IsBusy(HttpResponseMessage r)
+        {
+            int c = (int)r.StatusCode;
+            return c == 429 || c == 502 || c == 503 || c == 504;
+        }
+
         async Task<HttpResponseMessage> Send(string url, CancellationToken ct)
         {
             var waits = new[] { 2000 };   // one quick retry; the caller retries the whole lookup later
@@ -215,6 +486,7 @@ namespace PearNowPlaying
             using (var resp = await Send(url, ct))
             {
                 if ((int)resp.StatusCode == 404) return null;
+                if (IsBusy(resp)) throw new LrclibBusyException("LRCLIB get " + (int)resp.StatusCode);
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB get " + (int)resp.StatusCode);
                 var d = json.DeserializeObject(await resp.Content.ReadAsStringAsync()) as IDictionary<string, object>;
                 if (d == null) return null;
@@ -232,6 +504,7 @@ namespace PearNowPlaying
             }
             using (var resp = await Send(sb.ToString(), ct))
             {
+                if (IsBusy(resp)) throw new LrclibBusyException("LRCLIB search " + (int)resp.StatusCode);
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB search " + (int)resp.StatusCode);
                 var body = await resp.Content.ReadAsStringAsync();
                 var arr = json.DeserializeObject(body) as IEnumerable;
@@ -267,7 +540,7 @@ namespace PearNowPlaying
         /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces
         /// and punctuation) and the length within 3 seconds, which together are very unlikely to collide.
         /// </summary>
-        static IDictionary<string, object> PickByTitle(List<IDictionary<string, object>> items, SongInfo song)
+        static IDictionary<string, object> PickByTitle(List<IDictionary<string, object>> items, SongInfo song, double tolerance)
         {
             if (song.Duration <= 0) return null;
             var titles = new HashSet<string> { Norm(song.Title), Norm(CleanTitle(song.Title)) };
@@ -276,7 +549,7 @@ namespace PearNowPlaying
             return items
                 .Where(it => !string.IsNullOrEmpty(Str(it, "syncedLyrics")))
                 .Where(it => titles.Contains(Norm(Str(it, "trackName"))))
-                .Where(it => Math.Abs(Num(it, "duration") - song.Duration) <= 3)
+                .Where(it => Math.Abs(Num(it, "duration") - song.Duration) <= tolerance)
                 .OrderBy(it => Math.Abs(Num(it, "duration") - song.Duration))
                 .FirstOrDefault();
         }
@@ -380,6 +653,6 @@ namespace PearNowPlaying
             object v; return d.TryGetValue(k, out v) && v is bool && (bool)v;
         }
 
-        public void Dispose() { http.Dispose(); }
+        public void Dispose() { http.Dispose(); if (Ytm != null) Ytm.Dispose(); }
     }
 }
