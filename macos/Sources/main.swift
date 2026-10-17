@@ -17,12 +17,14 @@ import CoreText
         client.settings.save()
         overlay = OverlayController(client: client, preview: preview)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Pear Now Playing")
-        client.$status.combineLatest(client.$lyricsStatus).sink { [weak self] _, _ in DispatchQueue.main.async { self?.updateMenu() } }.store(in: &subscriptions)
+        item.button?.image = NativeTheme.trayIcon()
+        item.button?.setAccessibilityLabel("Pear Now Playing")
+        client.$status.combineLatest(client.$lyricsStatus).sink { [weak self] _, _ in DispatchQueue.main.async { self?.updateMenu(); self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$song.map { $0.identity + "|" + String($0.paused) }.removeDuplicates().dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { guard let self else { return }; if !self.client.song.title.isEmpty { self.overlay.show() }; self.updateMenu() }
         }.store(in: &subscriptions)
-        client.$lines.sink { [weak self] _ in DispatchQueue.main.async { guard let self, !self.client.song.title.isEmpty else { return }; self.overlay.show() } }.store(in: &subscriptions)
+        client.$lines.sink { [weak self] _ in DispatchQueue.main.async { guard let self else { return }; self.overlay.refresh() } }.store(in: &subscriptions)
+        client.$artwork.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         hotkeys.action = { [weak self] id in
             guard let self else { return }
             switch id { case 0: self.show(); case 1: self.client.control("toggle-play"); case 2: self.client.control("next"); case 3: self.client.control("previous"); case 4: self.togglePinned(); case 5: self.toggleLyrics(); default: break }
@@ -36,12 +38,8 @@ import CoreText
             overlay.show(temporary: false)
         } else { client.start(); overlay.show() }
     }
-    func registerFonts() {
-        for name in ["PretendardJP-Regular", "PretendardJP-Medium"] {
-            if let url = Bundle.main.url(forResource: name, withExtension: "ttf") { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
-        }
-    }
-    func applicationWillTerminate(_ notification: Notification) { setupTask?.cancel(); client.stop(); hotkeys.unregister(); if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) } }
+    func registerFonts() { NativeTheme.registerFonts() }
+    func applicationWillTerminate(_ notification: Notification) { overlay?.stop(); setupTask?.cancel(); client.stop(); hotkeys.unregister(); if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) } }
     func add(_ menu: NSMenu, _ title: String, _ action: Selector?, state: Bool = false, represented: Any? = nil) {
         let entry = NSMenuItem(title: title, action: action, keyEquivalent: ""); entry.target = self
         entry.state = state ? .on : .off; entry.representedObject = represented; menu.addItem(entry)
@@ -158,7 +156,10 @@ import CoreText
 }
 
 MainActor.assumeIsolated {
-if CommandLine.arguments.contains("--self-test") {
+if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
+    do { try renderNativePreview(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
+    catch { fputs("Preview failed: \(error)\n", stderr); exit(1) }
+} else if CommandLine.arguments.contains("--self-test") {
     runSelfTests()
 } else if CommandLine.arguments.contains("--integration-test") {
     Task { await runIntegrationTest() }

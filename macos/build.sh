@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 APP="$PWD/build/Pear Now Playing.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/module-cache
-xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macosx13.0" -module-cache-path "$PWD/build/module-cache" Sources/*.swift -o "$APP/Contents/MacOS/PearNowPlaying" -framework AppKit -framework SwiftUI -framework Carbon
+xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macosx13.0" -module-cache-path "$PWD/build/module-cache" Sources/*.swift -o "$APP/Contents/MacOS/PearNowPlaying" -framework AppKit -framework CoreText -framework QuartzCore -framework Carbon
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
