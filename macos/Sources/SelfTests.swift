@@ -92,6 +92,15 @@ func testPlayerSetup() {
 func testOverlayPlacement() {
     // The lyric card stays on the bottom margin as the song card appears/disappears.
     // At the top, lyrics move into the space vacated by the song card.
+    var legacy = Settings()
+    legacy.position = "TopRight"; legacy.marginX = 40; legacy.marginY = 140; legacy.positionLayoutVersion = nil
+    legacy.migratePosition()
+    precondition(legacy.position == "TopRight" && legacy.marginX == 24 && legacy.marginY == 24)
+    legacy.marginY = 140; legacy.marginX = 40; legacy.migratePosition()
+    precondition(legacy.marginY == 140, "Migration must only run once")
+    var custom = Settings(); custom.marginX = 60; custom.marginY = 80; custom.positionLayoutVersion = nil
+    custom.migratePosition()
+    precondition(custom.marginX == 60 && custom.marginY == 80, "Custom margins must survive migration")
     let screen = CGRect(x: 100, y: 50, width: 1440, height: 900)
     var config = Settings()
     let bottom = NativePlacement.frames(screen: screen, config: config, cardHeight: 100, lyricHeight: 130, cardVisible: true, lyricsVisible: true)
@@ -108,5 +117,5 @@ func testOverlayPlacement() {
     config.position = "BottomCenter"; config.scale = 1.5
     let scaled = NativePlacement.frames(screen: screen, config: config, cardHeight: 150, lyricHeight: 195, cardVisible: true, lyricsVisible: true)
     precondition(scaled.card.midX == screen.midX && scaled.card.minY == scaled.lyrics.maxY + 15)
-    print("PASS: original bottom/top/center placement, independent card dismissal, screen origin and scaled gap")
+    print("PASS: macOS margin migration, custom placement preservation, bottom/top/center anchoring, independent card dismissal and scaled gap")
 }

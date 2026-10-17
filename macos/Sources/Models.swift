@@ -4,8 +4,8 @@ struct Settings: Codable {
     var host = "127.0.0.1"
     var port = 26538
     var position = "BottomLeft"
-    var marginX: Double = 40
-    var marginY: Double = 140
+    var marginX: Double = 24
+    var marginY: Double = 24
     var scale: Double = 1
     var panelWidth: Double = 420
     var monitor = 0
@@ -14,14 +14,21 @@ struct Settings: Codable {
     var alwaysShow = false
     var showLyrics = true
     var lyricsOffsetMs: Double = 300
+    var positionLayoutVersion: Int? = 1
     static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/PearNowPlaying-macOS")
     static let file = directory.appendingPathComponent("config.json")
     static func load() -> Settings {
-        guard let data = try? Data(contentsOf: file), let settings = try? JSONDecoder().decode(Settings.self, from: data),
+        guard let data = try? Data(contentsOf: file), var settings = try? JSONDecoder().decode(Settings.self, from: data),
               (1...65535).contains(settings.port), settings.host == "127.0.0.1" || settings.host == "localhost",
               (0.5...3).contains(settings.scale), (260...800).contains(settings.panelWidth),
               (0.1...1).contains(settings.opacity), (1...3600).contains(settings.showSeconds), settings.marginX.isFinite, settings.marginY.isFinite else { return Settings() }
+        settings.migratePosition()
         return settings
+    }
+    mutating func migratePosition() {
+        guard (positionLayoutVersion ?? 0) < 1 else { return }
+        if marginX == 40 && marginY == 140 { marginX = 24; marginY = 24 }
+        positionLayoutVersion = 1
     }
     func save() {
         try? FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)

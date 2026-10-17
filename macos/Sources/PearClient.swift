@@ -35,7 +35,7 @@ import Combine
     }
     func retryAuth() { token = nil; try? FileManager.default.removeItem(at: tokenFile); start() }
     func stop() { connection?.cancel(); lyricTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
-    func reload() { settings = Settings.load(); start() }
+    func reload() { settings = Settings.load(); settings.save(); start() }
     private func persistToken(_ value: String) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try Data(value.utf8).write(to: tokenFile, options: .atomic)
