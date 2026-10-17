@@ -128,7 +128,7 @@ import Combine
         guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; return }
         if force { lyricsProvider.forget(track); ytMusicProvider.forget(track) }
         lyricTask = Task {
-            for (attempt, delay) in [0, 3, 10, 30].enumerated() {
+            for (attempt, delay) in LyricsProvider.lookupRetryDelays.enumerated() {
                 do {
                     if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                     try Task.checkCancellation()
@@ -157,8 +157,8 @@ import Combine
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    LyricsLog.write("가사 검색 실패 (\(attempt + 1)/4): \(track.artist) - \(track.title): \(error.localizedDescription)")
-                    lyricsStatus = "가사 서버 연결 재시도 중 (\(attempt + 1)/4)"
+                    LyricsLog.write("가사 검색 실패 (\(attempt + 1)/\(LyricsProvider.lookupRetryDelays.count)): \(track.artist) - \(track.title): \(error.localizedDescription)")
+                    lyricsStatus = "가사 서버 연결 재시도 중 (\(attempt + 1)/\(LyricsProvider.lookupRetryDelays.count))"
                 }
             }
             lyricsStatus = "가사 서버 연결 실패 · 가사 진단 기록 확인"

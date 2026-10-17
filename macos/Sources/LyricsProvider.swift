@@ -21,9 +21,20 @@ struct LyricRecord: Decodable {
     private let session = URLSession(configuration: .ephemeral)
     private let transport: Transport?
     private let log: (String) -> Void
+    private let sleep: (TimeInterval) async throws -> Void
     private var cache: [String: LyricsLookup] = [:]
-    init(transport: Transport? = nil, log: @escaping (String) -> Void = { _ in }) {
-        self.transport = transport; self.log = log
+    init(transport: Transport? = nil, log: @escaping (String) -> Void = { _ in },
+         sleep: @escaping (TimeInterval) async throws -> Void = { seconds in try await Task.sleep(for: .seconds(seconds)) }) {
+        self.transport = transport; self.log = log; self.sleep = sleep
+    }
+    static let lookupRetryDelays = [0, 15, 45]
+    static func isBusy(_ error: Error) -> Bool {
+        let error = error as NSError
+        return error.domain == "LRCLIB" && [429, 502, 503, 504].contains(error.code)
+    }
+    static func retryDelay(_ response: HTTPURLResponse) -> TimeInterval {
+        let advertised = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 2
+        return min(10, max(2, advertised.isFinite ? advertised : 2))
     }
     func forget(_ song: Song) { cache.removeValue(forKey: song.videoId + "|" + song.title) }
     private func fetch(_ path: String, _ query: [URLQueryItem]) async throws -> (Data, Int) {
@@ -32,20 +43,30 @@ struct LyricRecord: Decodable {
         url.queryItems = query
         var request = URLRequest(url: url.url!); request.timeoutInterval = 20
         request.setValue("PearNowPlaying-macOS/1.0 (+https://github.com/pdh0128/pear-now-playing)", forHTTPHeaderField: "User-Agent")
-        let data: Data, response: HTTPURLResponse
-        if let transport { (data, response) = try await transport(request) }
-        else {
-            let result = try await session.data(for: request)
-            guard let http = result.1 as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-            (data, response) = (result.0, http)
+        for attempt in 0..<2 {
+            let data: Data, response: HTTPURLResponse
+            if let transport { (data, response) = try await transport(request) }
+            else {
+                let result = try await session.data(for: request)
+                guard let http = result.1 as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+                (data, response) = (result.0, http)
+            }
+            try Task.checkCancellation()
+            log("LRCLIB \(path): HTTP \(response.statusCode)")
+            let busy = [429, 502, 503, 504].contains(response.statusCode)
+            if busy && attempt == 0 {
+                let delay = Self.retryDelay(response)
+                log("LRCLIB 혼잡 · \(Int(delay))초 뒤 같은 요청 한 번 재시도")
+                try await sleep(delay); try Task.checkCancellation(); continue
+            }
+            guard (200...299).contains(response.statusCode) || (path == "get" && response.statusCode == 404) else {
+                throw NSError(domain: "LRCLIB", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "LRCLIB HTTP \(response.statusCode)"])
+            }
+            return (data, response.statusCode)
         }
-        try Task.checkCancellation()
-        log("LRCLIB \(path): HTTP \(response.statusCode)")
-        guard (200...299).contains(response.statusCode) || (path == "get" && response.statusCode == 404) else {
-            throw NSError(domain: "LRCLIB", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "LRCLIB HTTP \(response.statusCode)"])
-        }
-        return (data, response.statusCode)
+        throw URLError(.badServerResponse)
     }
+
     private func search(_ query: [URLQueryItem]) async throws -> [LyricRecord] {
         let (data, _) = try await fetch("search", query)
         let records = try JSONDecoder().decode([LyricRecord].self, from: data)
@@ -64,6 +85,7 @@ struct LyricRecord: Decodable {
             do { return try await search(query) }
             catch {
                 if Task.isCancelled { throw CancellationError() }
+                if Self.isBusy(error) { throw error }
                 lastError = error; log("검색 요청 실패, 다음 검색 방식 시도: \(error.localizedDescription)")
                 return []
             }
@@ -78,6 +100,7 @@ struct LyricRecord: Decodable {
             }
             } catch {
                 if Task.isCancelled { throw CancellationError() }
+                if Self.isBusy(error) { throw error }
                 lastError = error; log("정확 조회 실패, 검색 방식 시도: \(error.localizedDescription)")
             }
         }
@@ -143,11 +166,15 @@ struct LyricRecord: Decodable {
         String(String.UnicodeScalarView(text.precomposedStringWithCompatibilityMapping.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }))
     }
     static func cleanTitle(_ text: String) -> String {
-        text.replacingOccurrences(of: #"[\(\[【][^\)\]】]*(official|mv|m/v|video|audio|lyric|live|ver\.|version|feat|prod)[^\)\]】]*[\)\]】]"#, with: "", options: [.regularExpression, .caseInsensitive])
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+        text.replacingOccurrences(of: #"【[^】]*】"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[\(\[][^\)\]]*(official|mv|m/v|video|audio|lyric|live|ver\.|version|feat|prod|cover|歌ってみた|踊ってみた|弾いてみた)[^\)\]]*[\)\]]"#, with: " ", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\s*/?\s*(covered by|cover by)\b.*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"歌ってみた|踊ってみた|弾いてみた"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[\s\u3000]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/-| "))
     }
     static func artistVariants(_ artist: String) -> [String] {
-        let parts = artist.replacingOccurrences(of: #"\s*(?:[&,、/×]|\bfeat\.?|\bft\.?|\bx\b|\band\b)\s*"#, with: "\n", options: [.regularExpression, .caseInsensitive]).components(separatedBy: "\n")
+        let parts = artist.replacingOccurrences(of: #"\s*(?:[&,、/×]|\bfeat\.?|\bft\.?|\bx\b|\band\b|\s및\s|\sと\s)\s*"#, with: "\n", options: [.regularExpression, .caseInsensitive]).components(separatedBy: "\n")
         let regex = try! NSRegularExpression(pattern: #"^(.*?)\s*[\(\[](.+?)[\)\]]\s*$"#)
         var variants: [String] = []
         func add(_ text: String) {
