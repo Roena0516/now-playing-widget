@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 @MainActor func runSelfTests() {
     let lyrics = parseLRC("[offset:200]\n[00:01.00][00:03.50]안녕 日本語\n[00:02.00]\n[ar:ignored]\n[bad]ignored")
@@ -19,6 +20,7 @@ import Foundation
     precondition(socketRequest.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
     precondition(socketRequest.url?.query == nil)
     testPlayerSetup()
+    testOverlayPlacement()
     print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, Pear song/state/seek messages")
 }
 
@@ -82,4 +84,26 @@ func testPlayerSetup() {
         precondition(unchanged == invalid)
         print("PASS: API setup preserves preferences/auth, creates exact backup, applies loopback settings, is idempotent and rejects invalid config")
     } catch { preconditionFailure("Player setup test failed: \(error)") }
+}
+
+func testOverlayPlacement() {
+    // The lyric card stays on the bottom margin as the song card appears/disappears.
+    // At the top, lyrics move into the space vacated by the song card.
+    let screen = CGRect(x: 100, y: 50, width: 1440, height: 900)
+    var config = Settings()
+    let bottom = NativePlacement.frames(screen: screen, config: config, cardHeight: 100, lyricHeight: 130, cardVisible: true, lyricsVisible: true)
+    let bottomHidden = NativePlacement.frames(screen: screen, config: config, cardHeight: 100, lyricHeight: 130, cardVisible: false, lyricsVisible: true)
+    precondition(bottom.lyrics == bottomHidden.lyrics && bottom.lyrics.minY == screen.minY + config.marginY)
+    precondition(bottom.card.minY == bottom.lyrics.maxY + 10)
+    let noLyrics = NativePlacement.frames(screen: screen, config: config, cardHeight: 100, lyricHeight: 130, cardVisible: true, lyricsVisible: false)
+    precondition(noLyrics.card.minY == screen.minY + config.marginY)
+    config.position = "TopRight"
+    let top = NativePlacement.frames(screen: screen, config: config, cardHeight: 100, lyricHeight: 130, cardVisible: true, lyricsVisible: true)
+    let topHidden = NativePlacement.frames(screen: screen, config: config, cardHeight: 100, lyricHeight: 130, cardVisible: false, lyricsVisible: true)
+    precondition(top.card.maxY == screen.maxY - config.marginY && top.lyrics.maxY == top.card.minY - 10)
+    precondition(topHidden.lyrics.maxY == top.card.maxY && top.card.maxX == screen.maxX - config.marginX)
+    config.position = "BottomCenter"; config.scale = 1.5
+    let scaled = NativePlacement.frames(screen: screen, config: config, cardHeight: 150, lyricHeight: 195, cardVisible: true, lyricsVisible: true)
+    precondition(scaled.card.midX == screen.midX && scaled.card.minY == scaled.lyrics.maxY + 15)
+    print("PASS: original bottom/top/center placement, independent card dismissal, screen origin and scaled gap")
 }

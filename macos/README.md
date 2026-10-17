@@ -52,6 +52,18 @@ macOS의 창 관리 정책에 따라 일부 독점 전체 화면 앱에서는 �
 
 단축키는 Carbon 전역 단축키 API로 등록하며 접근성 권한이 필요하지 않습니다. 다른 앱이 이미 사용 중인 조합은 등록되지 않으며 Console에 기록됩니다. 이 포트에서는 단축키 조합 변경을 지원하지 않습니다.
 
+## 원본 디자인과 위치
+
+`src/Theme.cs`, `src/CardRenderer.cs`, `src/LyricsView.cs`의 색상과 레이아웃을 macOS 네이티브 렌더러로 옮겼습니다. 카드 배경 `#242427`, 테두리 `#33333a`, 코랄 강조 `#ff9294`, Pretendard JP, 16pt 여백·모서리, 60pt 앨범 아트와 상태·시간 헤더를 사용합니다. 가사 강조선은 현재 줄 옆에만 표시되며, 일시정지 시 회색으로 바뀝니다. macOS에서는 수치를 논리 좌표(pt)로 사용하고 Retina 배율로 렌더링합니다.
+
+기본 위치는 왼쪽 40pt, 아래쪽 140pt 여백입니다. 가사가 있으면 가사 카드를 아래쪽 여백에 붙이고 곡 카드를 10pt 위에 배치합니다. 상단 배치에서는 곡 카드가 여백에 붙고 가사가 그 아래로 이어집니다. 계속 표시를 끄면 곡 카드만 사라지고 가사는 유지되며, 고정 높이의 빈 공간은 남기지 않습니다.
+
+렌더링 결과를 GUI 없이 확인할 수 있습니다.
+
+```sh
+'macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying' --render-preview /tmp/pear-preview.png
+```
+
 ## 설정과 데이터
 
 메뉴의 **설정 파일 열기**로 `~/Library/Application Support/PearNowPlaying-macOS/config.json`을 엽니다. 변경 후 **설정 다시 불러오기**를 선택합니다.
