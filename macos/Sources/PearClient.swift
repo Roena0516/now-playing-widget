@@ -1,0 +1,167 @@
+import Foundation
+import Combine
+
+@MainActor final class PearClient: ObservableObject {
+    @Published var song = Song()
+    @Published var status = "Pear Desktop 기다리는 중"
+    @Published var lines: [LyricLine] = []
+    @Published var lyricsStatus = "가사 대기 중"
+    @Published var artwork: Data?
+    @Published var settings = Settings.load()
+    private var connection: Task<Void, Never>?
+    private var lyricTask: Task<Void, Never>?
+    private var artTask: Task<Void, Never>?
+    private var socket: URLSessionWebSocketTask?
+    private var anchor = Date()
+    private var token: String?
+    private let session: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.connectionProxyDictionary = [:]
+        cfg.timeoutIntervalForRequest = 180
+        return URLSession(configuration: cfg)
+    }()
+    private let directory: URL
+    private let loadRemoteAssets: Bool
+    init(directory: URL = Settings.directory, loadRemoteAssets: Bool = true) {
+        self.directory = directory; self.loadRemoteAssets = loadRemoteAssets
+    }
+    private var tokenFile: URL { directory.appendingPathComponent("token.txt") }
+    var elapsed: Double { min(max(0, song.elapsed + (song.paused ? 0 : Date().timeIntervalSince(anchor))), max(0, song.duration)) }
+    var baseURL: URL { URL(string: "http://\(settings.host):\(settings.port)")! }
+    func start() {
+        connection?.cancel(); socket?.cancel(with: .goingAway, reason: nil)
+        connection = Task { await run() }
+    }
+    func retryAuth() { token = nil; try? FileManager.default.removeItem(at: tokenFile); start() }
+    func stop() { connection?.cancel(); lyricTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+    func reload() { settings = Settings.load(); start() }
+    private func persistToken(_ value: String) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try Data(value.utf8).write(to: tokenFile, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenFile.path)
+    }
+    private func run() async {
+        token = try? String(contentsOf: tokenFile, encoding: .utf8)
+        while !Task.isCancelled {
+            do {
+                if token == nil {
+                    status = "연결 시도 중 · Pear의 권한 창을 허용해 주세요"
+                    var req = URLRequest(url: baseURL.appendingPathComponent("auth/pear-now-playing-macos"))
+                    req.httpMethod = "POST"; req.httpBody = Data()
+                    let (data, response) = try await session.data(for: req)
+                    try Task.checkCancellation()
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    if code == 403 { status = "권한 거부됨 · 메뉴에서 연결 권한 다시 요청"; return }
+                    guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any], let value = obj["accessToken"] as? String, !value.isEmpty else { throw URLError(.badServerResponse) }
+                    token = value; try persistToken(value)
+                }
+                var components = URLComponents(url: baseURL.appendingPathComponent("api/v1/ws"), resolvingAgainstBaseURL: false)!
+                components.scheme = "ws"; components.queryItems = [URLQueryItem(name: "token", value: token)]
+                let ws = session.webSocketTask(with: components.url!); socket = ws; ws.resume()
+                do {
+                    while !Task.isCancelled {
+                        let message = try await ws.receive()
+                        try Task.checkCancellation()
+                        let data: Data
+                        switch message { case .string(let text): data = Data(text.utf8); case .data(let bytes): data = bytes; @unknown default: continue }
+                        if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] { status = "Pear Desktop 연결됨"; handle(obj) }
+                    }
+                } catch {
+                    if ws.closeCode == .policyViolation || (ws.response as? HTTPURLResponse)?.statusCode == 401 { token = nil; try? FileManager.default.removeItem(at: tokenFile) }
+                    throw error
+                }
+            } catch {
+                if Task.isCancelled { return }
+                status = "Pear Desktop 기다리는 중 · API 서버 \(settings.port) 확인"
+                if !song.paused { song.elapsed = elapsed; song.paused = true; anchor = Date() }
+            }
+            try? await Task.sleep(for: .seconds(3))
+        }
+    }
+    func handle(_ message: [String: Any]) {
+        let type = message["type"] as? String ?? ""
+        switch type {
+        case "PLAYER_INFO", "VIDEO_CHANGED":
+            let previous = song.identity
+            if let value = message["song"] as? [String: Any] { song = Song(value) }
+            if let value = message["isPlaying"] as? Bool { song.paused = !value }
+            if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
+            anchor = Date()
+            if song.identity != previous && loadRemoteAssets { fetchArtwork(); findLyrics() }
+        case "PLAYER_STATE_CHANGED":
+            song.elapsed = elapsed
+            song.paused = !(message["isPlaying"] as? Bool ?? false)
+            if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
+            anchor = Date()
+        case "POSITION_CHANGED":
+            song.elapsed = (message["position"] as? NSNumber)?.doubleValue ?? song.elapsed; anchor = Date()
+        default: break
+        }
+    }
+    func control(_ action: String) {
+        Task {
+            do {
+                var req = URLRequest(url: baseURL.appendingPathComponent("api/v1/\(action)"))
+                req.httpMethod = "POST"; req.httpBody = Data()
+                if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+                let (_, response) = try await session.data(for: req)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if code == 401 { retryAuth() }
+                else if !(200...299).contains(code) { status = "재생 제어 실패 (\(code))" }
+            } catch { status = "재생 제어 연결 실패" }
+        }
+    }
+    private func fetchArtwork() {
+        artTask?.cancel(); artwork = nil
+        guard let url = URL(string: song.imageSrc), url.scheme == "https" else { return }
+        let identity = song.identity
+        artTask = Task {
+            if let (data, response) = try? await session.data(from: url), (response as? HTTPURLResponse)?.statusCode == 200, !Task.isCancelled, song.identity == identity { artwork = data }
+        }
+    }
+    func findLyrics() {
+        lyricTask?.cancel(); lines = []; lyricsStatus = "가사 검색 중"
+        let track = song
+        guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; return }
+        lyricTask = Task {
+            for delay in [0, 3, 10, 30] {
+                do {
+                    if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
+                    try Task.checkCancellation()
+                    var url = URLComponents(string: "https://lrclib.net/api/get")!
+                    url.queryItems = [URLQueryItem(name: "track_name", value: track.title), URLQueryItem(name: "artist_name", value: track.artist), URLQueryItem(name: "album_name", value: track.album), URLQueryItem(name: "duration", value: String(Int(track.duration)))]
+                    var req = URLRequest(url: url.url!); req.timeoutInterval = 15
+                    req.setValue("PearNowPlaying-macOS/1.0", forHTTPHeaderField: "User-Agent")
+                    let (data, response) = try await session.data(for: req)
+                    try Task.checkCancellation()
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    guard code == 200 || code == 404 else { throw URLError(.badServerResponse) }
+                    if code == 200,
+                       let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any], let lrc = obj["syncedLyrics"] as? String, !lrc.isEmpty {
+                        lines = parseLRC(lrc); lyricsStatus = lines.isEmpty ? "싱크 가사 없음" : "싱크 가사 연결됨"; return
+                    }
+                    // Search fallback tolerates artist aliases when title and duration match.
+                    var search = URLComponents(string: "https://lrclib.net/api/search")!
+                    search.queryItems = [URLQueryItem(name: "track_name", value: track.title)]
+                    var searchRequest = URLRequest(url: search.url!); searchRequest.timeoutInterval = 15
+                    searchRequest.setValue("PearNowPlaying-macOS/1.0", forHTTPHeaderField: "User-Agent")
+                    let (results, searchResponse) = try await session.data(for: searchRequest)
+                    guard (searchResponse as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+                    try Task.checkCancellation()
+                    let candidates = (try JSONSerialization.jsonObject(with: results) as? [[String: Any]]) ?? []
+                    if let match = candidates.first(where: {
+                        ($0["trackName"] as? String)?.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) == track.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                        && abs((($0["duration"] as? NSNumber)?.doubleValue ?? -100) - track.duration) <= 3
+                        && !(($0["syncedLyrics"] as? String) ?? "").isEmpty
+                    }), let lrc = match["syncedLyrics"] as? String { lines = parseLRC(lrc); lyricsStatus = "싱크 가사 연결됨"; return }
+                    lyricsStatus = "싱크 가사를 찾지 못함"
+                    return
+                } catch {
+                    if Task.isCancelled { return }
+                    lyricsStatus = "가사 서버 연결 재시도 중"
+                }
+            }
+            lyricsStatus = "가사 서버 연결 실패 · 메뉴에서 다시 검색"
+        }
+    }
+}
