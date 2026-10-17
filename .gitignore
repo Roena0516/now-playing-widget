@@ -3,3 +3,7 @@ obj/
 *.zip
 .vs/
 *.user
+
+# Native macOS build products
+macos/build/
+.DS_Store
