@@ -28,7 +28,7 @@ import AppKit
     context.restoreGState()
     context.saveGState(); context.translateBy(x: 460, y: 330)
     client.song = Song(); client.status = "Pear Desktop에서 '허용'을 눌러주세요"
-    NativeRenderer.drawCard(client, kind: .info, marqueeTime: 0)
+    NativeRenderer.drawCard(client, kind: .info, marqueeTime: 0, infoText: "가사를 다시 찾는 중이에요")
     context.restoreGState()
     guard let image = context.makeImage(), let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
     try data.write(to: url)

@@ -81,7 +81,7 @@ struct NativeCardLayout {
     static func cardLayout(_ client: PearClient, kind: NativeCardKind) -> NativeCardLayout {
         NativeCardLayout(width: client.settings.panelWidth, hasArt: kind != .info, hasSubtitle: kind != .info && !subtitle(client.song).isEmpty, hasBar: kind != .info && client.song.duration > 0)
     }
-    static func drawCard(_ client: PearClient, kind: NativeCardKind, marqueeTime: Double) {
+    static func drawCard(_ client: PearClient, kind: NativeCardKind, marqueeTime: Double, infoText: String? = nil) {
         let layout = cardLayout(client, kind: kind)
         NativeTheme.surface(in: CGRect(x: 0, y: 0, width: layout.width, height: layout.height), opacity: client.settings.opacity)
         if layout.hasArt {
@@ -115,7 +115,7 @@ struct NativeCardLayout {
             NativeTheme.text(NativeTheme.time(client.elapsed) + " / " + NativeTheme.time(client.song.duration), font: NativeTheme.font(12), color: NativeTheme.dim, rect: CGRect(x: x, y: y, width: layout.textWidth, height: layout.headerH + 2), alignment: .right)
         }
         y += layout.headerH + 4
-        let title = kind == .info ? (client.status == "Pear Desktop 연결됨" ? "재생 중인 곡이 없어요" : client.status) : (client.song.title.isEmpty ? "알 수 없는 곡" : client.song.title)
+        let title = kind == .info ? (infoText ?? (client.status == "Pear Desktop 연결됨" ? "재생 중인 곡이 없어요" : client.status)) : (client.song.title.isEmpty ? "알 수 없는 곡" : client.song.title)
         drawTitle(title, rect: CGRect(x: x, y: y, width: layout.textWidth, height: layout.titleH + 2), elapsed: marqueeTime)
         y += layout.titleH
         if layout.hasSubtitle {

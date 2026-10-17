@@ -27,6 +27,7 @@ final class OverlayPanel: NSPanel {
     private var hideTask: Task<Void, Never>?
     private var cardVisible = false, lyricsVisible = false
     private var kind: NativeCardKind = .info
+    private var infoText: String?
     private var identity = "", wasPaused = true
     private var marqueeStart = Date()
     private var marqueeActive = false
@@ -43,7 +44,7 @@ final class OverlayPanel: NSPanel {
         panel.contentView = cardCanvas; lyricsPanel.contentView = lyricsCanvas
         cardCanvas.render = { [weak self] in
             guard let self else { return }
-            NativeRenderer.drawCard(self.client, kind: self.kind, marqueeTime: Date().timeIntervalSince(self.marqueeStart))
+            NativeRenderer.drawCard(self.client, kind: self.kind, marqueeTime: Date().timeIntervalSince(self.marqueeStart), infoText: self.infoText)
         }
         lyricsCanvas.render = { [weak self] in
             guard let self else { return }
@@ -108,7 +109,7 @@ final class OverlayPanel: NSPanel {
                 })
             }
         }
-        let title = kind == .info ? client.status : client.song.title
+        let title = kind == .info ? (infoText ?? client.status) : client.song.title
         marqueeActive = NativeTheme.width(title, font: NativeTheme.font(17, medium: true)) > NativeRenderer.cardLayout(client, kind: kind).textWidth + 0.5
         cardCanvas.needsDisplay = true; lyricsCanvas.needsDisplay = true
         layout(); tick()
@@ -137,6 +138,8 @@ final class OverlayPanel: NSPanel {
     }
     func show(temporary: Bool = true) {
         hideTask?.cancel()
+        infoText = nil
+        if kind == .info && !client.song.title.isEmpty { kind = client.song.paused ? .paused : .nowPlaying }
         let newSong = identity != client.song.identity
         if client.song.title.isEmpty { kind = .info }
         else if newSong { kind = .nowPlaying }
@@ -150,6 +153,17 @@ final class OverlayPanel: NSPanel {
         NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; panel.animator().alphaValue = 1 }
         if temporary && !client.settings.alwaysShow {
             hideTask = Task { try? await Task.sleep(for: .seconds(client.settings.showSeconds)); guard !Task.isCancelled else { return }; hide() }
+        }
+    }
+    func showInfo(_ message: String) {
+        hideTask?.cancel(); kind = .info; infoText = message; marqueeStart = Date()
+        let wasVisible = cardVisible; cardVisible = true
+        refresh()
+        if !wasVisible { panel.alphaValue = 0; panel.orderFrontRegardless() }
+        NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; panel.animator().alphaValue = 1 }
+        hideTask = Task {
+            try? await Task.sleep(for: .seconds(max(3, client.settings.showSeconds)))
+            guard !Task.isCancelled else { return }; hide()
         }
     }
     func hide() {

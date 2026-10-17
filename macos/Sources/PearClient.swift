@@ -7,6 +7,7 @@ import Combine
     @Published var lines: [LyricLine] = []
     @Published var lyricsStatus = "가사 대기 중"
     @Published var artwork: Data?
+    var onLyricsNotice: ((String?) -> Void)?
     @Published var settings = Settings.load()
     private var connection: Task<Void, Never>?
     private var lyricTask: Task<Void, Never>?
@@ -125,8 +126,8 @@ import Combine
     func findLyrics(force: Bool = false) {
         lyricTask?.cancel(); lines = []; lyricsStatus = "가사 검색 중"
         let track = song
-        guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; return }
-        if force { lyricsProvider.forget(track); ytMusicProvider.forget(track) }
+        guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
+        if force { lyricsProvider.forget(track); ytMusicProvider.forget(track); onLyricsNotice?("가사를 다시 찾는 중이에요") }
         lyricTask = Task {
             for (attempt, delay) in LyricsProvider.lookupRetryDelays.enumerated() {
                 do {
@@ -138,7 +139,7 @@ import Combine
                         try Task.checkCancellation()
                         if case .synced(let found, _) = youtube {
                             guard song.identity == track.identity else { return }
-                            lines = found; lyricsStatus = "싱크 가사 있음 · YTMusic · \(found.count)줄"; return
+                            lines = found; lyricsStatus = "싱크 가사 있음 · YTMusic · \(found.count)줄"; if force { onLyricsNotice?(nil) }; return
                         }
                         if case .plainOnly = youtube { youtubePlain = true }
                     } catch {
@@ -154,6 +155,7 @@ import Combine
                     case .plainOnly: lyricsStatus = "일반 가사만 있음 · 싱크 가사 없음"
                     case .notFound: lyricsStatus = youtubePlain ? "YTMusic 일반 가사만 있음 · 싱크 가사 없음" : "싱크 가사를 찾지 못함"
                     }
+                    if force { onLyricsNotice?(LyricsNotice.message(for: result)) }
                     return
                 } catch {
                     if Task.isCancelled { return }
@@ -162,6 +164,7 @@ import Combine
                 }
             }
             lyricsStatus = "가사 서버 연결 실패 · 가사 진단 기록 확인"
+            if force && song.identity == track.identity { onLyricsNotice?("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
         }
     }
 
@@ -173,4 +176,15 @@ func makeWebSocketRequest(url: URL, token: String?) -> URLRequest {
     var request = URLRequest(url: url)
     if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
     return request
+}
+
+enum LyricsNotice {
+    static func message(for result: LyricsLookup) -> String? {
+        switch result {
+        case .synced: return nil
+        case .instrumental: return "연주곡이에요"
+        case .plainOnly: return "이 곡은 일반 가사만 있고 싱크 가사는 없어요"
+        case .notFound: return "이 곡은 싱크 가사를 찾지 못했어요"
+        }
+    }
 }

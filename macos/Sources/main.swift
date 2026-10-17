@@ -16,6 +16,10 @@ import CoreText
         registerFonts()
         client.settings.save()
         overlay = OverlayController(client: client, preview: preview)
+        client.onLyricsNotice = { [weak self] message in
+            guard let self else { return }
+            if let message { self.overlay.showInfo(message) } else { self.overlay.show() }
+        }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NativeTheme.trayIcon()
         item.button?.setAccessibilityLabel("Pear Now Playing")
