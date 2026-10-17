@@ -107,7 +107,7 @@ namespace PearNowPlaying
         {
             BaseUrl = (baseUrl ?? "https://lrclib.net").TrimEnd('/');
             http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.4.1 (+https://github.com/Roena0516/pear-now-playing)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.4.4 (+https://github.com/Roena0516/pear-now-playing)");
         }
 
         public async Task<LyricsResult> Find(SongInfo song, CancellationToken ct)
@@ -184,6 +184,27 @@ namespace PearNowPlaying
             lock (gate) cache.Remove(song.VideoId + "|" + song.Title);
         }
 
+        /// <summary>
+        /// GET with one quick retry when LRCLIB is busy (429/502/503/504). It is a free, volunteer-run
+        /// service whose search endpoint answers 503 fairly often under load; keep the request count low.
+        /// </summary>
+        async Task<HttpResponseMessage> Send(string url, CancellationToken ct)
+        {
+            var waits = new[] { 2000 };   // one quick retry; the caller retries the whole lookup later
+            for (int i = 0; ; i++)
+            {
+                var resp = await http.GetAsync(url, ct);
+                int code = (int)resp.StatusCode;
+                bool busy = code == 429 || code == 502 || code == 503 || code == 504;
+                if (!busy || i >= waits.Length) return resp;
+                int wait = waits[i];
+                if (resp.Headers.RetryAfter != null && resp.Headers.RetryAfter.Delta.HasValue)
+                    wait = (int)Math.Min(10000, Math.Max(wait, resp.Headers.RetryAfter.Delta.Value.TotalMilliseconds));
+                resp.Dispose();
+                await Task.Delay(wait, ct);
+            }
+        }
+
         async Task<IDictionary<string, object>> Get(SongInfo song, CancellationToken ct)
         {
             if (string.IsNullOrEmpty(song.Title) || string.IsNullOrEmpty(song.Artist) || song.Duration <= 0) return null;
@@ -191,7 +212,7 @@ namespace PearNowPlaying
                     + "&track_name=" + Uri.EscapeDataString(song.Title)
                     + "&album_name=" + Uri.EscapeDataString(song.Album ?? "")
                     + "&duration=" + ((int)Math.Round(song.Duration)).ToString(CultureInfo.InvariantCulture);
-            using (var resp = await http.GetAsync(url, ct))
+            using (var resp = await Send(url, ct))
             {
                 if ((int)resp.StatusCode == 404) return null;
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB get " + (int)resp.StatusCode);
@@ -209,7 +230,7 @@ namespace PearNowPlaying
                 if (i > 0) sb.Append('&');
                 sb.Append(query[i].Key).Append('=').Append(Uri.EscapeDataString(query[i].Value ?? ""));
             }
-            using (var resp = await http.GetAsync(sb.ToString(), ct))
+            using (var resp = await Send(sb.ToString(), ct))
             {
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB search " + (int)resp.StatusCode);
                 var body = await resp.Content.ReadAsStringAsync();
@@ -274,7 +295,7 @@ namespace PearNowPlaying
         {
             var set = new HashSet<string>();
             if (string.IsNullOrEmpty(artist)) return set;
-            foreach (var part in Regex.Split(artist, @"\s*(?:[&,、/×]|\bfeat\.?|\bft\.?|\bx\b|\band\b)\s*", RegexOptions.IgnoreCase))
+            foreach (var part in Regex.Split(artist, @"\s*(?:[&,、/×]|\bfeat\.?|\bft\.?|\bx\b|\band\b|\s및\s|\sと\s)\s*", RegexOptions.IgnoreCase))
             {
                 var p = part.Trim().ToLowerInvariant();
                 if (p.Length == 0) continue;
@@ -295,11 +316,18 @@ namespace PearNowPlaying
             return v.Count > 0 ? v.First() : "";
         }
 
+        internal static string CleanTitleForTest(string title) { return CleanTitle(title); }
+
         static string CleanTitle(string title)
         {
             if (string.IsNullOrEmpty(title)) return "";
-            var t = Regex.Replace(title, @"[\(\[【][^\)\]】]*(official|mv|m/v|video|audio|lyric|live|ver\.|version|feat|prod)[^\)\]】]*[\)\]】]", "", RegexOptions.IgnoreCase);
-            return Regex.Replace(t, @"\s+", " ").Trim();
+            // video uploads: "【歌ってみた】曲名 / covered by 誰か", "曲名【MV】", "Title (Official Video)"
+            var t = Regex.Replace(title, @"【[^】]*】", " ");
+            t = Regex.Replace(t, @"[\(\[][^\)\]]*(official|mv|m/v|video|audio|lyric|live|ver\.|version|feat|prod|cover|歌ってみた|踊ってみた|弾いてみた)[^\)\]]*[\)\]]", " ", RegexOptions.IgnoreCase);
+            t = Regex.Replace(t, @"\s*/?\s*(covered by|cover by)\b.*$", "", RegexOptions.IgnoreCase);
+            t = Regex.Replace(t, @"歌ってみた|踊ってみた|弾いてみた", " ");
+            t = Regex.Replace(t, @"[\s\u3000]+", " ").Trim();
+            return t.Trim('/', '-', '|', ' ');
         }
 
         internal static double JaroWinkler(string a, string b)
