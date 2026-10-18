@@ -1,5 +1,7 @@
 import Foundation
 
+let appVersion = "1.5.0"
+
 struct Settings: Codable {
     var host = "127.0.0.1"
     var port = 26538
@@ -14,7 +16,25 @@ struct Settings: Codable {
     var alwaysShow = false
     var showLyrics = true
     var lyricsOffsetMs: Double = 300
+    var ytmLyrics = true
+    var ytmLyricsProxy = YTMusicProvider.defaultProxy
+    var lyricsServer = "https://lrclib.net"
     var positionLayoutVersion: Int? = 1
+    init() {}
+    // Keys missing from an older config.json keep their defaults instead of discarding the whole file.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) throws -> T { try c.decodeIfPresent(T.self, forKey: key) ?? fallback }
+        host = try value(.host, host); port = try value(.port, port); position = try value(.position, position)
+        marginX = try value(.marginX, marginX); marginY = try value(.marginY, marginY)
+        scale = try value(.scale, scale); panelWidth = try value(.panelWidth, panelWidth); monitor = try value(.monitor, monitor)
+        showSeconds = try value(.showSeconds, showSeconds); opacity = try value(.opacity, opacity)
+        alwaysShow = try value(.alwaysShow, alwaysShow); showLyrics = try value(.showLyrics, showLyrics)
+        lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
+        ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
+        lyricsServer = try value(.lyricsServer, lyricsServer)
+        positionLayoutVersion = try c.decodeIfPresent(Int.self, forKey: .positionLayoutVersion)
+    }
     static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/PearNowPlaying-macOS")
     static let file = directory.appendingPathComponent("config.json")
     static func load() -> Settings {
@@ -22,6 +42,9 @@ struct Settings: Codable {
               (1...65535).contains(settings.port), settings.host == "127.0.0.1" || settings.host == "localhost",
               (0.5...3).contains(settings.scale), (260...800).contains(settings.panelWidth),
               (0.1...1).contains(settings.opacity), (1...3600).contains(settings.showSeconds), settings.marginX.isFinite, settings.marginY.isFinite else { return Settings() }
+        // the lyric servers only make sense over HTTPS; a typo falls back to the default instead of breaking lookups
+        if URL(string: settings.ytmLyricsProxy)?.scheme != "https" { settings.ytmLyricsProxy = YTMusicProvider.defaultProxy }
+        if URL(string: settings.lyricsServer)?.scheme != "https" { settings.lyricsServer = "https://lrclib.net" }
         settings.migratePosition()
         return settings
     }
@@ -38,6 +61,8 @@ struct Settings: Codable {
 }
 struct Song: Equatable {
     var title = "", alternativeTitle = "", artist = "", album = "", imageSrc = "", videoId = ""
+    /// AUDIO, ORIGINAL_MUSIC_VIDEO, USER_GENERATED_CONTENT, PODCAST_EPISODE, OTHER_VIDEO (Pear's MediaType); UNKNOWN for queue entries
+    var mediaType = ""
     var tags: [String] = []
     var duration: Double = 0, elapsed: Double = 0
     var paused = true
@@ -51,6 +76,11 @@ struct Song: Equatable {
         duration = (d["songDuration"] as? NSNumber)?.doubleValue ?? 0
         elapsed = (d["elapsedSeconds"] as? NSNumber)?.doubleValue ?? 0
         paused = d["isPaused"] as? Bool ?? true
+        mediaType = d["mediaType"] as? String ?? ""
+    }
+    init(title: String, alternativeTitle: String = "", artist: String, album: String = "", videoId: String = "", mediaType: String = "", duration: Double = 0) {
+        self.title = title; self.alternativeTitle = alternativeTitle; self.artist = artist; self.album = album
+        self.videoId = videoId; self.mediaType = mediaType; self.duration = duration
     }
     var identity: String { videoId + "|" + title + "|" + artist }
 }

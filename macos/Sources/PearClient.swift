@@ -11,12 +11,12 @@ import Combine
     @Published var settings = Settings.load()
     private var connection: Task<Void, Never>?
     private var lyricTask: Task<Void, Never>?
+    private var prefetchTask: Task<Void, Never>?
     private var artTask: Task<Void, Never>?
     private var socket: URLSessionWebSocketTask?
     private var anchor = Date()
     private var token: String?
-    private let lyricsProvider = LyricsProvider(log: LyricsLog.write)
-    private let ytMusicProvider = YTMusicProvider(log: LyricsLog.write)
+    let lyrics = LyricsFinder(lrclib: LyricsProvider(log: LyricsLog.write), ytm: YTMusicProvider(log: LyricsLog.write), log: LyricsLog.write)
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.connectionProxyDictionary = [:]
@@ -27,6 +27,12 @@ import Combine
     private let loadRemoteAssets: Bool
     init(directory: URL = Settings.directory, loadRemoteAssets: Bool = true) {
         self.directory = directory; self.loadRemoteAssets = loadRemoteAssets
+        applyLyricsSources()
+    }
+    func applyLyricsSources() {
+        lyrics.useYtm = settings.ytmLyrics
+        lyrics.ytm.proxyBase = settings.ytmLyricsProxy
+        lyrics.lrclib.baseURL = settings.lyricsServer
     }
     private var tokenFile: URL { directory.appendingPathComponent("token.txt") }
     var elapsed: Double { min(max(0, song.elapsed + (song.paused ? 0 : Date().timeIntervalSince(anchor))), max(0, song.duration)) }
@@ -36,8 +42,8 @@ import Combine
         connection = Task { await run() }
     }
     func retryAuth() { token = nil; try? FileManager.default.removeItem(at: tokenFile); start() }
-    func stop() { connection?.cancel(); lyricTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
-    func reload() { settings = Settings.load(); settings.save(); start() }
+    func stop() { connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+    func reload() { settings = Settings.load(); settings.save(); applyLyricsSources(); start() }
     private func persistToken(_ value: String) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try Data(value.utf8).write(to: tokenFile, options: .atomic)
@@ -124,48 +130,79 @@ import Combine
         }
     }
     func findLyrics(force: Bool = false) {
-        lyricTask?.cancel(); lines = []; lyricsStatus = "가사 검색 중"
+        lyricTask?.cancel(); prefetchTask?.cancel(); lines = []; lyricsStatus = "가사 검색 중"
         let track = song
         guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
-        if force { lyricsProvider.forget(track); ytMusicProvider.forget(track); onLyricsNotice?("가사를 다시 찾는 중이에요") }
+        if force { lyrics.forget(track); lyrics.ytm.resetPause(); onLyricsNotice?("가사를 다시 찾는 중이에요") }
         lyricTask = Task {
-            for (attempt, delay) in LyricsProvider.lookupRetryDelays.enumerated() {
+            // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
+            let delays = LyricsProvider.lookupRetryDelays
+            for (attempt, delay) in delays.enumerated() {
                 do {
-                    if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
-                    try Task.checkCancellation()
-                    var youtubePlain = false
-                    do {
-                        let youtube = try await ytMusicProvider.find(track)
-                        try Task.checkCancellation()
-                        if case .synced(let found, _) = youtube {
-                            guard song.identity == track.identity else { return }
-                            lines = found; lyricsStatus = "싱크 가사 있음 · YTMusic · \(found.count)줄"; if force { onLyricsNotice?(nil) }; return
-                        }
-                        if case .plainOnly = youtube { youtubePlain = true }
-                    } catch {
-                        if Task.isCancelled { return }
-                        LyricsLog.write("YTMusic 조회 실패, LRCLIB 시도: \(error.localizedDescription)")
+                    if delay > 0 {
+                        lyricsStatus = "가사 서버 연결 실패, 다시 시도 중 (\(attempt)/\(delays.count - 1))"
+                        try await Task.sleep(for: .seconds(delay))
                     }
-                    let result = try await lyricsProvider.find(track)
+                    let result = try await lyrics.find(track)
                     try Task.checkCancellation()
                     guard song.identity == track.identity else { return }
                     switch result {
-                    case .synced(let found, _): lines = found; lyricsStatus = "싱크 가사 있음 · LRCLIB · \(found.count)줄"
+                    case .synced(let found, let source): lines = found; lyricsStatus = "싱크 가사 있음 · \(source) · \(found.count)줄"
                     case .instrumental: lyricsStatus = "연주곡 · 가사 없음"
                     case .plainOnly: lyricsStatus = "일반 가사만 있음 · 싱크 가사 없음"
-                    case .notFound: lyricsStatus = youtubePlain ? "YTMusic 일반 가사만 있음 · 싱크 가사 없음" : "싱크 가사를 찾지 못함"
+                    case .notFound: lyricsStatus = "싱크 가사를 찾지 못함"
                     }
                     if force { onLyricsNotice?(LyricsNotice.message(for: result)) }
+                    prefetchNext(after: track)
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    LyricsLog.write("가사 검색 실패 (\(attempt + 1)/\(LyricsProvider.lookupRetryDelays.count)): \(track.artist) - \(track.title): \(error.localizedDescription)")
-                    lyricsStatus = "가사 서버 연결 재시도 중 (\(attempt + 1)/\(LyricsProvider.lookupRetryDelays.count))"
+                    LyricsLog.write("WARN lyrics lookup failed (\(attempt + 1)/\(delays.count)) for \(track.artist) - \(track.title): \(error.localizedDescription)")
                 }
             }
-            lyricsStatus = "가사 서버 연결 실패 · 가사 진단 기록 확인"
-            if force && song.identity == track.identity { onLyricsNotice?("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
+            guard song.identity == track.identity else { return }
+            lyricsStatus = "가사 서버에 연결하지 못함 · 가사 진단 기록 확인"
+            if force { onLyricsNotice?("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
         }
+    }
+
+    /// While this song plays, look up the next one in Pear's queue so its lyrics are ready when it starts.
+    /// Waits a little first so quickly skipped songs don't trigger lookups.
+    private func prefetchNext(after current: Song) {
+        guard settings.showLyrics, loadRemoteAssets else { return }
+        prefetchTask?.cancel()
+        prefetchTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(10))
+                guard let next = try await nextSong(), next.videoId + "|" + next.title != current.videoId + "|" + current.title else { return }
+                try await lyrics.prefetch(next)
+            } catch {
+                if !Task.isCancelled { LyricsLog.write("INFO fetching ahead failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    /// The next song in Pear's queue (GET /api/v1/queue/next): title, artist, video ID and length only.
+    /// Nil when there is no next song or Pear can't be asked.
+    func nextSong() async throws -> Song? {
+        guard let token else { return nil }
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/queue/next"))
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200,   // 204 = nothing queued
+              let d = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        func firstRun(_ key: String) -> String {
+            if let simple = YTMusicProvider.path(d[key], "simpleText") as? String { return simple }
+            for run in YTMusicProvider.path(d[key], "runs") as? [Any] ?? [] {
+                if let t = YTMusicProvider.path(run, "text") as? String, !t.trimmed.isEmpty { return t.trimmed }
+            }
+            return ""
+        }
+        // the queue doesn't say the media type; cover detection goes by the title only
+        let next = Song(title: d["title"] as? String ?? "", artist: firstRun("shortBylineText"), videoId: d["videoId"] as? String ?? "",
+                        mediaType: "UNKNOWN", duration: YTMusicProvider.parseClock(firstRun("lengthText")))
+        return next.videoId.isEmpty || next.title.isEmpty ? nil : next
     }
 
 }

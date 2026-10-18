@@ -33,7 +33,9 @@
 
 ## macOS 네이티브 포트
 
-macOS 13 이상에서는 Swift/AppKit으로 만든 [macOS 버전의 빌드·실행 안내](macos/README.md)를 사용하세요. 곡 정보·싱크 가사 오버레이, 메뉴 막대 제어, 전역 단축키를 제공합니다.
+macOS 13 이상에서는 Swift/AppKit으로 만든 macOS 버전을 쓰면 돼요. [Releases](../../releases)에서 `PearNowPlaying-macOS.zip`을 받아 압축을 풀고 `Pear Now Playing.app`을 실행해요.
+곡 카드, 싱크 가사(가사 찾는 순서는 Windows 버전과 같아요), 메뉴 막대 제어, 전역 단축키를 지원해요.
+Apple 공증을 받지 않은 앱이라 처음에는 앱을 우클릭 → **열기**로 실행해야 해요. 빌드 방법과 설정은 [macOS 안내](macos/README.md)에 있어요.
 
 ## 설치
 

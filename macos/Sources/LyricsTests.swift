@@ -1,6 +1,7 @@
 import Foundation
 
 @MainActor func runLyricsTests() async {
+    runCoverTests()
     let record = LyricRecord(trackName: "M@GICAL CURE! LOVE SHOT!", artistName: "SAWTOWNE feat. Hatsune Miku", duration: 202, instrumental: false, syncedLyrics: "[00:01.00]Test line", plainLyrics: "Test line")
     let song = Song(["title": "M@GICAL☆CURE! LOVE SHOT!", "alternativeTitle": "M@GICAL☆CURE! LOVE SHOT! (feat. Hatsune Miku)", "artist": "SAWTOWNE 및 初音ミク", "tags": ["SAWTOWNE", "Hatsune Miku"], "songDuration": 202])
     precondition(LyricsProvider.pick([record], song: song) != nil, "Artist tags must match multilingual artist names")
@@ -38,13 +39,9 @@ import Foundation
         }, sleep: { _ in })
         let track = Song(["title": "Original Song (Official MV)", "alternativeTitle": "Original Song", "artist": "Artist", "songDuration": 100, "videoId": "lookup-test"])
         let result = try await provider.find(track)
-        if case .synced(let lines, let source) = result { precondition(lines.count == 1 && source == "title match") } else { preconditionFailure("Fallback chain did not find lyrics") }
-        precondition(urls.count >= 4 && urls.first?.path == "/api/get")
-        let count = urls.count
-        _ = try await provider.find(track)
-        precondition(urls.count == count, "Successful results must be cached")
-        provider.forget(track); _ = try await provider.find(track)
-        precondition(urls.count > count, "Manual retry must evict cached results")
+        if case .synced(let lines, let source) = result { precondition(lines.count == 1 && source == "LRCLIB") } else { preconditionFailure("Fallback chain did not find lyrics") }
+        let gets = urls.filter { $0.path == "/api/get" }.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "track_name" }?.value }
+        precondition(urls.first?.path == "/api/get" && gets == ["Original Song (Official MV)", "Original Song"], "Exact lookups also try the alternative / cleaned title")
         let plainProvider = LyricsProvider(transport: { request in
             let body = request.url!.path.hasSuffix("/get") ? #"{"plainLyrics":"Only plain lyrics"}"# : #"[{"trackName":"Original Song","artistName":"Artist","duration":100,"plainLyrics":"Only plain lyrics"}]"#
             return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
@@ -96,6 +93,7 @@ import Foundation
         precondition(firstFailures > 0 && failures == firstFailures * 2, "Server failures must not be cached")
         let cancelled = Task { try await provider.find(track) }; cancelled.cancel()
         do { _ = try await cancelled.value; preconditionFailure("Cancelled lookups must not publish results") } catch { }
+        await runFinderTests()
         print("PASS: original artist/tag matching, title normalization, duration selection, fallback chain, cache eviction, plain-only diagnosis, bounded busy retries, Retry-After, cancellation during backoff and video-title cleanup")
         exit(0)
     } catch { fputs("Lyrics tests failed: \(error)\n", stderr); exit(1) }
@@ -112,4 +110,107 @@ import Foundation
     if let match = artistMatch ?? titleMatch {
         print("Selected: \(match.trackName ?? "") / \(match.artistName ?? "") / \(match.duration ?? 0)s / parsed timed lines: \(parseLRC(match.syncedLyrics ?? "").count)")
     }
+}
+
+/// The whole lookup order (LyricsFinder), with YouTube and LRCLIB answered locally.
+@MainActor func runFinderTests() async {
+    func lrclib(_ handler: @escaping (URL) -> (Int, String)) -> LyricsProvider {
+        LyricsProvider(transport: { request in
+            let (status, body) = handler(request.url!)
+            return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        }, sleep: { _ in })
+    }
+    let synced = #"[{"trackName":"Song","artistName":"Band","duration":200,"syncedLyrics":"[00:01.00]From LRCLIB"}]"#
+    let noTab: YTMusicProvider.Transport = { request in try FakeYouTube.ok(request, FakeYouTube.next(FakeYouTube.body(request)["videoId"] as? String ?? "")) }
+    let song = Song(title: "Song", artist: "Band", videoId: "audioVideo1", mediaType: "AUDIO", duration: 200)
+    do {
+        // found results are cached; forget() asks again
+        var asked = 0
+        let finder = LyricsFinder(lrclib: lrclib { url in asked += 1; return url.path.hasSuffix("/get") ? (404, "") : (200, synced) }, ytm: YTMusicProvider(transport: noTab))
+        guard case .synced(_, let source) = try await finder.find(song), source == "LRCLIB" else { preconditionFailure("LRCLIB after YouTube Music had none") }
+        let count = asked
+        _ = try await finder.find(song); precondition(asked == count, "Found lyrics are cached")
+        finder.forget(song); _ = try await finder.find(song); precondition(asked > count, "Manual retry must evict cached results")
+
+        // a look-ahead that finds nothing doesn't stop the real lookup when the song starts
+        asked = 0
+        let ahead = LyricsFinder(lrclib: lrclib { url in asked += 1; return url.path.hasSuffix("/get") ? (404, "") : (200, "[]") }, ytm: YTMusicProvider(transport: noTab))
+        try await ahead.prefetch(Song(title: "Song", artist: "Band", videoId: "audioVideo1", mediaType: "UNKNOWN", duration: 200))
+        let afterPrefetch = asked
+        if case .notFound = try await ahead.find(song) {} else { preconditionFailure("Nothing to find") }
+        precondition(asked > afterPrefetch, "A miss while fetching ahead must not be cached")
+        let afterFind = asked
+        _ = try await ahead.find(song); precondition(asked == afterFind, "A miss with YouTube Music answering is final")
+
+        // YouTube Music down: "not found" is not final
+        asked = 0
+        let ytmDown = LyricsFinder(lrclib: lrclib { url in asked += 1; return url.path.hasSuffix("/get") ? (404, "") : (200, "[]") },
+                                   ytm: YTMusicProvider(transport: { request in (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!) }))
+        _ = try await ytmDown.find(song); let first = asked
+        _ = try await ytmDown.find(song); precondition(asked == first * 2, "A miss while YouTube Music failed is asked again")
+
+        // MV: the official audio track's lyrics
+        let mvSong = Song(title: "Song (Official Music Video)", artist: "Band", videoId: "mvVideo0001", mediaType: "ORIGINAL_MUSIC_VIDEO", duration: 200)
+        let catalog = LyricsFinder(lrclib: lrclib { _ in preconditionFailure("LRCLIB not needed") }, ytm: YTMusicProvider(transport: { request in
+            let body = FakeYouTube.body(request)
+            switch body["videoId"] as? String ?? body["browseId"] as? String ?? "" {
+            case "mvVideo0001": return try FakeYouTube.ok(request, FakeYouTube.next("mvVideo0001", title: "Song (Official Music Video)", artist: "Band", artistId: "UCband",
+                                                                                     length: "3:20", type: "MUSIC_VIDEO_TYPE_OMV", lyricsId: "lyrMV"))
+            case "lyrMV": return try FakeYouTube.ok(request, FakeYouTube.unavailable)
+            case "UCband": return try FakeYouTube.ok(request, FakeYouTube.artistPage([("MPREb_song", "Song")]))
+            case "MPREb_song": return try FakeYouTube.ok(request, FakeYouTube.album([("atvVideo001", "Song", "3:21")]))
+            case "atvVideo001": return try FakeYouTube.ok(request, FakeYouTube.next("atvVideo001", title: "Song", artist: "Band", length: "3:21", type: "MUSIC_VIDEO_TYPE_ATV", lyricsId: "lyrATV"))
+            case "lyrATV": return try FakeYouTube.ok(request, FakeYouTube.timed([(1000, "From the audio track")]))
+            case let other: preconditionFailure("unexpected request \(other)")
+            }
+        }))
+        guard case .synced(let audioLines, "YouTube Music · 공식 음원") = try await catalog.find(mvSong), audioLines.first?.text == "From the audio track" else {
+            preconditionFailure("MV must use the official audio track's lyrics")
+        }
+
+        // cover: the original linked in the description
+        let cover = Song(title: "【歌ってみた】ヴァンパイア / DECO*27 covered by X", artist: "X", videoId: "coverVideo1", mediaType: "USER_GENERATED_CONTENT", duration: 200)
+        let covers = LyricsFinder(lrclib: lrclib { _ in preconditionFailure("LRCLIB not needed") }, ytm: YTMusicProvider(transport: { request in
+            let body = FakeYouTube.body(request)
+            if request.url!.path.hasSuffix("/player") {
+                precondition(body["videoId"] as? String == "coverVideo1")
+                return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "原曲\nhttps://youtu.be/origVideo01\n\nMix: https://youtu.be/mixVideo001"]])
+            }
+            switch body["videoId"] as? String ?? body["browseId"] as? String ?? "" {
+            case "coverVideo1": return try FakeYouTube.ok(request, FakeYouTube.next("coverVideo1"))
+            case "origVideo01": return try FakeYouTube.ok(request, FakeYouTube.next("origVideo01", title: "ヴァンパイア", artist: "DECO*27", length: "3:22", type: "MUSIC_VIDEO_TYPE_ATV", lyricsId: "lyrOrig"))
+            case "lyrOrig": return try FakeYouTube.ok(request, FakeYouTube.timed([(1000, "From the original")]))
+            case let other: preconditionFailure("unexpected request \(other)")
+            }
+        }))
+        guard case .synced(let coverLines, "YouTube Music · 원곡") = try await covers.find(cover), coverLines.first?.text == "From the original" else {
+            preconditionFailure("A cover must use the original's lyrics")
+        }
+
+        // cover without links: song name read from the title, looked up on LRCLIB with a 10s length tolerance
+        var queries: [String] = []
+        let byTitle = LyricsFinder(lrclib: lrclib { url in
+            queries.append(url.query ?? "")
+            if url.path.hasSuffix("/get") { return (404, "") }
+            return (200, #"[{"trackName":"ワールドイズマイン","artistName":"supercell","duration":208,"syncedLyrics":"[00:01.00]From the original search"}]"#)
+        }, ytm: YTMusicProvider(transport: { request in
+            if request.url!.path.hasSuffix("/player") { return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "いつもありがとうございます"]]) }
+            return try FakeYouTube.ok(request, FakeYouTube.next(FakeYouTube.body(request)["videoId"] as? String ?? ""))
+        }))
+        let unlinked = Song(title: "ワールドイズマイン / ryo(covered by 誰か)", artist: "誰か", videoId: "coverVideo2", mediaType: "USER_GENERATED_CONTENT", duration: 200)
+        guard case .synced(_, "LRCLIB · 원곡 검색") = try await byTitle.find(unlinked) else { preconditionFailure("Cover without a link must fall back to the title") }
+        precondition(queries.contains { $0.contains("track_name=%E3%83%AF") || $0.contains("track_name=ワ") })
+
+        // LRCLIB busy while looking for the original: the lookup fails (retried later), nothing cached
+        var busyCalls = 0
+        let busy = LyricsFinder(lrclib: lrclib { _ in busyCalls += 1; return (503, "") }, ytm: YTMusicProvider(transport: { request in
+            if request.url!.path.hasSuffix("/player") { return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "-"]]) }
+            return try FakeYouTube.ok(request, FakeYouTube.next(FakeYouTube.body(request)["videoId"] as? String ?? ""))
+        }))
+        do { _ = try await busy.find(unlinked); preconditionFailure("Busy LRCLIB must fail the lookup") } catch { precondition(error is LrclibFailed) }
+        let firstBusy = busyCalls
+        do { _ = try await busy.find(unlinked); preconditionFailure("Busy LRCLIB must fail again") } catch { }
+        precondition(busyCalls == firstBusy * 2, "Failures are not cached")
+        print("PASS: lookup order (YouTube Music, official audio, cover originals by link and by title, LRCLIB), caching rules, look-ahead misses, busy LRCLIB")
+    } catch { fputs("Finder tests failed: \(error)\n", stderr); exit(1) }
 }

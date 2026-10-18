@@ -46,6 +46,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/test-controls':
             self.reply(200, controls)
             return
+        if self.path == '/api/v1/queue/next':
+            if self.headers.get('Authorization') != 'Bearer ' + TOKEN:
+                self.reply(401, {})
+                return
+            self.reply(200, {'title': '다음 곡', 'videoId': 'next-track01', 'shortBylineText': {'runs': [{'text': '다음 가수'}]}, 'lengthText': {'runs': [{'text': '3:05'}]}})
+            return
         if self.path != '/api/v1/ws':
             self.reply(404, {})
             return

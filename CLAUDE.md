@@ -4,18 +4,24 @@ Pear Now Playing: Pear Desktop(YouTube Music 데스크톱 클라이언트)에서
 
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 해요체)
-- 버전: `src/Program.cs`의 AssemblyVersion (현재 1.5.0.0)
+- 버전: `src/Program.cs`의 AssemblyVersion (현재 1.5.0.0), 맥은 `macos/Sources/Models.swift`의 `appVersion`과 `macos/build.sh`의 Info.plist
+- macOS 버전: `macos/` (Swift/AppKit, pdh0128의 PR #1에서 시작). 가사 찾는 순서는 Windows와 똑같이 맞춰 둠. 가사 쪽을 고치면 양쪽을 같이 고침 (`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`)
 
 ## 작업 방식
 
 - 사용자(로에나)는 반말 한국어(임/함체)로 짧고 직접적인 답을 선호함.
 - 커밋, 푸시, 릴리스 업로드는 사용자가 직접 함. 릴리스 zip에는 `PearNowPlaying.exe`, `README.md`, `PretendardJP-OFL.txt`가 `PearNowPlaying/` 폴더째 들어감.
+- 맥 릴리스는 `./macos/build.sh --universal`(arm64+x86_64) 후 `ditto -c -k --norsrc --keepParent 'macos/build/Pear Now Playing.app' PearNowPlaying-macOS.zip`. ad-hoc 서명이고 공증은 안 함.
 - 커밋 메시지는 한국어로 짧게 씀 (예: "트레이 가사 다시 찾기에 결과 표시").
 - 릴리스 본문은 합니다체로 씀.
 - 루트의 `PearNowPlaying.exe`, `_capture/`, `*.zip`은 커밋하지 않음 (`.gitignore`).
 - 실행 로그는 `%AppData%\PearNowPlaying\error.log`, 설정은 `%AppData%\PearNowPlaying\config.ini`에 있음. 가사가 안 뜬다는 제보는 로그부터 봄. 가사 검색 단계마다 INFO 줄이 남음.
 
 ## 빌드
+
+macOS: `./macos/build.sh` (Xcode Command Line Tools). 테스트: 앱 실행 파일에 `--self-test`, `--lyrics-tests`, `--ytmusic-tests`, 그리고 `python3 macos/Tests/mock_pear.py`. `--lyrics-tests`의 커버곡 케이스(`CoverTests.swift`)는 C# 결과를 그대로 기대값으로 넣은 것이라, `CoverLyrics.cs`를 바꾸면 같이 갱신함. GitHub Actions `macOS` 워크플로가 같은 테스트를 돌림.
+
+Windows:
 
 - C# 7.3, .NET Framework 4.8, WinForms. 외부 패키지 없음 (JSON은 `System.Web.Extensions`의 JavaScriptSerializer).
 - Windows: `dotnet build -c Release` (`PearNowPlaying.csproj`, SDK 스타일 net48).

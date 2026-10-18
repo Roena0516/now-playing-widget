@@ -1,104 +1,402 @@
 import Foundation
 
-/// Follows Pear's synced-lyrics/providers/YTMusic.ts. Anonymous next/browse requests
-/// never import the player's cookies or reuse the local Pear bearer token.
+struct TrackInfo {
+    var videoId = "", title = "", artist = ""
+    /// YouTube Music artist page of the video's artist (UC…), when the response links one.
+    var artistId = ""
+    /// MUSIC_VIDEO_TYPE_ATV (official audio), _OMV (official video), _UGC …
+    var videoType = ""
+    var duration: Double = 0
+    var lines: [LyricLine] = []
+    /// YouTube Music has lyrics for it, but without times.
+    var plainOnly = false
+}
+
+struct VideoDescription {
+    var text = ""
+    var linkedIds: [String] = []
+}
+
+/// YouTube Music's own time-synced lyrics, fetched the same way as Pear Desktop's "YTMusic" lyrics provider
+/// (src/plugins/synced-lyrics/providers/YTMusic.ts) and the Windows version (src/YtmLyrics.cs):
+///   1. /youtubei/v1/next for the video -> the lyrics tab's browseId
+///   2. /browse for that browseId as the YouTube Music mobile client (26 / 7.01.05) through Pear's relay
+///      (ytmbrowseproxy.zvz.be). Anonymous direct browse returns no lyrics, which is why Pear uses the relay.
+///      In practice timed lines come back for official audio tracks; MVs and uploads get "not available".
+/// No Google account cookies or Pear tokens are sent. The relay is a third-party service, so after repeated
+/// failures it is skipped for a while and lookups go straight to LRCLIB.
 @MainActor final class YTMusicProvider {
     typealias Transport = (URLRequest) async throws -> (Data, HTTPURLResponse)
-    private let session = URLSession(configuration: .ephemeral)
+    nonisolated static let defaultProxy = "https://ytmbrowseproxy.zvz.be/"
+    private static func datedVersion(_ prefix: String, _ suffix: String) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyyMMdd"
+        return prefix + f.string(from: Date().addingTimeInterval(-2 * 86400)) + suffix
+    }
+    /// WEB_REMIX versions are dated builds ("1.YYYYMMDD.01.00"); a recent date is what the web app sends.
+    static var webRemixVersion: String { datedVersion("1.", ".01.00") }
+    static var webVersion: String { datedVersion("2.", ".00.00") }
+
+    var musicBase = "https://music.youtube.com/"
+    var youtubeBase = "https://www.youtube.com/"
+    var proxyBase = defaultProxy
+
+    private let session: URLSession
     private let transport: Transport?
     private let log: (String) -> Void
-    private var cache: [String: LyricsLookup] = [:]
+    private var consecutiveFailures = 0
+    private var skipUntil = Date.distantPast
+    static let failuresBeforeSkip = 3
+    static let skipFor: TimeInterval = 600
+
     init(transport: Transport? = nil, log: @escaping (String) -> Void = { _ in }) {
         self.transport = transport; self.log = log
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false; config.httpCookieAcceptPolicy = .never
+        config.timeoutIntervalForRequest = 12
+        // redirects are followed by hand: a 301/302 would otherwise turn the POST into a GET
+        session = URLSession(configuration: config, delegate: NoRedirects(), delegateQueue: nil)
     }
-    func forget(_ song: Song) { cache.removeValue(forKey: song.videoId) }
-    private func post(_ url: String, body: [String: Any], label: String) async throws -> [String: Any] {
-        try Task.checkCancellation()
-        var request = URLRequest(url: URL(string: url)!)
-        request.httpMethod = "POST"; request.timeoutInterval = 12; request.httpShouldHandleCookies = false
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let data: Data, response: HTTPURLResponse
-        if let transport { (data, response) = try await transport(request) }
-        else {
-            let result = try await session.data(for: request)
-            guard let http = result.1 as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-            (data, response) = (result.0, http)
-        }
-        try Task.checkCancellation(); log("YTMusic \(label): HTTP \(response.statusCode)")
-        guard (200...299).contains(response.statusCode) else { throw NSError(domain: "YTMusic", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "YTMusic \(label) HTTP \(response.statusCode)"]) }
-        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw URLError(.cannotParseResponse) }
-        return result
+
+    /// True while the relay is being skipped after repeated failures.
+    var paused: Bool { Date() < skipUntil }
+    func resetPause() { skipUntil = .distantPast; consecutiveFailures = 0 }
+
+    // Answers from YouTube for this session, so retries (LRCLIB busy) and the next lookups of the same
+    // originals don't ask again. Failed requests are not remembered.
+    private var lookups: [String: TrackInfo] = [:]
+    private var audioTracks: [String: String?] = [:]
+    private var descriptions: [String: VideoDescription] = [:]
+    private var artistPages: [String: Any] = [:]
+    private var fullDiscographies: [String: [(id: String, title: String)]] = [:]
+
+    private func remember<T>(_ memo: inout [String: T], _ key: String, _ value: T) {
+        if memo.count > 300 { memo.removeAll() }
+        memo[key] = value
     }
-    func find(_ song: Song) async throws -> LyricsLookup {
-        try Task.checkCancellation()
-        guard !song.videoId.isEmpty else { return .notFound }
-        if let cached = cache[song.videoId] { return cached }
-        let next = try await post("https://music.youtube.com/youtubei/v1/next?prettyPrint=false", body: ["videoId": song.videoId, "context": ["client": ["clientName": "WEB_REMIX", "clientVersion": "1.20261016.01.00"]]], label: "next")
-        guard let browseID = Self.lyricsBrowseID(in: next) else { log("YTMusic: 가사 탭 없음"); return .notFound }
-        let body: [String: Any] = ["browseId": browseID, "context": ["client": ["clientName": "26", "clientVersion": "7.01.05"]]]
-        var plainOnly = false
-        // Try Google's endpoint first. Pear's existing provider uses the proxy below
-        // because direct anonymous browse requests may return no lyrics in some regions.
+
+    /// Drop what is known about one video, for a manual "find lyrics again".
+    func forget(_ videoId: String) {
+        lookups.removeValue(forKey: videoId + "|L"); lookups.removeValue(forKey: videoId + "|M")
+    }
+
+    /// Lyrics plus the track's title/artist/length as YouTube Music lists it. Throws when the servers can't be
+    /// reached or answer with an error; counts towards the relay's pause.
+    func lookup(_ videoId: String, withLyrics: Bool = true) async throws -> TrackInfo {
+        if let known = lookups[videoId + (withLyrics ? "|L" : "|M")] { return known }
+        if !withLyrics, let known = lookups[videoId + "|L"] { return known }
         do {
-            let response = try await post("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false", body: body, label: "browse")
-            let result = Self.parse(response)
-            if case .synced(let lines, _) = result { cache[song.videoId] = result; log("YTMusic 가사 \(lines.count)줄: \(song.artist) - \(song.title)"); return result }
-            if case .plainOnly = result { plainOnly = true }
+            var info = TrackInfo(videoId: videoId)
+            try await findCore(&info, withLyrics: withLyrics)
+            consecutiveFailures = 0
+            remember(&lookups, videoId + (withLyrics ? "|L" : "|M"), info)
+            return info
         } catch {
             if Task.isCancelled { throw CancellationError() }
-            log("YTMusic 직접 조회 실패, Pear 제공자 경로 시도: \(error.localizedDescription)")
+            consecutiveFailures += 1
+            if consecutiveFailures >= Self.failuresBeforeSkip {
+                skipUntil = Date().addingTimeInterval(Self.skipFor); consecutiveFailures = 0
+                log("WARN YouTube Music lyrics failed \(Self.failuresBeforeSkip) times in a row; using LRCLIB only for \(Int(Self.skipFor / 60)) minutes")
+            }
+            throw error
         }
-        let response = try await post("https://ytmbrowseproxy.zvz.be/browse?prettyPrint=false", body: body, label: "Pear provider browse")
-        let result = Self.parse(response)
-        if case .synced(let lines, _) = result { cache[song.videoId] = result; log("YTMusic 가사 \(lines.count)줄 (Pear 제공자): \(song.artist) - \(song.title)"); return result }
-        if case .plainOnly = result { return .plainOnly }
-        return plainOnly ? .plainOnly : .notFound
     }
-    static func lyricsBrowseID(in object: Any, depth: Int = 0) -> String? {
-        guard depth < 30 else { return nil }
-        if let dict = object as? [String: Any] {
-            if let endpoint = dict["browseEndpoint"] as? [String: Any],
-               let config = endpoint["browseEndpointContextSupportedConfigs"] as? [String: Any],
-               let music = config["browseEndpointContextMusicConfig"] as? [String: Any],
-               music["pageType"] as? String == "MUSIC_PAGE_TYPE_TRACK_LYRICS" { return endpoint["browseId"] as? String }
-            for value in dict.values { if let id = lyricsBrowseID(in: value, depth: depth + 1) { return id } }
-        } else if let values = object as? [Any] {
-            for value in values { if let id = lyricsBrowseID(in: value, depth: depth + 1) { return id } }
+
+    private func findCore(_ info: inout TrackInfo, withLyrics: Bool) async throws {
+        // 1) watch-next page of the video: find the lyrics tab
+        let next = try await post(musicBase.trimmed("/") + "/youtubei/v1/next?prettyPrint=false",
+                                  body: ["videoId": info.videoId, "context": ["client": ["clientName": "WEB_REMIX", "clientVersion": Self.webRemixVersion]]], label: "next")
+        Self.readQueueEntry(next, into: &info)
+        if !withLyrics { return }   // only the title/artist/length were wanted
+        guard let browseId = Self.lyricsBrowseID(in: next) else {
+            log("INFO YouTube Music: no lyrics tab for video \(info.videoId) -> LRCLIB")   // user uploads, covers, MVs …
+            return
         }
+        // 2) the lyrics page as the mobile client (same request body as Pear). Asking music.youtube.com directly
+        // (anonymously) has always answered "Lyrics not available at this time.", so go straight to Pear's relay.
+        let body: [String: Any] = ["browseId": browseId, "context": ["client": ["clientName": "26", "clientVersion": "7.01.05"]]]
+        let relayed = try await post(proxyBase.trimmed("/") + "/browse?prettyPrint=false", body: body, label: "relay browse")
+        switch Self.parse(relayed) {
+        case .synced(let lines, _): info.lines = lines
+        case .plainOnly: info.plainOnly = true; log("INFO YouTube Music relay browse \(info.videoId): plain lyrics only")
+        default: log("INFO YouTube Music relay browse \(info.videoId): no timed lines (\(Self.describe(relayed)))")
+        }
+    }
+
+    /// Short summary of a /browse answer for the log: what kind of lyrics (if any) it carried.
+    static func describe(_ response: [String: Any]) -> String {
+        guard let contents = response["contents"] else { return "no contents [" + response.keys.prefix(6).joined(separator: ",") + "]" }
+        if let model = find("musicMessageModel", in: contents) as? [String: Any] { return "message: " + (model["text"] as? String ?? "?") }
+        if let message = find("messageRenderer", in: contents) as? [String: Any], !runs(message["text"]).isEmpty { return "message: " + runs(message["text"]) }
+        return "contents [" + ((contents as? [String: Any])?.keys.prefix(6).joined(separator: ",") ?? "?") + "]"
+    }
+
+    /// Title, artist and length of the video from the "up next" queue entry YouTube Music returns for it.
+    static func readQueueEntry(_ next: Any, into info: inout TrackInfo) {
+        let videoId = info.videoId
+        guard let r = findWhere("playlistPanelVideoRenderer", in: next, { ($0 as? [String: Any])?["videoId"] as? String == videoId }) else { return }
+        info.title = runs(path(r, "title"))
+        let byline = path(r, "shortBylineText") ?? path(r, "longBylineText")
+        for run in path(byline, "runs") as? [Any] ?? [] {
+            if let t = path(run, "text") as? String, !t.trimmed.isEmpty { info.artist = t.trimmed; break }
+        }
+        info.duration = parseClock(runs(path(r, "lengthText")))
+        info.videoType = find("musicVideoType", in: r) as? String ?? ""
+        let artist = findWhere("browseEndpoint", in: next) { pageType($0) == "MUSIC_PAGE_TYPE_ARTIST" }
+        info.artistId = path(artist, "browseId") as? String ?? ""
+    }
+
+    // ---- official audio track for a music video (MV -> artist page -> single/album -> track) -------------
+
+    /// YouTube Music only returns timed lyrics for official audio tracks, not for music videos, and without
+    /// signing in it doesn't link a video to its audio track. So: open the artist's page, take the singles/albums
+    /// named like the song, and pick the track with the same title and (nearly) the same length.
+    /// Returns the audio track's video ID, or nil. `otherNames`: more names the song may go by (e.g. a cover's).
+    func findAudioTrack(_ video: TrackInfo, otherNames: [String] = []) async throws -> String? {
+        if video.artistId.isEmpty || video.title.isEmpty || video.duration <= 0 { return nil }
+        let key = ([video.videoId] + otherNames).joined(separator: "|")
+        if let known = audioTracks[key] { return known }
+        let found = try await findAudioTrackCore(video, otherNames)
+        remember(&audioTracks, key, found)
+        return found
+    }
+
+    private func findAudioTrackCore(_ video: TrackInfo, _ otherNames: [String]) async throws -> String? {
+        // the song's names: no 【tags】 / artist part / "covered by …"; Japanese and English halves both tried
+        // ("サイエンス - Science" may be released as either)
+        let names = CoverLyrics.titleNames(video.title, artist: video.artist, extra: otherNames)
+        if names.isEmpty { return nil }
+        let title = names.joined(separator: " / ")
+        func named(_ t: String) -> Bool { names.contains { CoverLyrics.sameTitle(t, $0) || CoverLyrics.sameTitle(CoverLyrics.primaryTitle(t), $0) } }
+        let browseURL = musicBase.trimmed("/") + "/youtubei/v1/browse?prettyPrint=false"
+        let artistPage: Any
+        if let known = artistPages[video.artistId] { artistPage = known }
+        else { artistPage = try await post(browseURL, body: browseBody(video.artistId), label: "artist page"); remember(&artistPages, video.artistId, artistPage) }
+        var releases: [(id: String, title: String)] = []
+        Self.collectReleases(artistPage, into: &releases)
+        func match() -> [String] {
+            Array(releases.filter { !CoverLyrics.looksArranged($0.title) && named($0.title) }.map(\.id).uniqued().prefix(2))
+        }
+        var matching = match()
+
+        // The artist page only shows the latest releases; "show all" (full singles / albums lists) has the rest.
+        if matching.isEmpty {
+            var all: [(id: String, title: String)]
+            if let known = fullDiscographies[video.artistId] { all = known }
+            else {
+                all = []
+                var more: [(id: String, params: String)] = []
+                Self.collectDiscographyLinks(artistPage, into: &more)
+                var seen = Set<String>()
+                for link in more where seen.count < 2 && seen.insert(link.id + "|" + link.params).inserted {
+                    Self.collectReleases(try await post(browseURL, body: browseBody(link.id, params: link.params), label: "discography"), into: &all)
+                }
+                remember(&fullDiscographies, video.artistId, all)
+            }
+            releases += all
+            matching = match()
+        }
+        if matching.isEmpty {
+            log("INFO YouTube Music: no single/album named \"\(title)\" by this artist (\(releases.map(\.id).uniqued().count) releases)")
+            return nil
+        }
+        for album in matching {
+            let page = try await post(browseURL, body: browseBody(album), label: "album page")
+            var tracks: [Any] = []
+            Self.collectAll("musicResponsiveListItemRenderer", in: page, into: &tracks)
+            for t in tracks {
+                guard let id = Self.path(t, "playlistItemData", "videoId") as? String, !id.isEmpty else { continue }
+                let trackTitle = (Self.path(t, "flexColumns") as? [Any])?.first.map { Self.runs(Self.path($0, "musicResponsiveListItemFlexColumnRenderer", "text")) } ?? ""
+                var length: Double = 0
+                for c in Self.path(t, "fixedColumns") as? [Any] ?? [] {
+                    length = Self.parseClock(Self.runs(Self.path(c, "musicResponsiveListItemFixedColumnRenderer", "text"))); if length > 0 { break }
+                }
+                if !named(trackTitle) { continue }
+                if length > 0 && abs(length - video.duration) > 5 { continue }
+                log("INFO YouTube Music: official audio for \(video.videoId) (\(video.title)) is \(id) (\(trackTitle), \(Int(length))s)")
+                return id
+            }
+        }
+        log("INFO YouTube Music: no track \"\(title)\" of about \(Int(video.duration))s in \(matching.joined(separator: ", "))")
         return nil
     }
-    private static func find(_ key: String, in object: Any, depth: Int = 0) -> Any? {
-        guard depth < 30 else { return nil }
-        if let dict = object as? [String: Any] {
-            if let value = dict[key] { return value }
-            for value in dict.values { if let match = find(key, in: value, depth: depth + 1) { return match } }
-        } else if let values = object as? [Any] {
-            for value in values { if let match = find(key, in: value, depth: depth + 1) { return match } }
-        }
-        return nil
+
+    private func browseBody(_ browseId: String, params: String = "") -> [String: Any] {
+        // hl=ja: Japanese titles, as in the songs
+        var body: [String: Any] = ["browseId": browseId, "context": ["client": ["clientName": "WEB_REMIX", "clientVersion": Self.webRemixVersion, "hl": "ja"]]]
+        if !params.isEmpty { body["params"] = params }
+        return body
     }
+
+    /// "Show all" links of the artist page's album / single shelves (browseId + params).
+    static func collectDiscographyLinks(_ node: Any, into found: inout [(id: String, params: String)], depth: Int = 0) {
+        guard depth <= 60 else { return }
+        if let d = node as? [String: Any] {
+            if let be = d["browseEndpoint"], pageType(be) == "MUSIC_PAGE_TYPE_ARTIST_DISCOGRAPHY", let id = path(be, "browseId") as? String, !id.isEmpty {
+                found.append((id, path(be, "params") as? String ?? ""))
+            }
+            for v in d.values { collectDiscographyLinks(v, into: &found, depth: depth + 1) }
+        } else if let list = node as? [Any] { for v in list { collectDiscographyLinks(v, into: &found, depth: depth + 1) } }
+    }
+
+    static func collectReleases(_ node: Any, into found: inout [(id: String, title: String)], depth: Int = 0) {
+        guard depth <= 60 else { return }
+        if let d = node as? [String: Any] {
+            if let item = d["musicTwoRowItemRenderer"] {
+                let be = path(item, "navigationEndpoint", "browseEndpoint")
+                if pageType(be) == "MUSIC_PAGE_TYPE_ALBUM", let id = path(be, "browseId") as? String, !id.isEmpty { found.append((id, runs(path(item, "title")))) }
+            }
+            for v in d.values { collectReleases(v, into: &found, depth: depth + 1) }
+        } else if let list = node as? [Any] { for v in list { collectReleases(v, into: &found, depth: depth + 1) } }
+    }
+
+    static func collectAll(_ key: String, in node: Any, into found: inout [Any], depth: Int = 0) {
+        guard depth <= 60 else { return }
+        if let d = node as? [String: Any] {
+            if let v = d[key] { found.append(v) }
+            for c in d.values { collectAll(key, in: c, into: &found, depth: depth + 1) }
+        } else if let list = node as? [Any] { for c in list { collectAll(key, in: c, into: &found, depth: depth + 1) } }
+    }
+
+    // ---- video description (www.youtube.com) ---------------------------------------------------
+
+    /// The video's description text, plus the video IDs its links point to (YouTube shortens long links in
+    /// the visible text, so linked IDs are collected separately). Nil when it can't be read.
+    func description(_ videoId: String) async throws -> VideoDescription? {
+        if let known = descriptions[videoId] { return known }
+        guard let d = try await descriptionCore(videoId) else { return nil }
+        remember(&descriptions, videoId, d)
+        return d
+    }
+
+    private func descriptionCore(_ videoId: String) async throws -> VideoDescription? {
+        let body: [String: Any] = ["videoId": videoId, "context": ["client": ["clientName": "WEB", "clientVersion": Self.webVersion]]]
+        // the player response carries the full description as plain text
+        do {
+            let player = try await post(youtubeBase.trimmed("/") + "/youtubei/v1/player?prettyPrint=false", body: body, label: "player")
+            if let text = Self.path(player, "videoDetails", "shortDescription") as? String, !text.isEmpty { return VideoDescription(text: text) }
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            log("INFO YouTube player (description) failed: \(error.localizedDescription), trying the watch page")
+        }
+        // otherwise the watch-next page: description text + the videos its links point to
+        let next = try await post(youtubeBase.trimmed("/") + "/youtubei/v1/next?prettyPrint=false", body: body, label: "watch next")
+        let desc = Self.find("attributedDescriptionBodyText", in: next) ?? Self.find("attributedDescription", in: next)
+        var d = VideoDescription(text: Self.path(desc, "content") as? String ?? "")
+        if let desc { Self.collectWatchIds(desc, into: &d.linkedIds) }
+        return d.text.isEmpty && d.linkedIds.isEmpty ? nil : d
+    }
+
+    static func collectWatchIds(_ node: Any, into ids: inout [String], depth: Int = 0) {
+        guard depth <= 30 else { return }
+        if let d = node as? [String: Any] {
+            if let id = path(d["watchEndpoint"], "videoId") as? String, !id.isEmpty, !ids.contains(id) { ids.append(id) }
+            for v in d.values { collectWatchIds(v, into: &ids, depth: depth + 1) }
+        } else if let list = node as? [Any] { for v in list { collectWatchIds(v, into: &ids, depth: depth + 1) } }
+    }
+
+    // ---- response helpers -----------------------------------------------------------------------
+
+    /// Timed lines from a /browse response; plain lyrics and "not available" are told apart for the status line.
     static func parse(_ response: [String: Any]) -> LyricsLookup {
         guard let contents = response["contents"] else { return .notFound }
         if let data = find("timedLyricsData", in: contents) as? [[String: Any]], !data.isEmpty {
-            var lines: [LyricLine] = []
+            var lines: [(Double, String)] = []
             for row in data {
                 guard let cue = row["cueRange"] as? [String: Any],
-                      let milliseconds = Double(String(describing: cue["startTimeMilliseconds"] ?? "")), milliseconds.isFinite,
-                      let text = row["lyricLine"] as? String else { continue }
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                lines.append(LyricLine(id: lines.count, time: max(0, milliseconds / 1000), text: trimmed.isEmpty ? "♪" : trimmed))
+                      let milliseconds = Double(String(describing: cue["startTimeMilliseconds"] ?? "")), milliseconds.isFinite else { continue }
+                let text = (row["lyricLine"] as? String ?? "").trimmed
+                lines.append((max(0, milliseconds / 1000), text.isEmpty ? "♪" : text))
             }
             if !lines.isEmpty {
-                lines = lines.sorted { $0.time < $1.time }.enumerated().map { LyricLine(id: $0.offset, time: $0.element.time, text: $0.element.text) }
-                return .synced(lines, source: "YTMusic")
+                return .synced(lines.sorted { $0.0 < $1.0 }.enumerated().map { LyricLine(id: $0.offset, time: $0.element.0, text: $0.element.1) }, source: "YouTube Music")
             }
             if data.contains(where: { !(($0["lyricLine"] as? String) ?? "").isEmpty }) { return .plainOnly }
         }
-        if let shelf = find("musicDescriptionShelfRenderer", in: contents) as? [String: Any],
-           let description = shelf["description"] as? [String: Any], let runs = description["runs"] as? [[String: Any]],
-           runs.contains(where: { !(($0["text"] as? String) ?? "").isEmpty }) { return .plainOnly }
+        if let shelf = find("musicDescriptionShelfRenderer", in: contents) as? [String: Any], !runs(shelf["description"]).trimmed.isEmpty { return .plainOnly }
         return .notFound
+    }
+
+    /// The lyrics tab's browseId, wherever it sits in the watch-next response.
+    static func lyricsBrowseID(in object: Any) -> String? {
+        path(findWhere("browseEndpoint", in: object) { pageType($0) == "MUSIC_PAGE_TYPE_TRACK_LYRICS" }, "browseId") as? String
+    }
+
+    static func pageType(_ browseEndpoint: Any?) -> String? {
+        path(browseEndpoint, "browseEndpointContextSupportedConfigs", "browseEndpointContextMusicConfig", "pageType") as? String
+    }
+
+    static func find(_ key: String, in object: Any) -> Any? { findWhere(key, in: object) { _ in true } }
+
+    static func findWhere(_ key: String, in object: Any, depth: Int = 0, _ match: (Any) -> Bool) -> Any? {
+        guard depth <= 40 else { return nil }
+        if let dict = object as? [String: Any] {
+            if let value = dict[key], match(value) { return value }
+            for value in dict.values { if let hit = findWhere(key, in: value, depth: depth + 1, match) { return hit } }
+        } else if let values = object as? [Any] {
+            for value in values { if let hit = findWhere(key, in: value, depth: depth + 1, match) { return hit } }
+        }
+        return nil
+    }
+
+    static func path(_ node: Any?, _ keys: String...) -> Any? {
+        var node = node
+        for k in keys { guard let d = node as? [String: Any] else { return nil }; node = d[k] }
+        return node
+    }
+
+    static func runs(_ textNode: Any?) -> String {
+        if let simple = path(textNode, "simpleText") as? String { return simple }
+        return (path(textNode, "runs") as? [Any] ?? []).map { path($0, "text") as? String ?? "" }.joined()
+    }
+
+    /// "4:51" / "1:02:03" -> seconds (0 when unreadable).
+    static func parseClock(_ text: String) -> Double {
+        let t = text.trimmed
+        if t.isEmpty { return 0 }
+        var total: Double = 0
+        for part in t.components(separatedBy: ":") { guard let v = Int(part) else { return 0 }; total = total * 60 + Double(v) }
+        return total
+    }
+
+    private func post(_ url: String, body: [String: Any], label: String) async throws -> [String: Any] {
+        let payload = try JSONSerialization.data(withJSONObject: body)
+        var url = url
+        for _ in 0..<4 {
+            try Task.checkCancellation()
+            var request = URLRequest(url: URL(string: url)!)
+            request.httpMethod = "POST"; request.timeoutInterval = 12; request.httpShouldHandleCookies = false
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("PearNowPlaying-macOS/\(appVersion)", forHTTPHeaderField: "User-Agent")
+            request.httpBody = payload
+            let data: Data, response: HTTPURLResponse
+            if let transport { (data, response) = try await transport(request) }
+            else {
+                let result = try await session.data(for: request)
+                guard let http = result.1 as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+                (data, response) = (result.0, http)
+            }
+            try Task.checkCancellation()
+            if (300..<400).contains(response.statusCode), let location = response.value(forHTTPHeaderField: "Location"),
+               let next = URL(string: location, relativeTo: URL(string: url)) {
+                url = next.absoluteString
+                continue   // re-send the same POST to the new address
+            }
+            guard (200...299).contains(response.statusCode) else {
+                throw NSError(domain: "YTMusic", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "YouTube Music \(label) \(response.statusCode)"])
+            }
+            // big pages (artist, album) are parsed off the main thread
+            let parsed = try await Task.detached { try JSONSerialization.jsonObject(with: data) as? [String: Any] }.value
+            guard let parsed else { throw URLError(.cannotParseResponse) }
+            return parsed
+        }
+        throw URLError(.httpTooManyRedirects)
+    }
+}
+
+private final class NoRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }

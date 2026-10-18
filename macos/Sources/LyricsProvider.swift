@@ -5,6 +5,9 @@ enum LyricsLookup {
     case instrumental
     case plainOnly
     case notFound
+    var isFound: Bool {
+        switch self { case .synced, .instrumental: return true; default: return false }
+    }
 }
 struct LyricRecord: Decodable {
     var trackName: String?
@@ -15,14 +18,16 @@ struct LyricRecord: Decodable {
     var plainLyrics: String?
     var hasSynced: Bool { !(syncedLyrics ?? "").isEmpty }
 }
-/// Search order, normalization, Jaro-Winkler matching and cache behavior follow src/Lyrics.cs.
+/// LRCLIB (https://lrclib.net), the open lyrics database Pear Desktop's synced-lyrics plugin also uses.
+/// Search order, normalization, Jaro-Winkler matching follow src/Lyrics.cs (FindLrclib). No cache here:
+/// LyricsFinder decides what is worth remembering. Throws when the lookup failed (busy, timeout, server error).
 @MainActor final class LyricsProvider {
     typealias Transport = (URLRequest) async throws -> (Data, HTTPURLResponse)
     private let session = URLSession(configuration: .ephemeral)
     private let transport: Transport?
     private let log: (String) -> Void
     private let sleep: (TimeInterval) async throws -> Void
-    private var cache: [String: LyricsLookup] = [:]
+    var baseURL = "https://lrclib.net"
     init(transport: Transport? = nil, log: @escaping (String) -> Void = { _ in },
          sleep: @escaping (TimeInterval) async throws -> Void = { seconds in try await Task.sleep(for: .seconds(seconds)) }) {
         self.transport = transport; self.log = log; self.sleep = sleep
@@ -36,13 +41,14 @@ struct LyricRecord: Decodable {
         let advertised = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 2
         return min(10, max(2, advertised.isFinite ? advertised : 2))
     }
-    func forget(_ song: Song) { cache.removeValue(forKey: song.videoId + "|" + song.title) }
+    /// GET with one quick retry when LRCLIB is busy (429/502/503/504). It is a free, volunteer-run
+    /// service whose search endpoint answers 503 fairly often under load; keep the request count low.
     private func fetch(_ path: String, _ query: [URLQueryItem]) async throws -> (Data, Int) {
         try Task.checkCancellation()
-        var url = URLComponents(string: "https://lrclib.net/api/\(path)")!
+        var url = URLComponents(string: baseURL.trimmed("/") + "/api/\(path)")!
         url.queryItems = query
         var request = URLRequest(url: url.url!); request.timeoutInterval = 20
-        request.setValue("PearNowPlaying-macOS/1.0 (+https://github.com/pdh0128/pear-now-playing)", forHTTPHeaderField: "User-Agent")
+        request.setValue("PearNowPlaying-macOS/\(appVersion) (+https://github.com/Roena0516/pear-now-playing)", forHTTPHeaderField: "User-Agent")
         for attempt in 0..<2 {
             let data: Data, response: HTTPURLResponse
             if let transport { (data, response) = try await transport(request) }
@@ -52,15 +58,14 @@ struct LyricRecord: Decodable {
                 (data, response) = (result.0, http)
             }
             try Task.checkCancellation()
-            log("LRCLIB \(path): HTTP \(response.statusCode)")
             let busy = [429, 502, 503, 504].contains(response.statusCode)
             if busy && attempt == 0 {
                 let delay = Self.retryDelay(response)
-                log("LRCLIB 혼잡 · \(Int(delay))초 뒤 같은 요청 한 번 재시도")
+                log("INFO LRCLIB \(path) busy (\(response.statusCode)), asking again in \(Int(delay))s")
                 try await sleep(delay); try Task.checkCancellation(); continue
             }
             guard (200...299).contains(response.statusCode) || (path == "get" && response.statusCode == 404) else {
-                throw NSError(domain: "LRCLIB", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "LRCLIB HTTP \(response.statusCode)"])
+                throw NSError(domain: "LRCLIB", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "LRCLIB \(path) \(response.statusCode)"])
             }
             return (data, response.statusCode)
         }
@@ -69,76 +74,79 @@ struct LyricRecord: Decodable {
 
     private func search(_ query: [URLQueryItem]) async throws -> [LyricRecord] {
         let (data, _) = try await fetch("search", query)
-        let records = try JSONDecoder().decode([LyricRecord].self, from: data)
-        log("검색 후보 \(records.count)건, 싱크 가사 \(records.filter(\.hasSynced).count)건")
-        return records
+        return try JSONDecoder().decode([LyricRecord].self, from: data)
     }
-    func find(_ song: Song) async throws -> LyricsLookup {
+
+    /// `titleTolerance`: allowed length difference when only the title matches (covers looked up by title use 10s).
+    func find(_ song: Song, titleTolerance: Double = 3) async throws -> LyricsLookup {
         try Task.checkCancellation()
-        let key = song.videoId + "|" + song.title
-        if let cached = cache[key] { return cached }
         var best: LyricRecord?
-        var how = "get"
+        var how = "not found"
         var sawPlain = false
+        // A request that fails for a reason other than "server busy" (bad response, 500 …) doesn't end
+        // the lookup: the next way of searching is tried, and the error only counts if nothing turns up.
+        // Busy answers and timeouts end it, since the following requests would hit the same wall.
         var lastError: Error?
-        func attemptSearch(_ query: [URLQueryItem]) async throws -> [LyricRecord] {
-            do { return try await search(query) }
+        func attempt<T>(_ fallback: T, _ call: () async throws -> T) async throws -> T {
+            do { return try await call() }
             catch {
                 if Task.isCancelled { throw CancellationError() }
-                if Self.isBusy(error) { throw error }
-                lastError = error; log("검색 요청 실패, 다음 검색 방식 시도: \(error.localizedDescription)")
-                return []
+                if Self.isBusy(error) || (error as? URLError)?.code == .timedOut { throw error }
+                lastError = error; log("INFO LRCLIB request failed (\(error.localizedDescription)), trying the next search")
+                return fallback
             }
         }
-        if !song.title.isEmpty && !song.artist.isEmpty && song.duration > 0 {
-            do {
-            let (data, status) = try await fetch("get", [URLQueryItem(name: "artist_name", value: song.artist), URLQueryItem(name: "track_name", value: song.title), URLQueryItem(name: "album_name", value: song.album), URLQueryItem(name: "duration", value: String(Int(song.duration.rounded(.toNearestOrEven))))])
-            if status != 404 {
-                let record = try JSONDecoder().decode(LyricRecord.self, from: data)
-                sawPlain = !(record.plainLyrics ?? "").isEmpty
-                if record.hasSynced || record.instrumental == true { best = record }
-            }
-            } catch {
-                if Task.isCancelled { throw CancellationError() }
-                if Self.isBusy(error) { throw error }
-                lastError = error; log("정확 조회 실패, 검색 방식 시도: \(error.localizedDescription)")
+
+        // 1) exact signature lookup (artist + title + album + duration): one row, usually fast
+        // also under the alternative / cleaned-up title ("ビノミ - Binomi" -> "ビノミ"): exact lookups are cheap
+        if !song.artist.isEmpty && song.duration > 0 {
+            for title in [song.title, song.alternativeTitle, Self.cleanTitle(song.title)].filter({ !$0.trimmed.isEmpty }).uniqued().prefix(3) {
+                let record: LyricRecord? = try await attempt(nil) {
+                    let (data, status) = try await fetch("get", [URLQueryItem(name: "artist_name", value: song.artist), URLQueryItem(name: "track_name", value: title),
+                                                                 URLQueryItem(name: "album_name", value: song.album), URLQueryItem(name: "duration", value: String(Int(song.duration.rounded(.toNearestOrEven))))])
+                    return status == 404 ? nil : try JSONDecoder().decode(LyricRecord.self, from: data)
+                }
+                if let record {
+                    sawPlain = sawPlain || !(record.plainLyrics ?? "").isEmpty
+                    if record.hasSynced || record.instrumental == true { best = record; how = title == song.title ? "get" : "get \"\(title)\""; break }
+                }
             }
         }
+
+        // 2) search like Pear does, then looser free-text searches
         var seen: [LyricRecord] = []
         if best == nil {
             var query = [URLQueryItem(name: "artist_name", value: song.artist), URLQueryItem(name: "track_name", value: song.title)]
             if !song.album.isEmpty { query.append(URLQueryItem(name: "album_name", value: song.album)) }
-            let records = try await attemptSearch(query); seen += records
-            best = Self.pick(records, song: song); how = "search"
+            let records = try await attempt([]) { try await search(query) }; seen += records
+            best = Self.pick(records, song: song); if best != nil { how = "search" }
         }
         if best == nil {
             let alt = song.alternativeTitle.isEmpty ? song.title : song.alternativeTitle
             let artist = Self.artistVariants(song.artist).first ?? ""
-            var attempted = Set<String>()
-            for query in [alt + " " + artist, Self.cleanTitle(song.title) + " " + artist, Self.cleanTitle(alt)] {
-                let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !query.isEmpty, attempted.insert(query).inserted else { continue }
-                let records = try await attemptSearch([URLQueryItem(name: "q", value: query)]); seen += records
-                if let match = Self.pick(records, song: song) { best = match; how = "q=" + query; break }
+            for text in [alt + " " + artist, Self.cleanTitle(song.title) + " " + artist, Self.cleanTitle(alt)].map(\.trimmed).uniqued() where !text.isEmpty {
+                let records = try await attempt([]) { try await search([URLQueryItem(name: "q", value: text)]) }; seen += records
+                if let match = Self.pick(records, song: song) { best = match; how = "q=" + text; break }
             }
         }
-        if best == nil { best = Self.pickByTitle(seen, song: song); how = "title match" }
+
+        // 3) artist written differently (e.g. "Kenshi Yonezu" vs "米津玄師"): same title and nearly the same length
+        if best == nil, let match = Self.pickByTitle(seen, song: song, tolerance: titleTolerance) { best = match; how = "title match (\(match.artistName ?? ""))" }
         if best == nil, let lastError { throw lastError }
+        try Task.checkCancellation()
+
         let result: LyricsLookup
-        if let best {
-            if best.instrumental == true { result = .instrumental; log("연주곡: \(song.artist) - \(song.title)") }
-            else {
-                let lines = parseLRC(best.syncedLyrics ?? "")
-                result = lines.isEmpty ? .notFound : .synced(lines, source: how)
-                log("가사 \(lines.count)줄, 경로 \(how): \(song.artist) - \(song.title) (\(Int(song.duration))s)")
-            }
-        } else {
+        if let best, best.instrumental == true { result = .instrumental }
+        else if let best, case let lines = parseLRC(best.syncedLyrics ?? ""), !lines.isEmpty { result = .synced(lines, source: "LRCLIB") }
+        else {
             sawPlain = sawPlain || seen.contains { !($0.plainLyrics ?? "").isEmpty }
             result = sawPlain ? .plainOnly : .notFound
-            log("\(sawPlain ? "일반 가사만 있음" : "가사 찾지 못함"): \(song.artist) - \(song.title)")
         }
-        try Task.checkCancellation()
-        cache[key] = result
+        switch result {
+        case .synced: log("INFO lyrics found via LRCLIB \(how): \(song.artist) - \(song.title) (\(Int(song.duration))s)")
+        case .instrumental: log("INFO lyrics instrumental: \(song.artist) - \(song.title)")
+        default: log("INFO lyrics not found\(sawPlain ? " (plain lyrics only)" : ""): \(song.artist) - \(song.title) (\(Int(song.duration))s)")
+        }
         return result
     }
     static func pick(_ records: [LyricRecord], song: Song) -> LyricRecord? {
@@ -152,25 +160,26 @@ struct LyricRecord: Decodable {
             candidates = candidates.filter { abs(($0.duration ?? 0) - song.duration) <= 15 }
                 .sorted { abs(($0.duration ?? 0) - song.duration) < abs(($1.duration ?? 0) - song.duration) }
         }
+        // prefer entries that actually have timestamps
         return candidates.first(where: \.hasSynced) ?? candidates.first { $0.instrumental == true }
     }
-    static func pickByTitle(_ records: [LyricRecord], song: Song) -> LyricRecord? {
+    /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces
+    /// and punctuation) and the length within `tolerance` seconds, which together are very unlikely to collide.
+    static func pickByTitle(_ records: [LyricRecord], song: Song, tolerance: Double = 3) -> LyricRecord? {
         guard song.duration > 0 else { return nil }
         var titles = Set([norm(song.title), norm(cleanTitle(song.title))])
         if !song.alternativeTitle.isEmpty { titles.insert(norm(song.alternativeTitle)); titles.insert(norm(cleanTitle(song.alternativeTitle))) }
         titles.remove("")
-        return records.filter { $0.hasSynced && titles.contains(norm($0.trackName ?? "")) && abs(($0.duration ?? 0) - song.duration) <= 3 }
+        return records.filter { $0.hasSynced && titles.contains(norm($0.trackName ?? "")) && abs(($0.duration ?? 0) - song.duration) <= tolerance }
             .min { abs(($0.duration ?? 0) - song.duration) < abs(($1.duration ?? 0) - song.duration) }
     }
-    static func norm(_ text: String) -> String {
-        String(String.UnicodeScalarView(text.precomposedStringWithCompatibilityMapping.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }))
-    }
+    static func norm(_ text: String) -> String { CoverLyrics.norm(text) }
     static func cleanTitle(_ text: String) -> String {
         text.replacingOccurrences(of: #"【[^】]*】"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"[\(\[][^\)\]]*(official|mv|m/v|video|audio|lyric|live|ver\.|version|feat|prod|cover|歌ってみた|踊ってみた|弾いてみた)[^\)\]]*[\)\]]"#, with: " ", options: [.regularExpression, .caseInsensitive])
             .replacingOccurrences(of: #"\s*/?\s*(covered by|cover by)\b.*$"#, with: "", options: [.regularExpression, .caseInsensitive])
             .replacingOccurrences(of: #"歌ってみた|踊ってみた|弾いてみた"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"[\s\u3000]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[\s　]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/-| "))
     }
     static func artistVariants(_ artist: String) -> [String] {
@@ -189,7 +198,7 @@ struct LyricRecord: Decodable {
         }
         return variants
     }
-    static func jaroWinkler(_ left: String, _ right: String) -> Double {
+    nonisolated static func jaroWinkler(_ left: String, _ right: String) -> Double {
         if left == right { return 1 }
         // Match the original C# algorithm's UTF-16 indexing.
         let a = Array(left.utf16), b = Array(right.utf16)

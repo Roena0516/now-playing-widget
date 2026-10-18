@@ -161,9 +161,13 @@ final class OverlayPanel: NSPanel {
         refresh()
         if !wasVisible { panel.alphaValue = 0; panel.orderFrontRegardless() }
         NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; panel.animator().alphaValue = 1 }
+        // While "always show" keeps the song card up, the message only borrows its place for a few seconds
+        // and the song card comes back; otherwise the message fades out like a normal card.
+        let restore = client.settings.alwaysShow && !client.song.title.isEmpty
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(max(3, client.settings.showSeconds)))
-            guard !Task.isCancelled else { return }; hide()
+            try? await Task.sleep(for: .seconds(restore ? 3.5 : max(3, client.settings.showSeconds)))
+            guard !Task.isCancelled else { return }
+            if restore { show() } else { hide() }
         }
     }
     func hide() {

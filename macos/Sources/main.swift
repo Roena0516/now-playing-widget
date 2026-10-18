@@ -58,6 +58,7 @@ import CoreText
         add(menu, "곡 정보 계속 표시    ⌃⌥P", #selector(togglePinned), state: client.settings.alwaysShow)
         add(menu, "가사 표시    ⌃⌥L", #selector(toggleLyrics), state: client.settings.showLyrics)
         add(menu, "가사 다시 찾기", #selector(findLyrics))
+        add(menu, "YouTube Music 가사 먼저 찾기", #selector(toggleYtmLyrics), state: client.settings.ytmLyrics)
         add(menu, "가사 진단 기록 열기", #selector(openLyricsLog))
         let timing = NSMenu(); for delta in [-1000, -500, -100, 0, 100, 500, 1000] {
             let title = delta == 0 ? "보정 초기화" : (delta > 0 ? "\(delta)ms 빠르게" : "\(-delta)ms 늦게")
@@ -84,11 +85,15 @@ import CoreText
         item.menu = menu
         item.button?.toolTip = client.status
     }
-    func save() { client.settings.save(); overlay.show(); updateMenu() }
+    func save() { client.settings.save(); client.applyLyricsSources(); overlay.show(); updateMenu() }
     @objc func show() { overlay.show() }
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
     @objc func toggleLyrics() { client.settings.showLyrics.toggle(); save() }
     @objc func findLyrics() { client.findLyrics(force: true) }
+    @objc func toggleYtmLyrics() {
+        client.settings.ytmLyrics.toggle(); client.settings.save(); client.applyLyricsSources(); client.lyrics.ytm.resetPause()
+        overlay.showInfo(client.settings.ytmLyrics ? "YouTube Music 가사를 먼저 찾아요" : "LRCLIB에서만 가사를 찾아요"); updateMenu()
+    }
     @objc func openLyricsLog() { LyricsLog.write("진단 기록 열기"); NSWorkspace.shared.open(LyricsLog.file) }
     @objc func position(_ sender: NSMenuItem) { client.settings.position = sender.representedObject as! String; save() }
     @objc func size(_ sender: NSMenuItem) { client.settings.scale = sender.representedObject as! Double; save() }

@@ -24,6 +24,10 @@ import CoreGraphics
     precondition(socketRequest.url?.query == nil)
     testPlayerSetup()
     testOverlayPlacement()
+    // a config.json written before the lyric source settings existed keeps the user's values
+    let old = try! JSONDecoder().decode(Settings.self, from: Data(#"{"host":"127.0.0.1","port":26538,"scale":1.25,"position":"TopRight","showLyrics":false}"#.utf8))
+    precondition(old.scale == 1.25 && old.position == "TopRight" && !old.showLyrics && old.ytmLyrics && old.ytmLyricsProxy == YTMusicProvider.defaultProxy && old.lyricsServer == "https://lrclib.net")
+    precondition(Song(["mediaType": "USER_GENERATED_CONTENT", "title": "x"]).mediaType == "USER_GENERATED_CONTENT")
     print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, Pear song/state/seek messages")
 }
 
@@ -51,7 +55,9 @@ import CoreGraphics
         let (data, _) = try await URLSession.shared.data(from: client.baseURL.appendingPathComponent("test-controls"))
         let controls = try JSONSerialization.jsonObject(with: data) as! [String]
         precondition(Set(controls) == Set(["next", "previous", "toggle-play"]))
-        print("PASS: expired-token reconnect, POST auth, WebSocket song/state/seek, bearer controls, token permissions")
+        let next = try await client.nextSong()
+        precondition(next?.title == "다음 곡" && next?.artist == "다음 가수" && next?.videoId == "next-track01" && next?.duration == 185 && next?.mediaType == "UNKNOWN", "queue/next")
+        print("PASS: expired-token reconnect, POST auth, WebSocket song/state/seek, bearer controls, token permissions, next song in the queue")
         client.stop(); try? FileManager.default.removeItem(at: directory)
         exit(0)
     } catch { fputs("Integration failed: \(error)\n", stderr); exit(1) }
