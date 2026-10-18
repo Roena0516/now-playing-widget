@@ -8,3 +8,7 @@ obj/
 /PearNowPlaying.exe
 /PretendardJP-OFL.txt
 _capture/
+
+# Native macOS build products
+macos/build/
+.DS_Store
