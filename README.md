@@ -33,7 +33,7 @@ Pear Now Playing은 [Pear Desktop](https://github.com/pear-devs/pear-desktop)(Yo
 
 ## macOS 버전
 
-macOS 13 이상에서는 Swift/AppKit으로 만든 macOS 버전을 사용할 수 있습니다. [Releases](../../releases)에서 `PearNowPlaying-macOS.zip`을 내려받아 압축을 풀고 `Pear Now Playing.app`을 실행합니다.
+macOS 13 이상에서는 Swift/AppKit으로 만든 macOS 버전을 사용할 수 있습니다. [Releases](../../releases)에서 `PearNowPlaying-macOS.dmg`를 내려받아 열고, 창에 보이는 `Pear Now Playing.app`을 `Applications` 폴더로 끌어다 놓은 뒤 실행합니다.
 macOS 버전도 곡 카드, 싱크 가사, 메뉴 막대 제어, 전역 단축키를 지원하며, 가사를 찾는 순서는 Windows 버전과 같습니다.
 이 앱은 Apple의 공증을 받지 않았기 때문에 처음 실행할 때 열리지 않을 수 있습니다. 그러면 **시스템 설정 → 개인정보 보호 및 보안**에서 **그래도 열기**를 누릅니다. 빌드 방법과 설정은 [macOS 안내](macos/README.md)에 정리되어 있습니다.
 

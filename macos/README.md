@@ -11,7 +11,7 @@
 open 'macos/build/Pear Now Playing.app'
 ```
 
-기본 빌드는 현재 Mac의 아키텍처(Apple Silicon 또는 Intel)에 맞춰 만들어집니다. `./macos/build.sh --universal`로 빌드하면 두 아키텍처를 모두 담은 앱이 만들어지며, 릴리스에는 이 방식을 사용합니다. 빌드 결과는 `macos/build/Pear Now Playing.app`에 생성되고, 원하는 Applications 폴더로 복사해서 사용할 수 있습니다. 앱에는 개발용 ad-hoc 서명만 되어 있으며, Apple의 공증은 받지 않았습니다.
+기본 빌드는 현재 Mac의 아키텍처(Apple Silicon 또는 Intel)에 맞춰 만들어집니다. `./macos/build.sh --universal`로 빌드하면 두 아키텍처를 모두 담은 앱이 만들어집니다. `--dmg`를 함께 붙이면 앱과 `Applications` 폴더 바로 가기가 들어 있는 설치용 디스크 이미지(`macos/build/PearNowPlaying-macOS.dmg`)도 만들어집니다. 릴리스에는 `./macos/build.sh --universal --dmg`로 만든 DMG 파일을 올립니다. 빌드 결과는 `macos/build/Pear Now Playing.app`에 생성되고, 원하는 Applications 폴더로 복사해서 사용할 수 있습니다. 앱에는 개발용 ad-hoc 서명만 되어 있으며, Apple의 공증은 받지 않았습니다.
 
 1. Pear Desktop 또는 호환되는 YouTube Music 데스크톱 앱을 실행합니다.
 2. **플러그인 → API 서버 [베타]**를 켭니다. 호스트는 `127.0.0.1`, 포트는 `26538`으로 설정하는 것을 권장합니다.
@@ -128,7 +128,7 @@ python3 macos/Tests/mock_pear.py
 
 `--lyrics-tests`는 커버곡의 제목과 설명란을 해석한 결과가 Windows 버전(C#)과 같은지 확인하고, YouTube Music, 공식 음원, 원곡, LRCLIB로 이어지는 검색 순서와 캐시 규칙을 모의 응답으로 검증합니다. `--self-test`는 LRC 파서의 다중 타임스탬프, 오프셋, 빈 줄, 현재 가사 위치를 계산하는 기능과 플레이어 상태 및 탐색 처리를 검증합니다. `mock_pear.py`는 Python 표준 라이브러리로 만든 모의 Pear 서버를 띄워서, 만료된 토큰으로 WebSocket 연결이 거절되는 상황, 재인증, 첫 곡·위치·재생 이벤트, Bearer 토큰을 사용하는 재생 제어, 다음 곡 조회, 토큰 파일 권한을 검증합니다. 이 테스트들은 외부 서비스나 로그인된 음악 계정을 사용하지 않습니다. 다만 모의 서버 테스트를 실행하려면 로컬 TCP 포트를 열 수 있는 권한이 필요합니다.
 
-GitHub Actions의 `macOS` 워크플로는 앱을 빌드하고 위의 테스트를 실행한 뒤, 앱 ZIP 파일을 아티팩트로 만듭니다. GUI 동작, 실제 Pear 권한 확인 창, 전체 화면 위의 배치는 Mac에서 직접 확인해야 합니다.
+GitHub Actions의 `macOS` 워크플로는 universal 앱과 DMG 파일을 빌드하고 위의 테스트를 실행한 뒤, DMG 파일을 아티팩트로 올립니다. GUI 동작, 실제 Pear 권한 확인 창, 전체 화면 위의 배치는 Mac에서 직접 확인해야 합니다.
 
 가사 카드를 표시하려면 YouTube Music의 `cueRange`나 LRCLIB의 `syncedLyrics`처럼 줄마다 시간 정보가 있는 가사가 필요합니다. YouTube Music에서 가사를 받는 경로는 공식 API가 아니므로, 지역, 응답 형식, 중계 서버의 사정에 따라 막힐 수 있습니다. 그러면 LRCLIB로 넘어가서 가사를 찾습니다. `plainLyrics`처럼 시간 정보가 없는 가사만 있으면 Windows 버전과 마찬가지로 가사 카드를 숨기고, 메뉴에 **일반 가사만 있음 · 싱크 가사 없음**을 표시합니다. 네트워크 오류와 가사가 없는 경우는 서로 다른 상태로 표시합니다. **가사 진단 기록 열기**를 선택하면 곡마다 어떤 단계에서 가사를 찾았는지, 또는 찾지 못했는지 확인할 수 있습니다. 이 기록은 설정 폴더의 `lyrics.log`에 저장되며, 가사 전문과 연결 토큰은 기록하지 않습니다.
 

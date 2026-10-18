@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build native app
-        run: ./macos/build.sh
+        run: ./macos/build.sh --universal --dmg
       - name: Test LRC and player state
         run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --self-test'
       - name: Test original lyric search and matching
@@ -21,9 +21,7 @@ jobs:
         run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --ytmusic-tests'
       - name: Test Pear authentication, WebSocket and controls
         run: python3 macos/Tests/mock_pear.py
-      - name: Package app
-        run: ditto -c -k --sequesterRsrc --keepParent 'macos/build/Pear Now Playing.app' macos/build/PearNowPlaying-macOS.zip
       - uses: actions/upload-artifact@v4
         with:
           name: PearNowPlaying-macOS
-          path: macos/build/PearNowPlaying-macOS.zip
+          path: macos/build/PearNowPlaying-macOS.dmg

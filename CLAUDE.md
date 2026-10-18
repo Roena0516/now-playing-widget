@@ -11,7 +11,7 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 
 - 사용자(로에나)는 대화할 때 반말 한국어(임/함체)로 짧고 직접적인 답을 받기를 선호합니다.
 - 커밋, 푸시, 릴리스 업로드는 사용자가 직접 합니다. Windows 릴리스 zip에는 `PearNowPlaying.exe`, `README.md`, `PretendardJP-OFL.txt`를 `PearNowPlaying/` 폴더째 넣습니다.
-- macOS 릴리스는 `./macos/build.sh --universal`(arm64+x86_64)로 빌드한 뒤 `ditto -c -k --norsrc --keepParent 'macos/build/Pear Now Playing.app' PearNowPlaying-macOS.zip`으로 압축합니다. 앱은 ad-hoc 서명만 하고 공증은 받지 않습니다.
+- macOS 릴리스는 `./macos/build.sh --universal --dmg`로 만든 `macos/build/PearNowPlaying-macOS.dmg`를 올립니다(arm64+x86_64, 앱과 `Applications` 바로 가기가 들어 있습니다). zip은 올리지 않습니다. 앱은 ad-hoc 서명만 하고 공증은 받지 않습니다.
 - 커밋 메시지는 한국어로 짧게 씁니다(예: "트레이 가사 다시 찾기에 결과 표시").
 - 릴리스 본문은 합니다체로 씁니다.
 - 루트에 있는 `PearNowPlaying.exe`, `_capture/`, `*.zip`은 커밋하지 않습니다(`.gitignore`).

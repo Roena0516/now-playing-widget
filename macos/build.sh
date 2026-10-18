@@ -4,8 +4,16 @@ cd "$(dirname "$0")"
 APP="$PWD/build/Pear Now Playing.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/module-cache
 # --universal: Apple Silicon + Intel in one binary (for releases); otherwise this Mac's architecture only
+# --dmg: also make build/PearNowPlaying-macOS.dmg (the app next to an Applications link, for drag-and-drop install)
 ARCHS=$(uname -m)
-if [ "${1:-}" = "--universal" ]; then ARCHS="arm64 x86_64"; fi
+DMG=0
+for ARG in "$@"; do
+  case "$ARG" in
+    --universal) ARCHS="arm64 x86_64" ;;
+    --dmg) DMG=1 ;;
+    *) echo "unknown option: $ARG" >&2; exit 1 ;;
+  esac
+done
 SLICES=()
 for ARCH in $ARCHS; do
   xcrun swiftc -swift-version 5 -O -target "$ARCH-apple-macosx13.0" -module-cache-path "$PWD/build/module-cache" Sources/*.swift -o "build/PearNowPlaying-$ARCH" -framework AppKit -framework CoreText -framework QuartzCore -framework Carbon
@@ -32,3 +40,13 @@ PLIST
 cp ../assets/fonts/PretendardJP-Regular.ttf ../assets/fonts/PretendardJP-Medium.ttf ../assets/fonts/PretendardJP-OFL.txt "$APP/Contents/Resources/"
 codesign --force --sign - "$APP"
 printf 'Built: %s\n' "$APP"
+if [ "$DMG" = 1 ]; then
+  STAGE="$PWD/build/dmg"
+  rm -rf "$STAGE" build/PearNowPlaying-macOS.dmg
+  mkdir -p "$STAGE"
+  ditto --norsrc "$APP" "$STAGE/Pear Now Playing.app"
+  ln -s /Applications "$STAGE/Applications"
+  hdiutil create -quiet -volname "Pear Now Playing" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov build/PearNowPlaying-macOS.dmg
+  rm -rf "$STAGE"
+  printf 'Built: %s\n' "$PWD/build/PearNowPlaying-macOS.dmg"
+fi
