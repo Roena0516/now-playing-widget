@@ -119,7 +119,11 @@ namespace PearNowPlaying
         public YtmLyrics Ytm;
         public bool UseYtm;
 
-        public async Task<LyricsResult> Find(SongInfo song, CancellationToken ct)
+        public Task<LyricsResult> Find(SongInfo song, CancellationToken ct) { return Find(song, ct, true); }
+
+        /// <param name="cacheMisses">false for a look-ahead: a "not found" from the queue's sparser song info
+        /// shouldn't stop the song from being looked up again with Pear's full info when it starts</param>
+        async Task<LyricsResult> Find(SongInfo song, CancellationToken ct, bool cacheMisses)
         {
             var key = song.VideoId + "|" + song.Title;
             lock (gate)
@@ -193,7 +197,7 @@ namespace PearNowPlaying
             // 3) LRCLIB
             var result = await FindLrclib(song, ct);
             // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
-            if (!result.Failed && (!ytmError || result.HasSynced || result.Instrumental))
+            if (!result.Failed && (result.HasSynced || result.Instrumental || (cacheMisses && !ytmError)))
                 lock (gate) cache[key] = result;
             return result;
         }
@@ -412,7 +416,7 @@ namespace PearNowPlaying
                 if (cache.ContainsKey(next.VideoId + "|" + next.Title) || prefetched.ContainsKey(next.VideoId)) return;
             }
             Log.Info("fetching lyrics ahead for the next song: " + next.Artist + " - " + next.Title);
-            var r = await Find(next, ct);
+            var r = await Find(next, ct, false);
             if (r.HasSynced || r.Instrumental)
                 lock (gate)
                 {
