@@ -21,8 +21,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>io.github.pdh0128.pear-now-playing.macos</string>
 <key>CFBundleExecutable</key><string>PearNowPlaying</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleVersion</key><string>1.5.0</string>
-<key>CFBundleShortVersionString</key><string>1.5.0</string>
+<key>CFBundleVersion</key><string>1.5.1</string>
+<key>CFBundleShortVersionString</key><string>1.5.1</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

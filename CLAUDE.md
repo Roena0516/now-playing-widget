@@ -4,7 +4,7 @@ Pear Now Playing: Pear Desktop(YouTube Music 데스크톱 클라이언트)에서
 
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 해요체)
-- 버전: `src/Program.cs`의 AssemblyVersion (현재 1.5.0.0), 맥은 `macos/Sources/Models.swift`의 `appVersion`과 `macos/build.sh`의 Info.plist
+- 버전: `src/Program.cs`의 AssemblyVersion (현재 1.5.1.0), 맥은 `macos/Sources/Models.swift`의 `appVersion`과 `macos/build.sh`의 Info.plist
 - macOS 버전: `macos/` (Swift/AppKit, pdh0128의 PR #1에서 시작). 가사 찾는 순서는 Windows와 똑같이 맞춰 둠. 가사 쪽을 고치면 양쪽을 같이 고침 (`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`)
 
 ## 작업 방식

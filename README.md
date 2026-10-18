@@ -35,7 +35,7 @@
 
 macOS 13 이상에서는 Swift/AppKit으로 만든 macOS 버전을 쓰면 돼요. [Releases](../../releases)에서 `PearNowPlaying-macOS.zip`을 받아 압축을 풀고 `Pear Now Playing.app`을 실행해요.
 곡 카드, 싱크 가사(가사 찾는 순서는 Windows 버전과 같아요), 메뉴 막대 제어, 전역 단축키를 지원해요.
-Apple 공증을 받지 않은 앱이라 처음에는 앱을 우클릭 → **열기**로 실행해야 해요. 빌드 방법과 설정은 [macOS 안내](macos/README.md)에 있어요.
+Apple 공증을 받지 않은 앱이라 처음 실행할 때 열리지 않으면 **시스템 설정 → 개인정보 보호 및 보안**에서 **그래도 열기**를 눌러요. 빌드 방법과 설정은 [macOS 안내](macos/README.md)에 있어요.
 
 ## 설치
 
