@@ -1,6 +1,6 @@
 # Pear Now Playing
 
-Pear Now Playing은 [Pear Desktop](https://github.com/pear-devs/pear-desktop)(YouTube Music 데스크톱 앱)에서 재생 중인 곡을 화면 위에 표시하는 Windows 오버레이 위젯입니다.
+Pear Now Playing은 [Pear Desktop](https://github.com/pear-devs/pear-desktop)(YouTube Music 데스크톱 앱)에서 재생 중인 곡을 화면 위에 표시하는 오버레이 위젯입니다. Windows 10/11과 macOS 13 이상에서 사용할 수 있습니다.
 곡이 바뀌면 화면 구석에 앨범 아트, 제목, 아티스트, 진행 바가 몇 초 동안 나타납니다.
 싱크 가사가 있는 곡이라면 YouTube Music 모바일 앱처럼 부드럽게 스크롤되는 가사 카드도 함께 표시합니다.
 
@@ -11,9 +11,8 @@ Pear Now Playing은 [Pear Desktop](https://github.com/pear-devs/pear-desktop)(Yo
 - 전체 화면 게임, 영상, 작업 중인 창 등 어떤 화면 위에도 표시됩니다. 특히 테두리 없는 창 모드로 실행한 게임에서 사용하기에 적합합니다.
 - 클릭과 키 입력은 위젯 아래에 있는 창으로 그대로 전달됩니다. 위젯이 포커스를 가져가지 않습니다.
 - 전역 단축키로 이전 곡, 다음 곡, 재생/일시정지를 조작할 수 있습니다.
-- Windows 10/11에 기본으로 설치되어 있는 .NET Framework 4.8에서 실행되므로 따로 설치할 프로그램이 없습니다.
-
-디자인은 [carol-web](https://github.com/team-carol/carol-web)의 디자인 시스템(색 토큰, Pretendard 계열 폰트, 16px 둥근 카드, 1px 테두리, 3px 강조선)을 따릅니다.
+- 새 버전이 나오면 앱이 알려주고, 메뉴에서 누르면 직접 받아서 설치합니다.
+- Windows 버전은 Windows 10/11에 기본으로 설치되어 있는 .NET Framework 4.8에서, macOS 버전은 별도의 런타임 없이 실행되므로 따로 설치할 프로그램이 없습니다.
 
 ## 기능
 
@@ -24,6 +23,8 @@ Pear Now Playing은 [Pear Desktop](https://github.com/pear-devs/pear-desktop)(Yo
 | **긴 제목 스크롤** | 제목이 카드보다 길면 전광판처럼 옆으로 흘러가며 표시됩니다. |
 | **일본어 폰트** | 한국어, 영어, 일본어를 Pretendard JP 폰트 하나로 표시합니다. |
 | **단축키** | 다시 보기, 재생/일시정지, 다음/이전 곡, 계속 표시, 가사 켜기/끄기를 지원합니다. |
+| **여러 모니터** | 여러 모니터에 위젯을 동시에 띄우고, 모니터마다 위치를 다르게 정할 수 있습니다. |
+| **자동 업데이트** | 새 버전이 있는지 확인해서 알려주고, 메뉴에서 누르면 받아서 설치한 뒤 다시 실행합니다. |
 
 <p align="center">
   <img src="docs/title-marquee.gif" alt="긴 제목 스크롤 미리보기" width="460">
@@ -47,7 +48,7 @@ macOS 버전도 곡 카드, 싱크 가사, 메뉴 막대 제어, 전역 단축�
 3. **포트**는 기본값인 `26538`을 그대로 두면 됩니다. 포트를 바꿨다면 위젯 설정 파일의 `port`도 같은 값으로 바꿉니다.
 4. **인증 정책**은 기본값(첫 번째 요청 시 인증)을 그대로 두면 됩니다.
 
-### 2. 실행
+### 2. 실행 (Windows)
 
 1. [Releases](../../releases)에서 Windows용 zip 파일(`PearNowPlaying-Windows`로 시작하는 `.zip` 파일)을 내려받아 압축을 풀고 `PearNowPlaying.exe`를 실행합니다.
    실행하면 작업 표시줄 오른쪽 트레이에 음표 아이콘이 나타납니다.
@@ -151,6 +152,7 @@ YouTube Music 가사를 먼저 찾는 동작은 메뉴에 없으며 항상 켜�
 - 앱이 직접 받은 파일이므로 "Windows의 PC 보호" 창은 다시 나타나지 않습니다.
 - 설치에 실패하면(예: 쓰기 권한이 없는 폴더에 둔 경우) 원래 exe를 그대로 두고 릴리스 페이지를 엽니다. 그때는 직접 받아서 바꿔 주시기 바랍니다.
 - 자동 확인을 끄려면 설정 파일의 `checkUpdates`를 `false`로 바꿉니다.
+- macOS 버전도 같은 방식으로 동작합니다. 받은 DMG를 화면에 띄우지 않고 열어서 앱의 서명과 버전을 확인한 뒤 앱을 바꾸고 다시 실행하며, 앱을 바꿀 권한이 없으면 받은 DMG를 열어 직접 설치하게 합니다. 자세한 내용은 [macOS 안내](macos/README.md)의 "업데이트"를 참고합니다.
 
 ## 설정 파일
 
@@ -224,7 +226,7 @@ YouTube Music 가사를 먼저 찾는 동작은 메뉴에 없으며 항상 켜�
 | `src/Lyrics.cs` | 가사를 찾는 순서, LRCLIB 검색(Pear와 같은 대조 방식), LRC 파서 |
 | `src/YtmLyrics.cs` | YouTube Music 가사(Pear의 YTMusic 가사 제공자와 같은 방식), 공식 음원 찾기, 영상 설명란 읽기 |
 | `src/CoverLyrics.cs` | 커버곡 설명란에서 원곡 링크 고르기, 편곡·리믹스 걸러내기 |
-| `src/Theme.cs` | carol-web 색 토큰, Pretendard JP 로딩과 글리프 커버리지 확인 |
+| `src/Theme.cs` | 색 토큰, Pretendard JP 로딩과 글리프 커버리지 확인 |
 | `src/TrayApp.cs`, `src/Hotkeys.cs`, `src/Config.cs` | 트레이 메뉴, 전역 단축키, 설정 |
 
 - **Windows**: [.NET SDK](https://dotnet.microsoft.com/download)를 설치한 뒤 `dotnet build -c Release`를 실행합니다. Visual Studio에서 `PearNowPlaying.csproj`를 열어 빌드할 수도 있습니다.

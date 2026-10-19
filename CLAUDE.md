@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에서 재생 중인 곡을 화면 위에 표시하는 오버레이 위젯입니다. 곡 카드와 싱크 가사를 보여줍니다. 원래는 Euro Truck Simulator 2용 "ETS2 Now Playing"으로 시작했지만, 게임과 상관없이 사용할 수 있어서 이름에서 ETS를 뺐습니다.
+Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에서 재생 중인 곡을 화면 위에 표시하는 오버레이 위젯입니다(Windows와 macOS). 곡 카드와 싱크 가사를 보여줍니다. 원래는 Euro Truck Simulator 2용 "ETS2 Now Playing"으로 시작했지만, 게임과 상관없이 사용할 수 있어서 이름에서 ETS를 뺐습니다.
 
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 합니다체)
