@@ -27,8 +27,11 @@ namespace PearNowPlaying
         public bool Failed;
         /// <summary>Nothing found, but a lyrics source couldn't be asked (Kugou / NetEase failing): not cached as "none".</summary>
         public bool Unsure;
-        /// <summary>Found on Kugou / NetEase only because LRCLIB failed (busy): kept for this run but not saved to disk,
-        /// so the next run asks LRCLIB again (it may have the song).</summary>
+        /// <summary>The failure was LRCLIB's rate limit (429): Kugou / NetEase may stand in. Other failures (503 …)
+        /// just retry LRCLIB.</summary>
+        public bool RateLimited;
+        /// <summary>Found on Kugou / NetEase only because LRCLIB rate-limited us (429): kept for this run but not saved
+        /// to disk, so the next run asks LRCLIB again (it may have the song).</summary>
         public bool StandIn;
         public string Source = "";
         public bool HasSynced { get { return Lines != null && Lines.Count > 0; } }
@@ -102,7 +105,8 @@ namespace PearNowPlaying
     /// </summary>
     internal sealed class LrclibBusyException : HttpRequestException
     {
-        public LrclibBusyException(string message) : base(message) { }
+        public readonly int Status;
+        public LrclibBusyException(string message, int status) : base(message) { Status = status; }
     }
 
     internal sealed class LyricsProvider : IDisposable
@@ -163,11 +167,19 @@ namespace PearNowPlaying
 
         async Task<LyricsResult> Find(SongInfo song, CancellationToken ct, bool cacheMisses)
         {
-            var key = song.VideoId + "|" + song.Title;
             var known = Known(song);
             if (known != null) return known;
+            return await Lookup(song, ct, cacheMisses);
+        }
 
-            Log.Info("looking up lyrics: " + song.Artist + " - " + song.Title + " [" + (string.IsNullOrEmpty(song.MediaType) ? "type?" : song.MediaType)
+        /// <summary>Set (for the async flow under Recheck only) while LRCLIB is asked again: no Kugou / NetEase, no YouTube Music lyrics.</summary>
+        static readonly AsyncLocal<bool> lrclibOnly = new AsyncLocal<bool>();
+
+        /// <summary>Find past the caches: asks the lyrics servers.</summary>
+        async Task<LyricsResult> Lookup(SongInfo song, CancellationToken ct, bool cacheMisses)
+        {
+            var key = song.VideoId + "|" + song.Title;
+            Log.Info((lrclibOnly.Value ? "asking LRCLIB again: " : "") + "looking up lyrics: " + song.Artist + " - " + song.Title + " [" + (string.IsNullOrEmpty(song.MediaType) ? "type?" : song.MediaType)
                      + ", " + song.VideoId + ", " + (int)song.Duration + "s]");
 
             // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
@@ -179,7 +191,7 @@ namespace PearNowPlaying
 
             // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
             bool ytmError = false;
-            if (UseYtm && Ytm != null && !string.IsNullOrEmpty(song.VideoId))
+            if (UseYtm && Ytm != null && !string.IsNullOrEmpty(song.VideoId) && !lrclibOnly.Value)
             {
                 if (Ytm.Paused) { ytmError = true; Log.Info("YouTube Music skipped (relay paused after repeated failures) -> LRCLIB"); }
                 else
@@ -388,10 +400,13 @@ namespace PearNowPlaying
                                             double artistTolerance = 15, int titleMatchCopies = 1)
         {
             var l = await FindLrclib(song, ct, titleMatchTolerance, titleOnly, artistTolerance, titleMatchCopies);
-            if (l.HasSynced || l.Instrumental || More == null || !UseMore) return l;
+            if (l.HasSynced || l.Instrumental || More == null || !UseMore || lrclibOnly.Value) return l;
+            // Kugou / NetEase only when LRCLIB has nothing, or rate-limits us (429); when it is busy (503 …) it is
+            // asked again instead, as soon as its Retry-After allows (user's choice: LRCLIB first)
+            if (l.Failed && !l.RateLimited) return l;
             var m = await More.Find(song, ct, titleOnly && titleMatchCopies <= 1 && titleMatchTolerance <= 3 ? titleMatchTolerance : -1, artistTolerance);
             if (m.HasSynced) { m.StandIn = l.Failed; return m; }
-            if (l.Failed) return l;   // LRCLIB busy: retried later
+            if (l.Failed) return l;   // LRCLIB rate-limited: retried later
             return m.Failed ? new LyricsResult { Lines = new List<LyricLine>(), Unsure = true } : l;
         }
 
@@ -486,7 +501,8 @@ namespace PearNowPlaying
                 // timeouts land here too (HttpClient reports them as TaskCanceledException)
                 Log.Write("WARN lyrics lookup failed for " + song.Artist + " - " + song.Title + ": "
                           + (ex is OperationCanceledException ? "timeout" : ex.GetType().Name + ": " + ex.Message));
-                return new LyricsResult { Lines = new List<LyricLine>(), Failed = true };   // don't cache
+                var busy = ex as LrclibBusyException;
+                return new LyricsResult { Lines = new List<LyricLine>(), Failed = true, RateLimited = busy != null && busy.Status == 429 };   // don't cache
             }
             Log.Info("lyrics " + (result.HasSynced ? "found via LRCLIB " + how : result.Instrumental ? "instrumental" : "not found")
                      + ": " + song.Artist + " - " + song.Title + " (" + (int)song.Duration + "s)");
@@ -562,6 +578,59 @@ namespace PearNowPlaying
             }
         }
 
+        /// <summary>When LRCLIB was last asked about a song whose lyrics came from Kugou / NetEase (by video ID, this run).</summary>
+        readonly Dictionary<string, DateTime> lrclibChecked = new Dictionary<string, DateTime>();
+
+        static string Id(SongInfo song) { return string.IsNullOrEmpty(song.VideoId) ? "|" + song.Title : song.VideoId; }
+
+        static bool FromMore(LyricsResult r)
+        {
+            return r != null && r.HasSynced && r.Source != null && (r.Source.StartsWith("Kugou") || r.Source.StartsWith("NetEase"));
+        }
+
+        /// <summary>
+        /// Whether LRCLIB should be asked again about lyrics found on Kugou / NetEase: a stand-in for a busy LRCLIB, or
+        /// a song LRCLIB didn't have (it may have been added since), once per play but not again within a day in the
+        /// same run (LRCLIB caches its answers for a day).
+        /// </summary>
+        public bool ShouldRecheck(SongInfo song, LyricsResult r)
+        {
+            if (!FromMore(r)) return false;
+            if (r.StandIn) return true;
+            lock (gate)
+            {
+                DateTime at;
+                return !lrclibChecked.TryGetValue(Id(song), out at) || DateTime.UtcNow - at > TimeSpan.FromHours(24);
+            }
+        }
+
+        /// <summary>
+        /// Ask LRCLIB (only) again about a song whose lyrics came from Kugou / NetEase. Returns LRCLIB's lyrics (kept, on
+        /// disk too), or the lyrics already known when LRCLIB has none (a stand-in then becomes final and is saved), or
+        /// null when LRCLIB couldn't answer (busy): the known lyrics stay, ask again later.
+        /// </summary>
+        public async Task<LyricsResult> Recheck(SongInfo song, CancellationToken ct)
+        {
+            var known = Known(song);
+            if (!FromMore(known)) return known;
+            lrclibOnly.Value = true;   // flows to the calls below only, not back to the caller
+            var r = await Lookup(song, ct, false);
+            if (r.Failed) return null;
+            lock (gate) lrclibChecked[Id(song)] = DateTime.UtcNow;
+            if (r.HasSynced || r.Instrumental)
+            {
+                Log.Info("LRCLIB has lyrics now (" + r.Source + "), replacing " + known.Source + ": " + song.Artist + " - " + song.Title);
+                return r;
+            }
+            if (known.StandIn)
+            {
+                known = new LyricsResult { Lines = known.Lines, Source = known.Source };
+                Keep(song.VideoId + "|" + song.Title, song, known);
+            }
+            Log.Info("LRCLIB still has no lyrics, keeping " + known.Source + ": " + song.Artist + " - " + song.Title);
+            return known;
+        }
+
         /// <summary>Drop the cached result for a song (in memory and on disk) so the next Find asks again.</summary>
         public void Forget(SongInfo song)
         {
@@ -574,34 +643,93 @@ namespace PearNowPlaying
 
         void Keep(string key, SongInfo song, LyricsResult r)
         {
-            lock (gate) cache[key] = r;
+            lock (gate)
+            {
+                cache[key] = r;
+                if (FromMore(r) && !r.StandIn) lrclibChecked[Id(song)] = DateTime.UtcNow;   // LRCLIB just said it has none
+            }
             if (Disk != null && LyricsDiskCache.Keeps(r)) Disk.Save(song, r);
         }
 
-        /// <summary>
-        /// GET with one quick retry when LRCLIB is busy (429/502/503/504). It is a free, volunteer-run
-        /// service whose search endpoint answers 503 fairly often under load; keep the request count low.
-        /// </summary>
         static bool IsBusy(HttpResponseMessage r)
         {
             int c = (int)r.StatusCode;
             return c == 429 || c == 502 || c == 503 || c == 504;
         }
 
+        // LRCLIB's rules (https://lrclib.net/docs, read 2026-10-20): an identified client gets ~90 requests/min per
+        // IP; send requests one after another with 200-500 ms between them; on 429 or 503 wait at least Retry-After
+        // (503 usually says 1s) plus up to 30% random jitter, or risk a temporary ban.
+        const int Spacing = 300, PerMinute = 60, Attempts = 4, MaxRetryAfter = 30;
+        readonly object pace = new object();
+        readonly Queue<DateTime> recent = new Queue<DateTime>();   // request starts in the last minute
+        readonly Random random = new Random();
+        DateTime nextStart = DateTime.MinValue;   // pacing, and Retry-After for every request (not only the one told)
+        DateTime lastBusy = DateTime.MinValue;
+
+        /// <summary>
+        /// How long to wait before trying a failed lookup again: a second right after LRCLIB said it was busy (the
+        /// next request also waits for its Retry-After, so LRCLIB is asked again about as soon as it allows),
+        /// otherwise (no connection, timeouts) 15 seconds.
+        /// </summary>
+        public TimeSpan RetryWait
+        {
+            get { lock (pace) return TimeSpan.FromSeconds(DateTime.UtcNow - lastBusy < TimeSpan.FromSeconds(10) ? 1 : 15); }
+        }
+
+        /// <summary>Wait for this request's turn: after the previous one plus the spacing, any Retry-After pause, and
+        /// within PerMinute requests a minute (all lookups share it: the current song and the next one).</summary>
+        async Task WaitTurn(CancellationToken ct)
+        {
+            DateTime start;
+            lock (pace)
+            {
+                var now = DateTime.UtcNow;
+                while (recent.Count > 0 && now - recent.Peek() >= TimeSpan.FromMinutes(1)) recent.Dequeue();
+                start = nextStart > now ? nextStart : now;
+                if (recent.Count >= PerMinute)
+                {
+                    var free = recent.ElementAt(recent.Count - PerMinute).AddMinutes(1);
+                    if (free > start) start = free;
+                }
+                recent.Enqueue(start);
+                nextStart = start.AddMilliseconds(Spacing);
+            }
+            var wait = start - DateTime.UtcNow;
+            if (wait > TimeSpan.Zero) await Task.Delay(wait, ct);
+        }
+
+        /// <summary>
+        /// GET, retried while LRCLIB is busy (429/502/503/504) after its Retry-After (1s if none) plus jitter, up to
+        /// Attempts times; then the busy response is returned and the lookup goes on to Kugou / NetEase, and the
+        /// whole lookup is tried again later. A Retry-After over MaxRetryAfter seconds isn't waited for here, but
+        /// still holds back every request until it has passed.
+        /// </summary>
         async Task<HttpResponseMessage> Send(string url, CancellationToken ct)
         {
-            var waits = new[] { 2000 };   // one quick retry; the caller retries the whole lookup later
-            for (int i = 0; ; i++)
+            for (int i = 1; ; i++)
             {
+                await WaitTurn(ct);
                 var resp = await http.GetAsync(url, ct);
-                int code = (int)resp.StatusCode;
-                bool busy = code == 429 || code == 502 || code == 503 || code == 504;
-                if (!busy || i >= waits.Length) return resp;
-                int wait = waits[i];
+                if (!IsBusy(resp)) return resp;
+                double seconds = 1;
                 if (resp.Headers.RetryAfter != null && resp.Headers.RetryAfter.Delta.HasValue)
-                    wait = (int)Math.Min(10000, Math.Max(wait, resp.Headers.RetryAfter.Delta.Value.TotalMilliseconds));
+                    seconds = Math.Max(1, resp.Headers.RetryAfter.Delta.Value.TotalSeconds);
+                else if (resp.Headers.RetryAfter != null && resp.Headers.RetryAfter.Date.HasValue)
+                    seconds = Math.Max(1, (resp.Headers.RetryAfter.Date.Value - DateTimeOffset.UtcNow).TotalSeconds);
+                lock (pace)
+                {
+                    seconds *= 1 + random.NextDouble() * 0.3;
+                    var until = DateTime.UtcNow.AddSeconds(seconds);
+                    if (until > nextStart) nextStart = until;
+                    lastBusy = DateTime.UtcNow;
+                }
+                // a rate limit (429) ends the lookup at once: Kugou / NetEase stand in while LRCLIB is waited out
+                bool last = i >= Attempts || seconds > MaxRetryAfter || (int)resp.StatusCode == 429;
+                Log.Info("LRCLIB busy (" + (int)resp.StatusCode + "), " + (last ? "giving up for now" : "asking again") + " after "
+                         + seconds.ToString("0.0", CultureInfo.InvariantCulture) + "s");
+                if (last) return resp;
                 resp.Dispose();
-                await Task.Delay(wait, ct);
             }
         }
 
@@ -615,7 +743,7 @@ namespace PearNowPlaying
             using (var resp = await Send(url, ct))
             {
                 if ((int)resp.StatusCode == 404) return null;
-                if (IsBusy(resp)) throw new LrclibBusyException("LRCLIB get " + (int)resp.StatusCode);
+                if (IsBusy(resp)) throw new LrclibBusyException("LRCLIB get " + (int)resp.StatusCode, (int)resp.StatusCode);
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB get " + (int)resp.StatusCode);
                 var d = json.DeserializeObject(await resp.Content.ReadAsStringAsync()) as IDictionary<string, object>;
                 if (d == null) return null;
@@ -634,7 +762,7 @@ namespace PearNowPlaying
             }
             using (var resp = await Send(sb.ToString(), ct))
             {
-                if (IsBusy(resp)) throw new LrclibBusyException("LRCLIB search " + (int)resp.StatusCode);
+                if (IsBusy(resp)) throw new LrclibBusyException("LRCLIB search " + (int)resp.StatusCode, (int)resp.StatusCode);
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB search " + (int)resp.StatusCode);
                 var body = await resp.Content.ReadAsStringAsync();
                 var arr = json.DeserializeObject(body) as IEnumerable;

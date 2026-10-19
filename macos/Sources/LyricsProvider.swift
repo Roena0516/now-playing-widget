@@ -8,6 +8,10 @@ enum LyricsLookup {
     var isFound: Bool {
         switch self { case .synced, .instrumental: return true; default: return false }
     }
+    var sourceName: String {
+        if case .synced(_, let source) = self { return source }
+        return ""
+    }
 }
 struct LyricRecord: Decodable {
     var trackName: String?
@@ -47,24 +51,62 @@ struct LyricRecord: Decodable {
          sleep: @escaping (TimeInterval) async throws -> Void = { seconds in try await Task.sleep(for: .seconds(seconds)) }) {
         self.transport = transport; self.log = log; self.sleep = sleep
     }
-    static let lookupRetryDelays = [0, 15, 45]
+    /// While the song plays, a failed lookup is tried again for this long (seconds; e.g. while paused).
+    static let lookupRetryFor: TimeInterval = 600
     static func isBusy(_ error: Error) -> Bool {
         let error = error as NSError
         return error.domain == "LRCLIB" && [429, 502, 503, 504].contains(error.code)
     }
-    static func retryDelay(_ response: HTTPURLResponse) -> TimeInterval {
-        let advertised = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 2
-        return min(10, max(2, advertised.isFinite ? advertised : 2))
+    /// Retry-After in seconds (1 when missing: LRCLIB's 503 usually says 1), at least 1.
+    static func retryAfter(_ response: HTTPURLResponse) -> TimeInterval {
+        guard let value = response.value(forHTTPHeaderField: "Retry-After") else { return 1 }
+        if let seconds = Double(value), seconds.isFinite { return max(1, seconds) }
+        let format = DateFormatter(); format.locale = Locale(identifier: "en_US_POSIX"); format.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        if let date = format.date(from: value) { return max(1, date.timeIntervalSinceNow) }
+        return 1
     }
-    /// GET with one quick retry when LRCLIB is busy (429/502/503/504). It is a free, volunteer-run
-    /// service whose search endpoint answers 503 fairly often under load; keep the request count low.
+
+    // LRCLIB's rules (https://lrclib.net/docs, read 2026-10-20): an identified client gets ~90 requests/min per
+    // IP; send requests one after another with 200-500 ms between them; on 429 or 503 wait at least Retry-After
+    // (503 usually says 1s) plus up to 30% random jitter, or risk a temporary ban. Same as src/Lyrics.cs.
+    static let spacing: TimeInterval = 0.3, perMinute = 60, attempts = 4, maxRetryAfter: TimeInterval = 30
+    /// Random extra share of a Retry-After wait (0-30%); tests make it 0.
+    var jitter: () -> Double = { Double.random(in: 0...0.3) }
+    private var recent: [Date] = []   // request starts in the last minute
+    private var nextStart = Date.distantPast   // pacing, and Retry-After for every request (not only the one told)
+    private var lastBusy = Date.distantPast
+
+    /// How long to wait before trying a failed lookup again: a second right after LRCLIB said it was busy (the
+    /// next request also waits for its Retry-After, so LRCLIB is asked again about as soon as it allows),
+    /// otherwise (no connection, timeouts) 15 seconds.
+    var retryWait: TimeInterval { Date().timeIntervalSince(lastBusy) < 10 ? 1 : 15 }
+
+    /// This request's turn: after the previous one plus the spacing, any Retry-After pause, and within perMinute
+    /// requests a minute (all lookups share it: the current song and the next one). `waited`: the caller has just
+    /// slept through a Retry-After pause itself.
+    private func waitTurn(waited: Bool) async throws {
+        let now = Date()
+        recent.removeAll { now.timeIntervalSince($0) >= 60 }
+        var start = waited ? now : max(now, nextStart)
+        if recent.count >= Self.perMinute { start = max(start, recent[recent.count - Self.perMinute].addingTimeInterval(60)) }
+        recent.append(start)
+        nextStart = max(nextStart, start.addingTimeInterval(Self.spacing))
+        let wait = start.timeIntervalSince(now)
+        if wait > 0 { try await sleep(wait); try Task.checkCancellation() }
+    }
+
+    /// GET, retried while LRCLIB is busy (429/502/503/504) after its Retry-After (1s if none) plus jitter, up to
+    /// `attempts` times; then the lookup ends (busy) and goes on to Kugou / NetEase, and is tried again later. A
+    /// Retry-After over maxRetryAfter seconds isn't waited for here, but still holds back every request until it has passed.
     private func fetch(_ path: String, _ query: [URLQueryItem]) async throws -> (Data, Int) {
         try Task.checkCancellation()
         var url = URLComponents(string: baseURL.trimmed("/") + "/api/\(path)")!
         url.queryItems = query
         var request = URLRequest(url: url.url!); request.timeoutInterval = 20
         request.setValue("PearNowPlaying-macOS/\(appVersion) (+https://github.com/Roena0516/pear-now-playing)", forHTTPHeaderField: "User-Agent")
-        for attempt in 0..<2 {
+        var waited = false
+        for attempt in 1...Self.attempts {
+            try await waitTurn(waited: waited)
             let data: Data, response: HTTPURLResponse
             if let transport { (data, response) = try await transport(request) }
             else {
@@ -73,11 +115,13 @@ struct LyricRecord: Decodable {
                 (data, response) = (result.0, http)
             }
             try Task.checkCancellation()
-            let busy = [429, 502, 503, 504].contains(response.statusCode)
-            if busy && attempt == 0 {
-                let delay = Self.retryDelay(response)
-                log("INFO LRCLIB \(path) busy (\(response.statusCode)), asking again in \(Int(delay))s")
-                try await sleep(delay); try Task.checkCancellation(); continue
+            if [429, 502, 503, 504].contains(response.statusCode) {
+                let delay = Self.retryAfter(response) * (1 + jitter())
+                nextStart = max(nextStart, Date().addingTimeInterval(delay)); lastBusy = Date()
+                // a rate limit (429) ends the lookup at once: Kugou / NetEase stand in while LRCLIB is waited out
+                let last = attempt == Self.attempts || delay > Self.maxRetryAfter || response.statusCode == 429
+                log("INFO LRCLIB \(path) busy (\(response.statusCode)), \(last ? "giving up for now" : "asking again") after \(String(format: "%.1f", delay))s")
+                if !last { try await sleep(delay); try Task.checkCancellation(); waited = true; continue }
             }
             guard (200...299).contains(response.statusCode) || (path == "get" && response.statusCode == 404) else {
                 throw NSError(domain: "LRCLIB", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "LRCLIB \(path) \(response.statusCode)"])

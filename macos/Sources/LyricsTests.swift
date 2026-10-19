@@ -19,7 +19,7 @@ import Foundation
         ("Song (Cover)", "Song"),
         ("Song (Live Version)", "Song")
     ] { precondition(LyricsProvider.cleanTitle(input) == expected, "Unexpected cleaned title: \(input)") }
-    precondition(LyricsProvider.lookupRetryDelays == [0, 15, 45])
+    precondition(LyricsProvider.lookupRetryFor == 600 && LyricsProvider().retryWait == 15)
     precondition(abs(LyricsProvider.jaroWinkler("martha", "marhta") - 0.961111111) < 0.00001)
     let tooFar = LyricRecord(trackName: song.title, artistName: "Unknown", duration: 206, instrumental: false, syncedLyrics: "[00:01]test")
     precondition(LyricsProvider.pickByTitle([tooFar], song: song) == nil, "Different edits must not match the three-second fallback")
@@ -104,19 +104,35 @@ import Foundation
             let body = recoveredRequests == 1 ? "{}" : #"{"trackName":"Original Song","artistName":"Artist","duration":100,"syncedLyrics":"[00:01.00]Recovered"}"#
             return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: recoveredRequests == 1 ? 503 : 200, httpVersion: nil, headerFields: ["Retry-After": "8"])!)
         }, sleep: { recoveredWaits.append($0) })
+        resilient.jitter = { 0 }
         if case .synced = try await resilient.find(track) {} else { preconditionFailure("A busy endpoint must recover after one quick retry") }
-        precondition(recoveredRequests == 2 && recoveredWaits == [8])
+        precondition(recoveredRequests == 2 && recoveredWaits == [8], "Retry-After honored: \(recoveredWaits)")
         for status in [429, 502, 503, 504] {
             var requests = 0
             var waits: [TimeInterval] = []
             let busy = LyricsProvider(transport: { request in
                 requests += 1
-                return (Data(), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Retry-After": "120"])!)
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Retry-After": "1"])!)
             }, sleep: { waits.append($0) })
+            busy.jitter = { 0 }
             do { _ = try await busy.find(track); preconditionFailure("Busy service must end this lookup") }
             catch { precondition(LyricsProvider.isBusy(error)) }
-            precondition(requests == 2 && waits == [10], "Do not flood other searches while the server is busy")
+            if status == 429 { precondition(requests == 1 && waits.isEmpty, "rate limited: the lookup ends at once (Kugou / NetEase stand in)") }
+            else { precondition(requests == 4 && waits == [1, 1, 1], "asked again after each Retry-After, 4 times, then no other searches: \(requests) \(waits)") }
         }
+        // a long Retry-After: not waited for in this lookup, but the next request waits for it
+        var longWaits: [TimeInterval] = []
+        var longRequests = 0
+        let banned = LyricsProvider(transport: { request in
+            longRequests += 1
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil, headerFields: ["Retry-After": "120"])!)
+        }, sleep: { longWaits.append($0) })
+        banned.jitter = { 0 }
+        do { _ = try await banned.find(track); preconditionFailure("Rate limited lookup must end") } catch { }
+        precondition(longRequests == 1 && longWaits.isEmpty, "Retry-After 120: lookup ends at once")
+        precondition(banned.retryWait == 1, "after a busy answer the lookup is tried again soon (the requests wait for Retry-After)")
+        do { _ = try await banned.find(track) } catch { }
+        precondition(longWaits.first.map { $0 > 119 && $0 <= 120 } == true, "and the next request waits it out: \(longWaits)")
         var backoffStarted = false
         var backoffRequests = 0
         let cancellable = LyricsProvider(transport: { request in
@@ -332,7 +348,7 @@ import Foundation
         var lrclibCalls = 0
         let retried = LyricsFinder(lrclib: lrclib { url in
             lrclibCalls += 1
-            if lrclibCalls <= 2 { return (503, "") }
+            if lrclibCalls <= LyricsProvider.attempts { return (503, "") }
             return url.path.hasSuffix("/get") ? (404, "") : (200, synced)
         }, ytm: YTMusicProvider(transport: noTab))
         let queued = Song(title: "Song", artist: "Band", videoId: "audioVideo1", mediaType: "UNKNOWN", duration: 200)
@@ -419,11 +435,50 @@ import Foundation
         precondition(LyricsDiskCache(directory: moreDir).load(song.videoId) != nil, "Kugou lyrics saved")
         let busyDir = FileManager.default.temporaryDirectory.appendingPathComponent("pear-lyrics-busy-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: busyDir) }
-        let lrclibBusy = LyricsFinder(lrclib: lrclib { _ in (503, "") }, ytm: YTMusicProvider(transport: noTab), more: more(kugouHas: false),
+        // LRCLIB busy (503): asked again, no Kugou / NetEase
+        moreAsked = []
+        let lrclib503 = LyricsFinder(lrclib: lrclib { _ in (503, "") }, ytm: YTMusicProvider(transport: noTab), more: more())
+        do { _ = try await lrclib503.find(song); preconditionFailure("503: the lookup fails, to ask LRCLIB again") } catch { precondition(!(error is CancellationError)) }
+        precondition(moreAsked.isEmpty, "503: Kugou / NetEase not asked: \(moreAsked)")
+        // LRCLIB rate-limited (429): Kugou / NetEase stand in
+        let lrclibBusy = LyricsFinder(lrclib: lrclib { _ in (429, "") }, ytm: YTMusicProvider(transport: noTab), more: more(kugouHas: false),
                                       disk: LyricsDiskCache(directory: busyDir))
-        guard case .synced(let nLines, "NetEase") = try await lrclibBusy.find(song), nLines.first?.text == "From NetEase" else { preconditionFailure("NetEase (exact title within 3s) while LRCLIB is busy") }
-        precondition(LyricsDiskCache(directory: busyDir).load(song.videoId) == nil, "a stand-in for a busy LRCLIB is not saved to disk")
+        guard case .synced(let nLines, "NetEase") = try await lrclibBusy.find(song), nLines.first?.text == "From NetEase" else { preconditionFailure("NetEase (exact title within 3s) while LRCLIB rate-limits") }
+        precondition(LyricsDiskCache(directory: busyDir).load(song.videoId) == nil, "a stand-in for a rate-limited LRCLIB is not saved to disk")
         guard case .synced = lrclibBusy.known(song) else { preconditionFailure("but it is remembered for this run") }
+        // Kugou / NetEase lyrics: LRCLIB is asked again (recheck) when it was busy, and in a later run when it had none
+        var lrclibStatus = 429
+        let recheckDir = FileManager.default.temporaryDirectory.appendingPathComponent("pear-lyrics-recheck-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: recheckDir) }
+        func makeFinder() -> LyricsFinder {
+            LyricsFinder(lrclib: lrclib { url in lrclibStatus == 429 ? (429, "") : url.path.hasSuffix("/get") ? (404, "") : (200, lrclibStatus == 200 ? synced : "[]") },
+                         ytm: YTMusicProvider(transport: noTab), more: more(), disk: LyricsDiskCache(directory: recheckDir))
+        }
+        let rechecked = makeFinder()
+        let standIn = try await rechecked.find(song)
+        guard case .synced(_, "Kugou") = standIn, rechecked.shouldRecheck(song, standIn) else { preconditionFailure("stand-in while LRCLIB is busy") }
+        moreAsked = []
+        let stillBusy = try await rechecked.recheck(song)
+        precondition(stillBusy == nil && rechecked.shouldRecheck(song, standIn), "still busy: the stand-in stays")
+        lrclibStatus = 200
+        guard case .synced(let back, let backSource)? = try await rechecked.recheck(song), backSource.hasPrefix("LRCLIB"), back.first?.text == "From LRCLIB"
+        else { preconditionFailure("LRCLIB back: its lyrics replace the stand-in") }
+        precondition(LyricsDiskCache(directory: recheckDir).load(song.videoId) != nil, "LRCLIB's lyrics saved")
+        let laterSong = Song(title: "Song", artist: "Band", videoId: "audioVideo4", mediaType: "AUDIO", duration: 200)
+        lrclibStatus = 429
+        _ = try await rechecked.find(laterSong)
+        lrclibStatus = 404
+        guard case .synced(_, "Kugou")? = try await rechecked.recheck(laterSong) else { preconditionFailure("LRCLIB has none: Kugou's are final") }
+        guard let saved = LyricsDiskCache(directory: recheckDir).load(laterSong.videoId), !rechecked.shouldRecheck(laterSong, saved) else { preconditionFailure("saved, not asked again this run") }
+        let laterRun = makeFinder()
+        guard let fromDisk = laterRun.known(laterSong), laterRun.shouldRecheck(laterSong, fromDisk) else { preconditionFailure("next run: LRCLIB asked again") }
+        guard case .synced(_, "Kugou")? = try await laterRun.recheck(laterSong), !laterRun.shouldRecheck(laterSong, fromDisk) else { preconditionFailure("still none: kept") }
+        lrclibStatus = 200
+        let afterAdded = makeFinder()
+        guard case .synced(_, let addedSource)? = try await afterAdded.recheck(laterSong), addedSource.hasPrefix("LRCLIB"),
+              case .synced(_, let savedSource)? = LyricsDiskCache(directory: recheckDir).load(laterSong.videoId), savedSource.hasPrefix("LRCLIB")
+        else { preconditionFailure("LRCLIB added it: replaced and saved") }
+        precondition(moreAsked.isEmpty, "rechecks ask LRCLIB only: \(moreAsked)")
         moreAsked = []
         let kugouFailing = LyricsFinder(lrclib: lrclib { url in url.path.hasSuffix("/get") ? (404, "") : (200, "[]") }, ytm: YTMusicProvider(transport: noTab), more: more(kugouDown: true))
         let offSong = Song(title: "Nothing", artist: "Nobody", videoId: "audioVideo2", mediaType: "AUDIO", duration: 200)

@@ -7,6 +7,9 @@ struct LrclibFailed: LocalizedError {
     var errorDescription: String? { underlying.localizedDescription }
 }
 
+/// Set (for the task under LyricsFinder.recheck only) while LRCLIB is asked again: no Kugou / NetEase, no YouTube Music lyrics.
+enum LrclibRecheck { @TaskLocal static var only = false }
+
 /// The whole order of finding lyrics for a song, as LyricsProvider.Find in src/Lyrics.cs:
 ///   cache -> fetched ahead -> YouTube Music (the video, then its official audio track)
 ///   -> covers: the original's lyrics -> LRCLIB.
@@ -23,12 +26,18 @@ struct LrclibFailed: LocalizedError {
     private let log: (String) -> Void
     private var cache: [String: LyricsLookup] = [:]
     private var prefetched: [String: LyricsLookup] = [:]
+    /// Songs (by videoId) whose lyrics this run are a stand-in: found on Kugou / NetEase because LRCLIB was busy.
+    private var standIns: Set<String> = []
+    /// When LRCLIB was last asked about a song whose lyrics came from Kugou / NetEase (by videoId, this run).
+    private var lrclibChecked: [String: Date] = [:]
 
     init(lrclib: LyricsProvider, ytm: YTMusicProvider, more: MoreLyrics? = nil, disk: LyricsDiskCache? = nil, log: @escaping (String) -> Void = { _ in }) {
         self.lrclib = lrclib; self.ytm = ytm; self.more = more; self.disk = disk; self.log = log
     }
 
     private static func key(_ song: Song) -> String { song.videoId + "|" + song.title }
+    /// By videoId, as a result fetched ahead (the queue's title can differ slightly); the key when there is none.
+    private static func id(_ song: Song) -> String { song.videoId.isEmpty ? key(song) : song.videoId }
 
     /// `cacheMisses`: false for a look-ahead, where a "not found" from the queue's sparser song info
     /// shouldn't stop the song from being looked up again with Pear's full info when it starts.
@@ -53,9 +62,15 @@ struct LrclibFailed: LocalizedError {
     }
 
     func find(_ song: Song, cacheMisses: Bool = true) async throws -> LyricsLookup {
-        let key = Self.key(song)
         if let hit = known(song) { return hit }
-        log("INFO looking up lyrics: \(song.artist) - \(song.title) [\(song.mediaType.isEmpty ? "type?" : song.mediaType), \(song.videoId), \(Int(song.duration))s]")
+        return try await lookup(song, cacheMisses: cacheMisses)
+    }
+
+    /// find past the caches: asks the lyrics servers.
+    private func lookup(_ song: Song, cacheMisses: Bool) async throws -> LyricsLookup {
+        let key = Self.key(song)
+        if !LrclibRecheck.only { standIns.remove(Self.id(song)) }
+        log("INFO \(LrclibRecheck.only ? "asking LRCLIB again: " : "")looking up lyrics: \(song.artist) - \(song.title) [\(song.mediaType.isEmpty ? "type?" : song.mediaType), \(song.videoId), \(Int(song.duration))s]")
 
         // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
         // the usual case for covers: ask for it alongside the first lookups instead of after them.
@@ -66,7 +81,7 @@ struct LrclibFailed: LocalizedError {
 
         // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
         var ytmError = false, ytmPlain = false
-        if useYtm && !song.videoId.isEmpty {
+        if useYtm && !song.videoId.isEmpty && !LrclibRecheck.only {
             if ytm.paused { ytmError = true; log("INFO YouTube Music skipped (relay paused after repeated failures) -> LRCLIB") }
             else {
                 do {
@@ -92,6 +107,7 @@ struct LrclibFailed: LocalizedError {
         // 2) covers: the original song linked in the description, if the music wasn't changed
         // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics off)
         if coverCandidate && !ytm.paused, let original = try await fromOriginal(song, description) {
+            if original.standIn { standIns.insert(Self.id(song)) }
             return original.standIn ? remember(key, original.lookup) : keep(key, song, original.lookup)
         }
 
@@ -101,7 +117,10 @@ struct LrclibFailed: LocalizedError {
         var result = found.lookup
         if case .notFound = result, ytmPlain { result = .plainOnly }
         // a "not found" is only final when YouTube Music (and Kugou / NetEase) answered too; otherwise ask again next time
-        if result.isFound { _ = found.standIn ? remember(key, result) : keep(key, song, result) }
+        if result.isFound {
+            if found.standIn { standIns.insert(Self.id(song)) }
+            _ = found.standIn ? remember(key, result) : keep(key, song, result)
+        }
         else if cacheMisses && !ytmError && !found.unsure { cache[key] = result }
         return result
     }
@@ -109,7 +128,7 @@ struct LrclibFailed: LocalizedError {
     private func remember(_ key: String, _ result: LyricsLookup) -> LyricsLookup { cache[key] = result; return result }
 
     /// A lookup's outcome. `unsure`: nothing was found and Kugou / NetEase couldn't be asked, so the miss isn't final.
-    /// `standIn`: found on Kugou / NetEase only because LRCLIB failed (busy); remembered for this run but not saved to
+    /// `standIn`: found on Kugou / NetEase only because LRCLIB rate-limited us (429); remembered for this run but not saved to
     /// disk, so the next run asks LRCLIB again (it may have the song).
     struct Synced {
         var lookup: LyricsLookup
@@ -119,6 +138,7 @@ struct LrclibFailed: LocalizedError {
 
     /// Remembered for this run, and on disk when it came from LRCLIB, Kugou or NetEase.
     private func keep(_ key: String, _ song: Song, _ result: LyricsLookup) -> LyricsLookup {
+        if Self.fromMore(result) { lrclibChecked[Self.id(song)] = Date(); standIns.remove(Self.id(song)) }   // LRCLIB just said it has none
         if LyricsDiskCache.keeps(result) { disk?.save(song, result) }
         return remember(key, result)
     }
@@ -149,9 +169,47 @@ struct LrclibFailed: LocalizedError {
         }
     }
 
+    private static func fromMore(_ result: LyricsLookup) -> Bool {
+        guard case .synced(_, let source) = result else { return false }
+        return source.hasPrefix("Kugou") || source.hasPrefix("NetEase")
+    }
+
+    /// Whether LRCLIB should be asked again about lyrics found on Kugou / NetEase: a stand-in for a busy LRCLIB, or
+    /// a song LRCLIB didn't have (it may have been added since), once per play but not again within a day in the
+    /// same run (LRCLIB caches its answers for a day).
+    func shouldRecheck(_ song: Song, _ result: LyricsLookup) -> Bool {
+        guard Self.fromMore(result) else { return false }
+        if standIns.contains(Self.id(song)) { return true }
+        guard let at = lrclibChecked[Self.id(song)] else { return true }
+        return Date().timeIntervalSince(at) > 24 * 3600
+    }
+
+    /// Ask LRCLIB (only) again about a song whose lyrics came from Kugou / NetEase. Returns LRCLIB's lyrics (kept, on
+    /// disk too), or the lyrics already known when LRCLIB has none (a stand-in then becomes final and is saved), or
+    /// nil when LRCLIB couldn't answer (busy): the known lyrics stay, ask again later. Throws only when cancelled.
+    func recheck(_ song: Song) async throws -> LyricsLookup? {
+        guard let known = known(song), Self.fromMore(known) else { return known(song) }
+        let result: LyricsLookup
+        do { result = try await LrclibRecheck.$only.withValue(true) { try await lookup(song, cacheMisses: false) } }
+        catch {
+            if Task.isCancelled { throw CancellationError() }
+            log("INFO asking LRCLIB again failed (\(error.localizedDescription)), keeping the lyrics shown")
+            return nil
+        }
+        lrclibChecked[Self.id(song)] = Date()
+        if result.isFound {
+            log("INFO LRCLIB has lyrics now (\(result.sourceName)), replacing \(known.sourceName): \(song.artist) - \(song.title)")
+            standIns.remove(Self.id(song))
+            return result
+        }
+        if standIns.contains(Self.id(song)) { _ = keep(Self.key(song), song, known) }
+        log("INFO LRCLIB still has no lyrics, keeping \(known.sourceName): \(song.artist) - \(song.title)")
+        return known
+    }
+
     /// Drop the cached result for a song so the next find asks again.
     func forget(_ song: Song) {
-        cache.removeValue(forKey: Self.key(song)); prefetched.removeValue(forKey: song.videoId)
+        cache.removeValue(forKey: Self.key(song)); prefetched.removeValue(forKey: song.videoId); standIns.remove(Self.id(song))
         ytm.forget(song.videoId)
         disk?.forget(song.videoId)
     }
@@ -275,14 +333,17 @@ struct LrclibFailed: LocalizedError {
             lrclibError = error
         }
         if result.isFound { return Synced(lookup: result) }
-        guard let more, useMore else {
+        // Kugou / NetEase only when LRCLIB has nothing, or rate-limits us (429); when it is busy (503 …) it is
+        // asked again instead, as soon as its Retry-After allows (user's choice: LRCLIB first)
+        let rateLimited = lrclibError.map { ($0 as NSError).domain == "LRCLIB" && ($0 as NSError).code == 429 } ?? false
+        guard let more, useMore, !LrclibRecheck.only, lrclibError == nil || rateLimited else {
             if let lrclibError { throw lrclibError }
             return Synced(lookup: result)
         }
         let m = try await more.find(song, titleTolerance: titleOnly && titleCopies <= 1 && titleTolerance <= 3 ? titleTolerance : -1,
                                     artistTolerance: artistTolerance)
         if case .found(let lines, let source) = m { return Synced(lookup: .synced(lines, source: source), standIn: lrclibError != nil) }
-        if let lrclibError { throw lrclibError }   // LRCLIB busy: retried later
+        if let lrclibError { throw lrclibError }   // LRCLIB rate-limited: retried later
         if case .failed = m { return Synced(lookup: result, unsure: true) }
         return Synced(lookup: result)
     }

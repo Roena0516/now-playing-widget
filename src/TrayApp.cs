@@ -264,7 +264,13 @@ namespace PearNowPlaying
             // already known (fetched ahead, cached): swap the lyrics in place, so the lyrics card doesn't close and
             // reopen (which made the song card drop down and come back up)
             var known = WantsLyrics(song) ? lyricsProvider.Known(song) : null;
-            if (known != null) { ApplyLyrics(key, song, known); return; }
+            if (known != null)
+            {
+                ApplyLyrics(key, song, known);
+                // found on Kugou / NetEase: LRCLIB was busy then, or may have the song by now
+                if (lyricsProvider.ShouldRecheck(song, known)) LookUp(key, song, known);
+                return;
+            }
             lyrics = null;
             lyricsInfoItem.Text = "가사: 찾는 중";
             lyricsWin.Dismiss();
@@ -276,29 +282,55 @@ namespace PearNowPlaying
                 PrefetchNext(key);
                 return;
             }
+            LookUp(key, song, null);
+        }
+
+        /// <summary>
+        /// Look up the song's lyrics, and while it plays retry when LRCLIB was busy (or unreachable). Lyrics found on
+        /// Kugou / NetEase are shown at once when LRCLIB should be asked again (it was busy, or it may have the song
+        /// by now: ShouldRecheck), and LRCLIB alone is asked: its lyrics replace them, its "none" keeps them.
+        /// </summary>
+        /// <param name="shown">Kugou / NetEase lyrics already on screen to ask LRCLIB about at once, or null</param>
+        void LookUp(string key, SongInfo song, LyricsResult shown)
+        {
             lyricsCts = new CancellationTokenSource();
             var ct = lyricsCts.Token;
             var snapshot = song;
             Task.Run(async () =>
             {
-                // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
-                var waits = new[] { 0, 15000, 45000 };
+                // LRCLIB is sometimes busy or briefly down: keep asking while the same song plays, as often as its
+                // Retry-After allows (up to 10 minutes, e.g. while paused)
+                var until = DateTime.UtcNow.AddMinutes(10);
                 LyricsResult r = null;
-                for (int i = 0; i < waits.Length; i++)
+                for (int i = 0; i == 0 || DateTime.UtcNow < until; i++)
                 {
                     try
                     {
-                        if (waits[i] > 0)
+                        if (i > 0)
                         {
                             int attempt = i;
-                            ui.Post(_ => { if (key == lyricsKey) lyricsInfoItem.Text = "가사: 연결 실패, 다시 시도 중 (" + attempt + "/" + (waits.Length - 1) + ")"; }, null);
-                            await Task.Delay(waits[i], ct);
+                            if (shown == null)
+                                ui.Post(_ => { if (key == lyricsKey) lyricsInfoItem.Text = "가사: 연결 실패, 다시 시도 중 (" + attempt + ")"; }, null);
+                            await Task.Delay(lyricsProvider.RetryWait, ct);
                         }
-                        r = await lyricsProvider.Find(snapshot, ct);
+                        r = shown != null ? await lyricsProvider.Recheck(snapshot, ct) : await lyricsProvider.Find(snapshot, ct);
                     }
                     catch (OperationCanceledException) { return; }
-                    if (!r.Failed) break;
+                    if (shown != null) { if (r != null) break; continue; }   // null: LRCLIB still busy
+                    if (r.Failed) continue;
+                    if (!lyricsProvider.ShouldRecheck(snapshot, r)) break;
+                    // a stand-in for a busy LRCLIB: shown now, LRCLIB asked again later
+                    shown = r;
+                    Log.Info("LRCLIB busy: showing " + r.Source + " lyrics meanwhile, asking LRCLIB again later");
+                    var standIn = r;
+                    ui.Post(_ =>
+                    {
+                        if (ct.IsCancellationRequested || key != lyricsKey) return;
+                        ApplyLyrics(key, snapshot, standIn);
+                    }, null);
                 }
+                // LRCLIB still busy, or has none: the lyrics shown stay (no need to lay them out again)
+                if (shown != null && (r == null || r.Lines == shown.Lines)) return;
                 var result = r;
                 ui.Post(_ =>
                 {

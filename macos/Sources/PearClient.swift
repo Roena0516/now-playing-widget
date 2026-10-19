@@ -202,7 +202,12 @@ import Combine
         let track = song
         // already known (fetched ahead, cached): swap the lyrics in place, so the lyrics card doesn't close and
         // reopen (which made the song card drop down and come back up)
-        if !force, !track.title.isEmpty, wantsLyrics(track), let known = lyrics.known(track) { apply(known, for: track, force: false); return }
+        if !force, !track.title.isEmpty, wantsLyrics(track), let known = lyrics.known(track) {
+            apply(known, for: track, force: false)
+            // found on Kugou / NetEase: LRCLIB was busy then, or may have the song by now
+            if lyrics.shouldRecheck(track, known) { lookUp(track, force: false, shown: known) }
+            return
+        }
         lines = []; lyricsStatus = "가사: 찾는 중"; lyricsOutcome = nil; lyricsFailed = false
         guard !track.title.isEmpty else { lyricsStatus = "가사: -"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
         if !wantsLyrics(track) {
@@ -213,25 +218,54 @@ import Combine
             return
         }
         if force { lyrics.forget(track); lyrics.ytm.resetPause(); lyrics.more?.resetPause(); onLyricsNotice?("가사를 다시 찾는 중이에요") }
+        lookUp(track, force: force, shown: nil)
+    }
+
+    /// Look up the song's lyrics, and while it plays retry when LRCLIB was busy (or unreachable). Lyrics found on
+    /// Kugou / NetEase are shown at once when LRCLIB should be asked again (it was busy, or it may have the song by
+    /// now: shouldRecheck), and LRCLIB alone is asked: its lyrics replace them, its "none" keeps them.
+    /// `shown`: Kugou / NetEase lyrics already on screen to ask LRCLIB about at once.
+    private func lookUp(_ track: Song, force: Bool, shown: LyricsLookup?) {
         lyricTask = Task {
-            // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
-            let delays = LyricsProvider.lookupRetryDelays
-            for (attempt, delay) in delays.enumerated() {
+            // LRCLIB is sometimes busy or briefly down: keep asking while the same song plays, as often as its
+            // Retry-After allows (up to 10 minutes, e.g. while paused)
+            let until = Date().addingTimeInterval(LyricsProvider.lookupRetryFor)
+            var shown = shown
+            var attempt = 0
+            while attempt == 0 || Date() < until {
+                defer { attempt += 1 }
                 do {
-                    if delay > 0 {
-                        lyricsStatus = "가사: 연결 실패, 다시 시도 중 (\(attempt)/\(delays.count - 1))"
-                        try await Task.sleep(for: .seconds(delay))
+                    if attempt > 0 {
+                        if shown == nil { lyricsStatus = "가사: 연결 실패, 다시 시도 중 (\(attempt))" }
+                        try await Task.sleep(for: .seconds(lyrics.lrclib.retryWait))
+                    }
+                    if let before = shown {
+                        guard let result = try await lyrics.recheck(track) else { continue }   // LRCLIB still busy
+                        try Task.checkCancellation()
+                        guard song.identity == track.identity else { return }
+                        // LRCLIB has none: the lyrics shown stay (no need to lay them out again)
+                        if case .synced(let a, _) = before, case .synced(let b, _) = result, a == b { return }
+                        apply(result, for: track, force: false)
+                        return
                     }
                     let result = try await lyrics.find(track)
                     try Task.checkCancellation()
                     guard song.identity == track.identity else { return }
+                    if lyrics.shouldRecheck(track, result) {
+                        // a stand-in for a busy LRCLIB: shown now, LRCLIB asked again later
+                        Log.info("LRCLIB busy: showing \(result.sourceName) lyrics meanwhile, asking LRCLIB again later")
+                        apply(result, for: track, force: force)
+                        shown = result
+                        continue
+                    }
                     apply(result, for: track, force: force)
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    Log.write("WARN lyrics lookup failed (\(attempt + 1)/\(delays.count)) for \(track.artist) - \(track.title): \(error.localizedDescription)")
+                    Log.write("WARN lyrics lookup failed (\(attempt + 1)) for \(track.artist) - \(track.title): \(error.localizedDescription)")
                 }
             }
+            guard shown == nil else { return }   // LRCLIB still busy: keep the stand-in
             guard song.identity == track.identity else { return }
             lyricsStatus = "가사: 가사 서버에 연결하지 못함"; lyricsFailed = true
             if force { onLyricsNotice?("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
