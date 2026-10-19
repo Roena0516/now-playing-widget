@@ -167,8 +167,8 @@ import CoreText
         if screens.count > 1 {
             let display = NSMenu()
             for index in screens.indices {
-                let on = client.settings.widgets.contains { $0.monitor == index }
-                let entry = NSMenuItem(title: screenTitle(index), action: !on || client.settings.widgets.count > 1 ? #selector(toggleMonitor(_:)) : nil, keyEquivalent: "")
+                let on = client.settings.onWidgets.contains { $0.monitor == index }
+                let entry = NSMenuItem(title: screenTitle(index), action: !on || client.settings.onWidgets.count > 1 ? #selector(toggleMonitor(_:)) : nil, keyEquivalent: "")
                 entry.target = self; entry.state = on ? .on : .off; entry.representedObject = index
                 display.addItem(entry)   // the last widget can't be turned off (no action = greyed out)
             }
@@ -249,11 +249,15 @@ import CoreText
     @objc func toggleMonitor(_ sender: NSMenuItem) {
         let index = sender.representedObject as! Int
         if let found = client.settings.widgets.firstIndex(where: { $0.monitor == index }) {
-            guard client.settings.widgets.count > 1 else { return }
-            client.settings.widgets.remove(at: found)
+            if client.settings.widgets[found].isOn {
+                guard client.settings.onWidgets.count > 1 else { return }
+                client.settings.widgets[found].hidden = true   // kept: turning it on again brings its settings back
+            } else {
+                client.settings.widgets[found].hidden = nil
+            }
         } else {
             // a new widget starts where the first one is (as a preset or the same dragged offsets)
-            var widget = client.settings.widgets.first ?? WidgetSetting(); widget.monitor = index
+            var widget = client.settings.onWidgets.first ?? WidgetSetting(); widget.monitor = index
             client.settings.widgets.append(widget); client.settings.widgets.sort { $0.monitor < $1.monitor }
         }
         client.settings.save(); overlay.rebuildWidgets(); overlay.show(); updateMenu()

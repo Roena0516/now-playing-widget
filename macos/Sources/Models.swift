@@ -14,6 +14,9 @@ struct WidgetSetting: Codable, Equatable {
     var scale: Double?
     /// How see-through the whole widget is, text included (0 = not at all, at most 0.8)
     var transparency: Double?
+    /// Turned off in the 표시 menu: kept with its settings so turning it on again brings them back
+    var hidden: Bool?
+    var isOn: Bool { hidden != true }
     var opacity: CGFloat { CGFloat(1 - min(0.8, max(0, transparency ?? 0))) }
 }
 
@@ -98,6 +101,7 @@ struct Settings: Codable {
         if widgets.isEmpty {
             widgets = [WidgetSetting(monitor: max(0, monitor), position: position, customX: customX, customY: customY, customFromBottom: customFromBottom)]
         }
+        if !widgets.contains(where: \.isOn) { widgets[0].hidden = nil }   // at least one widget stays on
     }
     static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/PearNowPlaying-macOS")
     static let file = directory.appendingPathComponent("config.json")
@@ -120,12 +124,15 @@ struct Settings: Codable {
     }
     /// The saved widget behind the one shown on this screen (the first one when it stands in on the main screen).
     func savedWidgetIndex(monitor: Int, screenCount: Int) -> Int? {
-        widgets.firstIndex { $0.monitor == monitor } ?? (shownWidgets(screenCount: screenCount).count == 1 ? 0 : nil)
+        widgets.firstIndex { $0.monitor == monitor && $0.isOn }
+            ?? (shownWidgets(screenCount: screenCount).count == 1 ? widgets.firstIndex(where: \.isOn) : nil)
     }
+    /// The widgets turned on in the 표시 menu.
+    var onWidgets: [WidgetSetting] { widgets.filter(\.isOn) }
     /// The widgets whose screen is connected; the first widget on the main screen if none is.
     func shownWidgets(screenCount: Int) -> [WidgetSetting] {
-        let shown = widgets.filter { $0.monitor < screenCount }
-        if shown.isEmpty, var first = widgets.first { first.monitor = 0; return [first] }
+        let shown = onWidgets.filter { $0.monitor < screenCount }
+        if shown.isEmpty, var first = onWidgets.first { first.monitor = 0; return [first] }
         return shown
     }
     func save() {

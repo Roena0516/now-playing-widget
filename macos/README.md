@@ -111,7 +111,7 @@ Windows 버전의 `src/Theme.cs`, `src/CardRenderer.cs`, `src/LyricsView.cs`에 
 | 설정 | 기본값 | 설명 |
 |---|---|---|
 | `host`, `port` | `127.0.0.1`, `26538` | 로컬 Pear API의 주소입니다. 호스트는 `127.0.0.1` 또는 `localhost`만 사용할 수 있습니다. |
-| `widgets` | 주 화면 왼쪽 아래 하나 | 위젯 목록입니다. 항목마다 `monitor`(화면 번호, 0부터), `position`(`TopLeft` … `BottomRight` 또는 `Custom`), `customX`, `customY`, `customFromBottom`(끌어서 옮겨 둔 위치, pt), `scale`(그 위젯의 배율, 없으면 아래의 `scale`), `transparency`(위젯 전체의 투명도, 0–0.8)가 있습니다. 1.6까지의 `position`, `monitor`, `custom…` 값은 처음 실행할 때 이 목록으로 옮겨집니다. |
+| `widgets` | 주 화면 왼쪽 아래 하나 | 위젯 목록입니다. 항목마다 `monitor`(화면 번호, 0부터), `position`(`TopLeft` … `BottomRight` 또는 `Custom`), `customX`, `customY`, `customFromBottom`(끌어서 옮겨 둔 위치, pt), `scale`(그 위젯의 배율, 없으면 아래의 `scale`), `transparency`(위젯 전체의 투명도, 0–0.8), `hidden`(**표시**에서 끈 위젯이면 `true`, 설정은 보관됨)이 있습니다. 1.6까지의 `position`, `monitor`, `custom…` 값은 처음 실행할 때 이 목록으로 옮겨집니다. |
 | `marginX`, `marginY` | `24`, `24` | Dock과 메뉴 막대를 제외한 화면 영역으로부터 떨어진 여백(pt)입니다. |
 | `scale`, `panelWidth` | `1`, `420` | 배율(0.5–3, `scale`이 없는 위젯에 적용)과 기본 카드 너비(260–800pt)입니다. |
 | `showSeconds`, `opacity` | `6`, `0.92` | 곡 카드를 잠시 표시하는 시간과 배경의 불투명도입니다. |

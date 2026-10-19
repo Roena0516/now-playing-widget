@@ -826,9 +826,10 @@ namespace PearNowPlaying
 
         // ---- widgets (one per monitor) -------------------------------------------------
 
-        /// <summary>The configured widgets whose monitor is connected; the first widget on the main monitor if none is.</summary>
-        static List<WidgetPlace> ShownWidgets(List<WidgetPlace> widgets, int monitorCount)
+        /// <summary>The widgets turned on whose monitor is connected; the first of them on the main monitor if none is.</summary>
+        static List<WidgetPlace> ShownWidgets(List<WidgetPlace> all, int monitorCount)
         {
+            var widgets = all.Where(w => !w.Hidden).ToList();
             var list = widgets.Where(w => w.Monitor < monitorCount).ToList();
             if (list.Count == 0 && widgets.Count > 0)
             {
@@ -905,7 +906,7 @@ namespace PearNowPlaying
         /// <summary>The saved widget behind the one shown on this monitor (the first one when it stands in on the main monitor).</summary>
         WidgetPlace SavedWidget(int monitor)
         {
-            return cfg.Widgets.FirstOrDefault(w => w.Monitor == monitor) ?? (shown.Count == 1 ? cfg.Widgets[0] : null);
+            return cfg.OnWidgets.FirstOrDefault(w => w.Monitor == monitor) ?? (shown.Count == 1 ? cfg.OnWidgets[0] : null);
         }
 
         void SetWidgetScale(int monitor, double v)
@@ -957,11 +958,11 @@ namespace PearNowPlaying
             for (int i = 0; i < screens.Length; i++)
             {
                 int index = i;
-                var on = cfg.Widgets.Any(w => w.Monitor == i);
+                var on = cfg.OnWidgets.Any(w => w.Monitor == i);
                 displayMenu.DropDownItems.Add(new ToolStripMenuItem(MonitorName(screens, i), null, (s, e) => ToggleMonitor(index))
                 {
                     Checked = on,
-                    Enabled = !on || cfg.Widgets.Count > 1,   // the last widget can't be turned off
+                    Enabled = !on || cfg.OnWidgets.Count > 1,   // the last widget can't be turned off
                 });
             }
 
@@ -1007,15 +1008,16 @@ namespace PearNowPlaying
         void ToggleMonitor(int monitor)
         {
             var widget = cfg.Widgets.FirstOrDefault(w => w.Monitor == monitor);
-            if (widget != null)
+            if (widget != null && !widget.Hidden)
             {
-                if (cfg.Widgets.Count == 1) return;
-                cfg.Widgets.Remove(widget);
+                if (cfg.OnWidgets.Count == 1) return;
+                widget.Hidden = true;   // kept: turning it on again brings its position, size and transparency back
             }
+            else if (widget != null) widget.Hidden = false;
             else
             {
                 // a new widget starts where the first one is (as a preset or the same dragged offsets)
-                cfg.Widgets.Add(cfg.Widgets[0].CopyTo(monitor));
+                cfg.Widgets.Add(cfg.OnWidgets[0].CopyTo(monitor));
                 cfg.Widgets = cfg.Widgets.OrderBy(w => w.Monitor).ToList();
             }
             cfg.Save();

@@ -162,7 +162,8 @@ final class OverlayPanel: NSPanel {
         if let index = client.settings.widgets.firstIndex(where: { $0.monitor == w.place.monitor }) {
             client.settings.widgets[index] = w.place
         } else {
-            client.settings.widgets = [w.place]   // the shown widget stood in for one on a screen that's gone
+            // the shown widget stood in for one on a screen that's gone: it becomes this screen's own widget
+            client.settings.widgets.append(w.place); client.settings.widgets.sort { $0.monitor < $1.monitor }
         }
         client.settings.save()
         layout()

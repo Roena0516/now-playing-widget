@@ -265,6 +265,13 @@ func testCustomPlacement() {
     var faint = WidgetSetting(); faint.transparency = 5
     precondition(abs(faint.opacity - 0.2) < 0.001, "transparency is capped so a widget never disappears")
     precondition(old.savedWidgetIndex(monitor: 0, screenCount: 1) == 0 && old.savedWidgetIndex(monitor: 1, screenCount: 2) == 1, "menu choices find their widget")
+    // a widget turned off keeps its settings, and comes back with them
+    var off = round; off.widgets[1].hidden = true
+    let offRound = try! JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(off))
+    precondition(offRound.shownWidgets(screenCount: 2).map(\.monitor) == [0] && offRound.widgets.count == 2 && offRound.placed(offRound.widgets[1]).scale == 0.8, "a widget turned off is kept, not shown")
+    precondition(offRound.savedWidgetIndex(monitor: 0, screenCount: 2) == 0 && offRound.onWidgets.map(\.monitor) == [0], "menus reach the widgets that are on")
+    var allOff = off; allOff.widgets[0].hidden = true
+    precondition(try! JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(allOff)).shownWidgets(screenCount: 2).map(\.monitor) == [0], "at least one widget stays on")
     var away = old; away.widgets = [old.widgets[1]]
     precondition(away.savedWidgetIndex(monitor: 0, screenCount: 1) == 0, "the widget standing in on the main screen is the saved first one")
     print("PASS: dragged position (screen choice, top/bottom anchor, clamping), custom placement, new defaults, one widget per screen with its own position, size and transparency")

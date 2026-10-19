@@ -26,6 +26,8 @@ namespace PearNowPlaying
         public double Scale = 1.0;
         /// <summary>How see-through the whole widget is, text included (0 = not at all).</summary>
         public double Transparency;
+        /// <summary>Turned off in the 표시 menu: kept with its settings so turning it on again brings them back.</summary>
+        public bool Hidden;
 
         /// <summary>The same widget on another monitor (a new widget starts like the first one).</summary>
         public WidgetPlace CopyTo(int monitor)
@@ -76,6 +78,9 @@ namespace PearNowPlaying
         // Overlay
         /// <summary>The widgets, one per monitor (at least one).</summary>
         public List<WidgetPlace> Widgets = new List<WidgetPlace> { new WidgetPlace() };
+
+        /// <summary>The widgets turned on in the 표시 menu (at least one).</summary>
+        public List<WidgetPlace> OnWidgets { get { return Widgets.Where(w => !w.Hidden).ToList(); } }
         public int MarginX = 40;
         public int MarginY = 140;
         public double Scale = 1.0;
@@ -160,7 +165,9 @@ namespace PearNowPlaying
                     var n = "widget" + (w.Monitor + 1).ToString(CultureInfo.InvariantCulture);
                     w.Scale = Clamp(GetDouble(map, n + "Scale", c.Scale), 0.5, 3.0);
                     w.Transparency = Clamp(GetDouble(map, n + "Transparency", 0), 0, 0.8);
+                    w.Hidden = !GetBool(map, n + "Show", true);
                 }
+                if (c.Widgets.All(w => w.Hidden)) c.Widgets[0].Hidden = false;   // at least one widget stays on
                 c.PanelWidth = Math.Max(260, Math.Min(1200, GetInt(map, "panelWidth", c.PanelWidth)));
                 c.ShowSeconds = Clamp(GetDouble(map, "showSeconds", c.ShowSeconds), 1, 60);
                 c.Opacity = Clamp(GetDouble(map, "opacity", c.Opacity), 0.2, 1.0);
@@ -206,10 +213,11 @@ namespace PearNowPlaying
                 sb.AppendLine("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight,");
                 sb.AppendLine("#       또는 Custom x y bottom|top (트레이 메뉴의 '위젯 끌어서 옮기기'로 놓은 위치, 모니터 왼쪽과 아래/위 가장자리에서 떨어진 px)");
                 foreach (var w in Widgets) sb.AppendLine("widget" + (w.Monitor + 1).ToString(inv) + "=" + w.Spec());
-                sb.AppendLine("# 위젯마다의 크기 배율(1.0 = 기본)과 투명도(0 = 불투명, 최대 0.8). 글자까지 함께 투명해집니다.");
+                sb.AppendLine("# 위젯마다 표시 여부(false면 꺼 두고 설정만 보관), 크기 배율(1.0 = 기본), 투명도(0 = 불투명, 최대 0.8, 글자까지 함께 투명해짐)");
                 foreach (var w in Widgets)
                 {
                     var n = "widget" + (w.Monitor + 1).ToString(inv);
+                    sb.AppendLine(n + "Show=" + B(!w.Hidden));
                     sb.AppendLine(n + "Scale=" + w.Scale.ToString("0.##", inv));
                     sb.AppendLine(n + "Transparency=" + w.Transparency.ToString("0.##", inv));
                 }
