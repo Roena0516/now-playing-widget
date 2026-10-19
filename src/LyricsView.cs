@@ -33,6 +33,7 @@ namespace PearNowPlaying
         int leadingPseudo;          // 1 when a "♪" line was added before the first lyric
         int carried;                // lines kept from the previous song above this song's first line
         int ownEnd;                 // this song's entries end here; the next song's (SetNext) follow
+        bool mergedGap;             // this song's opening "♪" is the last kept line of the previous song's
         float s;
         int width, height, padX, padY, textX, textW;
         float gapY, viewportH, anchor;
@@ -44,7 +45,8 @@ namespace PearNowPlaying
 
         public int Width { get { return width; } }
         public int Height { get { return height; } }
-        public bool HasLines { get { return ownEnd > carried; } }
+        public bool HasLines { get { return ownEnd > carried || mergedGap; } }
+        int FirstOwn { get { return mergedGap ? carried - 1 : carried; } }
         public bool Animating { get { return anim.IsRunning && anim.Elapsed.TotalMilliseconds < animMs; } }
 
         /// <summary>
@@ -58,9 +60,9 @@ namespace PearNowPlaying
         {
             var keep = new List<Entry>();
             int keptCurrent = -1;
-            if (carryOver && current >= carried && current < ownEnd && (float)scale == s && panelWidth == width)
+            if (carryOver && current >= FirstOwn && current < ownEnd && (float)scale == s && panelWidth == width)
             {
-                int from = Math.Max(carried, current - 1);
+                int from = Math.Max(FirstOwn, current - 1);
                 int to = ownEnd - 1 - current <= NextShownWithin ? ownEnd - 1 : current;
                 for (int i = from; i <= to; i++) keep.Add(entries[i]);
                 keptCurrent = current - from;
@@ -68,6 +70,7 @@ namespace PearNowPlaying
             entries.Clear();
             current = previous = -1;
             carried = 0;
+            mergedGap = false;
             anim.Reset();
             s = (float)scale;
             width = panelWidth;
@@ -78,7 +81,9 @@ namespace PearNowPlaying
             gapY = 8 * s;
 
             leadingPseudo = lines.Count > 0 && lines[0].TimeMs > 0 ? 1 : 0;
-            entries.AddRange(Layout(lines, 0));
+            // the last song ending on "♪" and this one opening with one: a single "♪" line, not two in a row
+            mergedGap = keep.Count > 0 && keep[keep.Count - 1].Gap && StartsWithGap(lines);
+            entries.AddRange(Layout(lines, 0, mergedGap));
             ownEnd = entries.Count;
 
             if (keep.Count > 0)
@@ -121,17 +126,29 @@ namespace PearNowPlaying
         public void SetNext(List<LyricLine> next)
         {
             if (entries.Count > ownEnd) entries.RemoveRange(ownEnd, entries.Count - ownEnd);
-            if (next == null || next.Count == 0 || ownEnd == carried) return;
+            if (next == null || next.Count == 0 || ownEnd == 0) return;
             var last = entries[ownEnd - 1];
-            entries.AddRange(Layout(next, last.Y + last.H + gapY));
+            entries.AddRange(Layout(next, last.Y + last.H + gapY, last.Gap && StartsWithGap(next)));
         }
 
-        /// <summary>Entries for a song's lines from y down, with a "♪" line first if the song starts with music.</summary>
-        List<Entry> Layout(List<LyricLine> lines, float y)
+        /// <summary>The song's first panel line is a "♪" (it opens with music, or with a blank line).</summary>
+        static bool StartsWithGap(List<LyricLine> lines)
+        {
+            return lines.Count > 0 && (lines[0].TimeMs > 0 || IsGap(lines[0].Text));
+        }
+
+        static bool IsGap(string text) { return string.IsNullOrWhiteSpace(text) || text.Trim() == "♪"; }
+
+        /// <summary>
+        /// Entries for a song's lines from y down, with a "♪" line first if the song starts with music.
+        /// skipFirst leaves that first "♪" out (the line above already is one).
+        /// </summary>
+        List<Entry> Layout(List<LyricLine> lines, float y, bool skipFirst = false)
         {
             var texts = new List<string>();
             if (lines.Count > 0 && lines[0].TimeMs > 0) texts.Add("");
             foreach (var l in lines) texts.Add(l.Text ?? "");
+            if (skipFirst && texts.Count > 0) texts.RemoveAt(0);
             var result = new List<Entry>();
             using (var probe = new Bitmap(1, 1))
             using (var g = Graphics.FromImage(probe))
@@ -139,7 +156,7 @@ namespace PearNowPlaying
                 g.TextRenderingHint = TextRenderingHint.AntiAlias;
                 foreach (var t in texts)
                 {
-                    var e = new Entry { Gap = string.IsNullOrWhiteSpace(t) };
+                    var e = new Entry { Gap = IsGap(t) };
                     e.Text = e.Gap ? "♪" : t.Trim();
                     e.Font = Fonts.Get(Weight.Medium, 18f * s, e.Text);
                     e.LineH = CardRenderer.LineHeight(e.Font, g);
@@ -156,9 +173,10 @@ namespace PearNowPlaying
         /// <summary>Map an index from LyricsResult.IndexAt (-1 = before the first line) to a panel entry.</summary>
         public int EntryFor(int lyricIndex)
         {
-            if (ownEnd == carried) return -1;
-            int e = carried + (lyricIndex < 0 ? 0 : lyricIndex + leadingPseudo);
-            return Math.Max(carried, Math.Min(ownEnd - 1, e));
+            if (ownEnd == FirstOwn) return -1;
+            // with mergedGap, the song's own first line (its "♪") is the kept one just above
+            int e = FirstOwn + (lyricIndex < 0 ? 0 : lyricIndex + leadingPseudo);
+            return Math.Max(FirstOwn, Math.Min(ownEnd - 1, e));
         }
 
         public int Current { get { return current; } }

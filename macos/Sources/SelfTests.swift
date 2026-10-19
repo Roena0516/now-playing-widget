@@ -18,6 +18,15 @@ import CoreGraphics
     client.handle(["type": "POSITION_CHANGED", "position": 80])
     client.handle(["type": "PLAYER_STATE_CHANGED", "isPlaying": false])
     precondition(client.song.paused && client.elapsed >= 80 && client.elapsed < 81)
+    // Pear's position 0 just before VIDEO_CHANGED (recorded 0.3s apart) isn't a rewind of the ending song
+    client.handle(["type": "POSITION_CHANGED", "position": 198])
+    client.handle(["type": "POSITION_CHANGED", "position": 0])
+    precondition(client.elapsed >= 198, "position 0 at the end waits for the next song")
+    client.handle(["type": "VIDEO_CHANGED", "position": 0, "song": ["title": "next", "songDuration": 180, "videoId": "next"]])
+    precondition(client.song.title == "next" && client.elapsed < 1)
+    client.handle(["type": "POSITION_CHANGED", "position": 50])
+    client.handle(["type": "POSITION_CHANGED", "position": 0])
+    precondition(client.elapsed < 1, "a seek to the start mid-song still works")
     precondition(parseLRC("[ar:Artist]\nplain text").isEmpty)
     client.stop()
     let socketRequest = makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: "test-token")
@@ -98,6 +107,15 @@ import CoreGraphics
     precondition(abs((view.entries[3].y - view.entries[1].y) - waiting) < 0.001, "the next song's lines don't move when its turn comes")
     view.setNext([])
     precondition(view.entries.count == 7, "taking the next song's lines away")
+    // a song ending on "♪" and the next opening with one: one "♪" line, which the next song starts on
+    let closing = [LyricLine(id: 0, time: 0, text: "a"), LyricLine(id: 1, time: 10, text: "b"), LyricLine(id: 2, time: 20, text: "")]
+    view.setLines(closing, width: 420); view.setNext(second)
+    precondition(view.entries.count == 6 && view.entries[2].gap && view.entries[3].text == "second 0", "no two \"♪\" in a row while waiting")
+    let gapToFirst = view.entries[3].y - view.entries[2].y
+    view.setLines(second, width: 420, carryFrom: view.entry(at: 25, lines: closing))
+    precondition(view.entries.count == 5 && view.entries[1].gap && view.entries[2].text == "second 0" && view.carriedCurrent == 1, "nor after the change")
+    precondition(view.entry(at: 0, lines: second) == 1 && view.entry(at: 6, lines: second) == 2, "the new song starts on the shared \"♪\"")
+    precondition(abs((view.entries[2].y - view.entries[1].y) - gapToFirst) < 0.001, "and its lines stay where they were")
     view.setLines(second, width: 500, carryFrom: 3)
     precondition(view.carried == 0, "a new width lays out from scratch")
     print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, scrolling on into the next song, Pear song/state/seek messages")

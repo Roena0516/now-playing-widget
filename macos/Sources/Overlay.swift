@@ -178,7 +178,9 @@ final class OverlayPanel: NSPanel {
     }
     private var scroll: CGFloat { scrollFrom + (scrollTo - scrollFrom) * progress }
     private func tick() {
-        if lyricsVisible {
+        // the song just changed and refresh() hasn't swapped the lyrics yet: the old ones must not follow the new
+        // song's position (they scrolled back to the top before the next song's lines came in)
+        if lyricsVisible && linesSong == client.song.identity {
             let index = lyrics.entry(at: client.elapsed + client.settings.lyricsOffsetMs / 1000, lines: lines)
             if index != current && lyrics.entries.indices.contains(index) {
                 scrollFrom = scroll; scrollTo = lyrics.entries[index].y - lyrics.anchor
@@ -211,6 +213,7 @@ final class OverlayPanel: NSPanel {
             // the next song's lyrics arrived (or went away): below this song's last line
             lyrics.setNext(client.nextLines); shownNext = client.nextLines
         }
+        linesSong = client.song.identity   // the client sets a song and its lyrics together
         let shouldShow = client.settings.showLyrics && !lines.isEmpty && !client.song.title.isEmpty
         if shouldShow != lyricsVisible {
             lyricsVisible = shouldShow

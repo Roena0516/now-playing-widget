@@ -171,6 +171,9 @@ struct NativeLyricEntry {
     private(set) var carriedCurrent = -1
     /// This song's entries end here; the next song's (setNext) follow.
     private(set) var ownEnd = 0
+    /// This song's opening "♪" is the last kept line of the previous song's.
+    private(set) var mergedGap = false
+    private var firstOwn: Int { mergedGap ? carried - 1 : carried }
     var width: CGFloat = 420
     let font = NativeTheme.font(18, medium: true)
     var lineH: CGFloat { NativeTheme.lineHeight(font) }
@@ -185,14 +188,16 @@ struct NativeLyricEntry {
     func setLines(_ lines: [LyricLine], width: CGFloat, carryFrom current: Int? = nil) {
         var keep: [NativeLyricEntry] = []
         carriedCurrent = -1
-        if let current, width == self.width, current >= carried, current < ownEnd {
-            let from = max(carried, current - 1)
+        if let current, width == self.width, current >= firstOwn, current < ownEnd {
+            let from = max(firstOwn, current - 1)
             keep = Array(entries[from...(ownEnd - 1 - current <= Self.nextShownWithin ? ownEnd - 1 : current)])
             carriedCurrent = current - from
         }
         self.width = width; carried = 0; leadingPseudo = (lines.first?.time ?? 0) > 0 ? 1 : 0
-        entries = layout(lines, from: 0); ownEnd = entries.count
-        guard !keep.isEmpty, !entries.isEmpty else { carriedCurrent = -1; return }
+        // the last song ending on "♪" and this one opening with one: a single "♪" line, not two in a row
+        mergedGap = keep.last?.gap == true && Self.startsWithGap(lines)
+        entries = layout(lines, from: 0, skipFirst: mergedGap); ownEnd = entries.count
+        guard !keep.isEmpty, !entries.isEmpty || mergedGap else { carriedCurrent = -1; mergedGap = false; return }
         // the kept lines end one gap above the new first line
         var top: CGFloat = -8
         for i in keep.indices.reversed() { top -= keep[i].height; keep[i].y = top; top -= 8 }
@@ -204,12 +209,20 @@ struct NativeLyricEntry {
     /// is already in view and the change just scrolls on. Empty takes them away.
     func setNext(_ next: [LyricLine]) {
         entries.removeSubrange(ownEnd...)
-        guard !next.isEmpty, ownEnd > carried, let last = entries.last else { return }
-        entries += layout(next, from: last.y + last.height + 8)
+        guard !next.isEmpty, let last = entries.last else { return }
+        entries += layout(next, from: last.y + last.height + 8, skipFirst: last.gap && Self.startsWithGap(next))
     }
-    private func layout(_ lines: [LyricLine], from start: CGFloat) -> [NativeLyricEntry] {
+    /// The song's first panel line is a "♪" (it opens with music, or with a blank line).
+    static func startsWithGap(_ lines: [LyricLine]) -> Bool {
+        guard let first = lines.first else { return false }
+        return first.time > 0 || first.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || first.text == "♪"
+    }
+    /// Entries for a song's lines from `start` down, with a "♪" first if the song opens with music. `skipFirst`
+    /// leaves that first "♪" out (the line above already is one).
+    private func layout(_ lines: [LyricLine], from start: CGFloat, skipFirst: Bool = false) -> [NativeLyricEntry] {
         var texts = lines.map(\.text)
         if (lines.first?.time ?? 0) > 0 { texts.insert("♪", at: 0) }
+        if skipFirst && !texts.isEmpty { texts.removeFirst() }
         var y = start, result: [NativeLyricEntry] = []
         for text in texts {
             let gap = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text == "♪"
@@ -221,7 +234,8 @@ struct NativeLyricEntry {
         return result
     }
     func entry(at time: Double, lines: [LyricLine]) -> Int {
-        min(carried + max(0, (activeLyric(lines, at: time) ?? -leadingPseudo) + leadingPseudo), max(carried, ownEnd - 1))
+        // with mergedGap, the song's own first line (its "♪") is the kept one just above
+        min(firstOwn + max(0, (activeLyric(lines, at: time) ?? -leadingPseudo) + leadingPseudo), max(firstOwn, ownEnd - 1))
     }
     private func fit(_ text: String) -> String {
         if NativeTheme.width(text, font: font) <= textWidth { return text }
