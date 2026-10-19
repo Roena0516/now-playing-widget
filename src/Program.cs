@@ -23,8 +23,14 @@ namespace PearNowPlaying
     internal static class Program
     {
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            // started by an update: wait for the old instance to exit so the single-instance check lets us in
+            int pid;
+            if (args.Length == 2 && args[0] == "--wait-for" && int.TryParse(args[1], out pid))
+            {
+                try { System.Diagnostics.Process.GetProcessById(pid).WaitForExit(15000); } catch { }
+            }
             bool created;
             using (var mutex = new Mutex(true, "Local\\PearNowPlaying_SingleInstance", out created))
             {
@@ -45,7 +51,8 @@ namespace PearNowPlaying
                 AppDomain.CurrentDomain.UnhandledException += (s, e) => Log.Write("FATAL " + e.ExceptionObject);
 
                 SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
-                Log.Info("start");
+                Log.Info("start " + AppInfo.Version);
+                Updater.CleanupOld(Application.ExecutablePath);
                 Application.Run(new TrayApp());
                 Log.Info("exit");
             }

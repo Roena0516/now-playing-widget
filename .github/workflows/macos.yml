@@ -21,6 +21,8 @@ jobs:
         run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --ytmusic-tests'
       - name: Test Pear authentication, WebSocket and controls
         run: python3 macos/Tests/mock_pear.py
+      - name: Test updating from GitHub releases
+        run: python3 macos/Tests/mock_update.py
       - uses: actions/upload-artifact@v4
         with:
           name: PearNowPlaying-macOS

@@ -31,6 +31,17 @@ import CoreGraphics
     let old = try! JSONDecoder().decode(Settings.self, from: Data(#"{"host":"127.0.0.1","port":26538,"scale":1.25,"position":"TopRight","showLyrics":false}"#.utf8))
     precondition(old.scale == 1.25 && old.position == "TopRight" && !old.showLyrics && old.ytmLyrics && old.ytmLyricsProxy == YTMusicProvider.defaultProxy && old.lyricsServer == "https://lrclib.net")
     precondition(Song(["mediaType": "USER_GENERATED_CONTENT", "title": "x"]).mediaType == "USER_GENERATED_CONTENT")
+    // updates: the same version comparison and release file choice as the Windows version (src/Updater.cs)
+    precondition(Updater.isNewer("1.6.0", than: "1.5.2") && Updater.isNewer("v2.0", than: "1.9.9") && !Updater.isNewer("1.5.2", than: "1.5.2"))
+    precondition(!Updater.isNewer("1.5.10", than: "1.6.0") && Updater.isNewer("1.5.10", than: "1.5.9") && !Updater.isNewer("abc", than: "1.0.0"))
+    let release: [String: Any] = ["tag_name": "v2.0.0", "html_url": "page", "assets": [
+        ["name": "PearNowPlaying-Windows-2.0.0.zip", "browser_download_url": "w", "digest": "sha256:aa"],
+        ["name": "PearNowPlaying-macOS-2.0.0.dmg", "browser_download_url": "m", "digest": "sha256:BB"]]]
+    precondition(Updater.info(from: release, current: "1.5.2") == UpdateInfo(version: "2.0.0", assetName: "PearNowPlaying-macOS-2.0.0.dmg", url: "m", sha256: "bb", pageURL: "page"))
+    precondition(Updater.info(from: release, current: "2.0.0") == nil, "up to date")
+    precondition(Updater.info(from: ["tag_name": "v2.0.0", "assets": [["name": "PearNowPlaying-macOS-2.0.0.dmg", "browser_download_url": "m"]]], current: "1.5.2") == nil,
+                 "a release without a SHA-256 is not offered")
+    precondition(Settings().checkUpdates, "update checks are on by default")
     // hotkeys use the Windows config format
     precondition(Hotkeys.parse("Ctrl+Alt+Up")! == (UInt32(kVK_UpArrow), UInt32(controlKey | optionKey)))
     precondition(Hotkeys.parse("ctrl + shift + F9")! == (UInt32(kVK_F9), UInt32(controlKey | shiftKey)))

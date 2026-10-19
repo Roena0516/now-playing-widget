@@ -21,6 +21,11 @@ namespace PearNowPlaying
         readonly ContextMenuStrip menu;
         readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, albumOnlyItem, retryLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu, monitorMenu, moveItem, titleMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        readonly Updater updater = new Updater();
+        readonly ToolStripMenuItem updateItem;
+        UpdateInfo update;          // a newer release found on GitHub
+        string announcedUpdate;     // told the user about this version already
+        bool installing;
         readonly SynchronizationContext ui;
         readonly double dpiScale;
         readonly System.Windows.Forms.Timer lyricsTimer = new System.Windows.Forms.Timer { Interval = 100 };
@@ -127,6 +132,8 @@ namespace PearNowPlaying
             menu.Items.Add(new ToolStripMenuItem("설정 파일 열기", null, (s, e) => OpenFile(Config.FilePath)));
             menu.Items.Add(new ToolStripMenuItem("설정 다시 불러오기", null, (s, e) => ReloadConfig()));
             menu.Items.Add(new ToolStripMenuItem("오류 기록 열기", null, (s, e) => OpenFile(Config.LogPath)));
+            updateItem = new ToolStripMenuItem("업데이트 확인", null, (s, e) => UpdateClicked());
+            menu.Items.Add(updateItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("종료", null, (s, e) => ExitThread()));
             menu.Opening += (s, e) => SyncMenuChecks();
@@ -157,6 +164,7 @@ namespace PearNowPlaying
             pear.PlayStateChanged += OnPlayState;
             pear.PositionChanged += OnPosition;
             pear.Start();
+            StartUpdateChecks();
         }
 
         // ---- pear events -----------------------------------------------------
@@ -439,6 +447,85 @@ namespace PearNowPlaying
             cfg.LyricsOffsetMs = ms;
             cfg.Save();
             TickLyrics(true);
+        }
+
+        // ---- updates ---------------------------------------------------------------------
+        // GitHub's latest release is checked 30 s after start and then daily ("checkUpdates"); installing happens
+        // only when the user picks it from the menu, never mid-game on its own.
+
+        void StartUpdateChecks()
+        {
+            Task.Run(async () =>
+            {
+                await Task.Delay(30000);
+                while (true)
+                {
+                    if (cfg.CheckUpdates) await CheckForUpdate(false);
+                    await Task.Delay(TimeSpan.FromHours(24));
+                }
+            });
+        }
+
+        async Task CheckForUpdate(bool manual)
+        {
+            try
+            {
+                var found = await updater.Check(AppInfo.Version, CancellationToken.None);
+                ui.Post(_ =>
+                {
+                    update = found;
+                    if (found != null)
+                    {
+                        Log.Info("update available: " + found.Version + " (" + found.AssetName + ")");
+                        if (manual || found.Version != announcedUpdate)
+                        {
+                            announcedUpdate = found.Version;
+                            ShowInfo("새 버전 " + found.Version + "이 있어요. 메뉴에서 업데이트할 수 있어요");
+                        }
+                    }
+                    else if (manual) ShowInfo("최신 버전이에요 (" + AppInfo.Version + ")");
+                }, null);
+            }
+            catch (Exception ex)
+            {
+                Log.Write("INFO update check failed: " + (ex is OperationCanceledException ? "timeout" : ex.Message));
+                if (manual) ui.Post(_ => ShowInfo("업데이트를 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요"), null);
+            }
+        }
+
+        void UpdateClicked()
+        {
+            if (update == null) { ShowInfo("업데이트를 확인하는 중이에요"); Task.Run(() => CheckForUpdate(true)); return; }
+            if (installing) return;
+            installing = true;
+            var target = update;
+            var exe = Application.ExecutablePath;
+            ShowInfo("업데이트를 받는 중이에요 (" + target.Version + ")");
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var dir = Path.Combine(Path.GetTempPath(), "PearNowPlaying-update-" + target.Version);
+                    var zip = await updater.Download(target, dir, CancellationToken.None);
+                    Updater.Install(zip, exe, target.Version);
+                    Log.Info("updated to " + target.Version + ", restarting");
+                    ui.Post(_ =>
+                    {
+                        Process.Start(exe, "--wait-for " + Process.GetCurrentProcess().Id);
+                        ExitThread();
+                    }, null);
+                }
+                catch (Exception ex)
+                {
+                    Log.Write("WARN update to " + target.Version + " failed: " + ex.GetType().Name + ": " + ex.Message);
+                    ui.Post(_ =>
+                    {
+                        installing = false;
+                        ShowInfo("업데이트하지 못했어요. 릴리스 페이지를 열게요");
+                        try { Process.Start(target.PageUrl); } catch (Exception e2) { Log.Error("open release page", e2); }
+                    }, null);
+                }
+            });
         }
 
         // ---- album track titles -----------------------------------------------------------
@@ -841,6 +928,7 @@ namespace PearNowPlaying
             lyricsItem.Checked = cfg.ShowLyrics;
             albumOnlyItem.Checked = cfg.LyricsAlbumOnly;
             moveItem.Checked = moveMode;
+            updateItem.Text = update != null ? "업데이트 설치 (" + update.Version + ")" : "업데이트 확인";
             foreach (ToolStripMenuItem it in titleMenu.DropDownItems) it.Checked = (bool)it.Tag == cfg.VideoTitle;
             BuildMonitorMenu();
             foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
@@ -898,7 +986,7 @@ namespace PearNowPlaying
             try { pear.Dispose(); } catch { }
             try { hotkeys.Dispose(); } catch { }
             try { cardWin.Close(); cardWin.Dispose(); lyricsWin.Close(); lyricsWin.Dispose(); } catch { }
-            try { tray.Dispose(); menu.Dispose(); artHttp.Dispose(); lyricsProvider.Dispose(); } catch { }
+            try { tray.Dispose(); menu.Dispose(); artHttp.Dispose(); lyricsProvider.Dispose(); updater.Dispose(); } catch { }
             base.ExitThreadCore();
         }
     }

@@ -11,6 +11,10 @@ import CoreText
     var screenObserver: NSObjectProtocol?
     var setupTask: Task<Void, Never>?
     let preview = CommandLine.arguments.contains("--preview")
+    let updater = Updater()
+    var update: UpdateInfo?         // a newer release found on GitHub
+    var announcedUpdate = ""        // told the user about this version already
+    var installing = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         Log.migrate()
@@ -45,7 +49,64 @@ import CoreText
             client.handle(["type": "PLAYER_INFO", "isPlaying": true, "song": ["title": "Pear Now Playing · macOS", "artist": "오버레이 미리보기", "album": "한국어 · 日本語 · English", "songDuration": 240, "elapsedSeconds": 42, "isPaused": false]])
             client.lines = parseLRC("[00:00.00]음악과 함께하는 시간\n[00:40.00]macOS에서도 만나는 싱크 가사\n[00:46.00]クリックを通すオーバーレイ\n[00:52.00]Your music, always nearby")
             overlay.show(temporary: false)
-        } else { client.start(); overlay.show() }
+        } else { client.start(); overlay.show(); startUpdateChecks() }
+    }
+
+    // GitHub's latest release is checked 30 s after start and then daily ("checkUpdates"); installing happens
+    // only when the user picks it from the menu, never mid-game on its own. Same as the Windows version.
+    func startUpdateChecks() {
+        Task {
+            try? await Task.sleep(for: .seconds(30))
+            while !Task.isCancelled {
+                if client.settings.checkUpdates { await checkForUpdate(manual: false) }
+                try? await Task.sleep(for: .seconds(86400))
+            }
+        }
+    }
+
+    func checkForUpdate(manual: Bool) async {
+        do {
+            let found = try await updater.check()
+            update = found; updateMenu()
+            if let found {
+                Log.info("update available: \(found.version) (\(found.assetName))")
+                if manual || found.version != announcedUpdate {
+                    announcedUpdate = found.version
+                    overlay.showInfo("새 버전 \(found.version)이 있어요. 메뉴에서 업데이트할 수 있어요")
+                }
+            } else if manual { overlay.showInfo("최신 버전이에요 (\(appVersion))") }
+        } catch {
+            Log.write("INFO update check failed: \(error.localizedDescription)")
+            if manual { overlay.showInfo("업데이트를 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
+        }
+    }
+
+    @objc func updateClicked() {
+        guard let target = update else {
+            overlay.showInfo("업데이트를 확인하는 중이에요")
+            Task { await checkForUpdate(manual: true) }
+            return
+        }
+        guard !installing else { return }
+        installing = true
+        overlay.showInfo("업데이트를 받는 중이에요 (\(target.version))")
+        Task {
+            var dmg: URL?
+            do {
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("PearNowPlaying-update-\(target.version)")
+                dmg = try await updater.download(target, into: dir)
+                let app = Bundle.main.bundleURL, id = Bundle.main.bundleIdentifier ?? "", file = dmg!
+                try await Task.detached { try Updater.install(dmg: file, version: target.version, into: app, bundleId: id) }.value
+                Log.info("updated to \(target.version), restarting")
+                Updater.relaunch(app)
+            } catch {
+                // e.g. no permission to replace the app (another user's install, run from the DMG): install by hand
+                Log.write("WARN update to \(target.version) failed: \(error.localizedDescription)")
+                installing = false
+                overlay.showInfo(dmg != nil ? "업데이트하지 못했어요. 받은 파일을 열게요" : "업데이트하지 못했어요. 릴리스 페이지를 열게요")
+                if let dmg { NSWorkspace.shared.open(dmg) } else if let page = URL(string: target.pageURL) { NSWorkspace.shared.open(page) }
+            }
+        }
     }
     func registerFonts() { NativeTheme.registerFonts() }
     var lastIdentity = ""
@@ -129,6 +190,7 @@ import CoreText
         add(menu, "설정 파일 열기", #selector(openConfig))
         add(menu, "설정 다시 불러오기", #selector(reload))
         add(menu, "오류 기록 열기", #selector(openLog))
+        add(menu, update.map { "업데이트 설치 (\($0.version))" } ?? "업데이트 확인", #selector(updateClicked))
         menu.addItem(.separator())
         add(menu, "종료", #selector(quit))
         item.menu = menu
@@ -254,6 +316,20 @@ if CommandLine.arguments.contains("--ytmusic-tests") {
 } else if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
     do { try renderNativePreview(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
     catch { fputs("Preview failed: \(error)\n", stderr); exit(1) }
+} else if let index = CommandLine.arguments.firstIndex(of: "--update-test"), CommandLine.arguments.count > index + 2 {
+    // the whole update against a given releases URL, installing into the given app instead of this one
+    let target = URL(fileURLWithPath: CommandLine.arguments[index + 2])
+    Task {
+        let updater = Updater(); updater.apiURL = URL(string: CommandLine.arguments[index + 1])!
+        let plist = NSDictionary(contentsOf: target.appendingPathComponent("Contents/Info.plist")) ?? [:]
+        do {
+            guard let info = try await updater.check(current: plist["CFBundleShortVersionString"] as? String ?? "0") else { print("UP TO DATE"); exit(0) }
+            let dmg = try await updater.download(info, into: FileManager.default.temporaryDirectory.appendingPathComponent("pnp-update-test-\(UUID().uuidString)"))
+            try Updater.install(dmg: dmg, version: info.version, into: target, bundleId: plist["CFBundleIdentifier"] as? String ?? "")
+            print("UPDATED to \(info.version)"); exit(0)
+        } catch { print("FAILED: \(error.localizedDescription)"); exit(1) }
+    }
+    RunLoop.main.run()
 } else if CommandLine.arguments.contains("--self-test") {
     runSelfTests()
 } else if CommandLine.arguments.contains("--integration-test") {

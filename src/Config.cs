@@ -46,6 +46,8 @@ namespace PearNowPlaying
         public bool ShowLyrics = true;
         /// <summary>Lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up.</summary>
         public bool LyricsAlbumOnly = false;
+        /// <summary>Look for a new release on GitHub at start and once a day (installing is always the user's choice).</summary>
+        public bool CheckUpdates = true;
         public bool LyricsShowNext = true;
         public int LyricsOffsetMs = 300;
         public string LyricsServer = "https://lrclib.net";
@@ -98,6 +100,7 @@ namespace PearNowPlaying
                 c.VideoTitle = GetBool(map, "videoTitle", c.VideoTitle);
                 c.ShowLyrics = GetBool(map, "showLyrics", c.ShowLyrics);
                 c.LyricsAlbumOnly = GetBool(map, "lyricsAlbumOnly", c.LyricsAlbumOnly);
+                c.CheckUpdates = GetBool(map, "checkUpdates", c.CheckUpdates);
                 c.LyricsShowNext = GetBool(map, "lyricsShowNext", c.LyricsShowNext);
                 c.LyricsOffsetMs = Math.Max(-10000, Math.Min(10000, GetInt(map, "lyricsOffsetMs", c.LyricsOffsetMs)));
                 c.LyricsServer = Get(map, "lyricsServer", c.LyricsServer);
@@ -170,6 +173,9 @@ namespace PearNowPlaying
                 sb.AppendLine("ytmLyrics=" + B(YtmLyrics));
                 sb.AppendLine("# YouTube Music 가사 중계 서버 (Pear Desktop이 쓰는 외부 서버)");
                 sb.AppendLine("ytmLyricsProxy=" + YtmLyricsProxy);
+                sb.AppendLine();
+                sb.AppendLine("# 새 버전이 있는지 GitHub에서 확인 (켜 두면 시작할 때와 하루에 한 번, 설치는 메뉴에서 직접 누를 때만 함)");
+                sb.AppendLine("checkUpdates=" + B(CheckUpdates));
                 sb.AppendLine();
                 sb.AppendLine("# 단축키 (예: Ctrl+Alt+Right, Ctrl+Shift+F9, 비워두면 사용 안 함)");
                 sb.AppendLine("hotkeyShow=" + HotkeyShow);

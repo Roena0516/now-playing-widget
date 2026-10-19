@@ -27,6 +27,8 @@ struct Settings: Codable {
     var showLyrics = true
     /// lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up
     var lyricsAlbumOnly = false
+    /// look for a new release on GitHub at start and once a day (installing is always the user's choice)
+    var checkUpdates = true
     var lyricsOffsetMs: Double = 300
     var ytmLyrics = true
     var ytmLyricsProxy = YTMusicProvider.defaultProxy
@@ -57,6 +59,7 @@ struct Settings: Codable {
         hotkeyAlwaysShow = try value(.hotkeyAlwaysShow, hotkeyAlwaysShow); hotkeyLyrics = try value(.hotkeyLyrics, hotkeyLyrics)
         lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
         lyricsAlbumOnly = try value(.lyricsAlbumOnly, lyricsAlbumOnly)
+        checkUpdates = try value(.checkUpdates, checkUpdates)
         ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
         lyricsServer = try value(.lyricsServer, lyricsServer)
         positionLayoutVersion = try c.decodeIfPresent(Int.self, forKey: .positionLayoutVersion)
