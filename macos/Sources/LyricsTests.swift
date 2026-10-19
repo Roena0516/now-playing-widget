@@ -36,6 +36,12 @@ import Foundation
     precondition(LyricsProvider.pick([marked, worded], song: pupa) == nil, "but not when an entry of this version has words")
     let original = Song(["title": "PUPA", "artist": "Morimori Atsushi", "songDuration": 128])
     precondition(LyricsProvider.pick([LyricRecord(trackName: "Pupa", artistName: "Morimori Atsushi", duration: 128, instrumental: true, syncedLyrics: nil, plainLyrics: nil)], song: original)?.instrumental == true)
+    // romanized title and artist from Pear, the original title from YouTube Music: the entry crediting ササノマリイ (a tag)
+    let kanade = Song(["title": "kanade tomosu sora nekobolo version", "alternativeTitle": "カナデトモスソラ　ねこぼーろver.", "artist": "Sasanomaly", "album": "nekobolo selection", "songDuration": 256,
+                       "tags": ["Sasanomaly", "ササノマリイ", "nekobolo", "ねこぼーろ", "ネコボーロ", "nekobolo selection", "kanade tomosu sora nekobolo version"]])
+    let unit = LyricRecord(trackName: "カナデトモスソラ", artistName: "25時、ナイトコードで。", duration: 257, instrumental: false, syncedLyrics: "[00:01.00]a")
+    let credited = LyricRecord(trackName: "カナデトモスソラ (feat. 宵崎奏&朝比奈まふゆ&東雲絵名&暁山瑞希&巡音ルカ)", artistName: "ササノマリイ/ねこぼーろ/25時、ナイトコードで。/巡音ルカ", duration: 257, instrumental: false, syncedLyrics: "[00:01.00]b")
+    precondition(LyricsProvider.pick([unit, credited], song: kanade)?.syncedLyrics == "[00:01.00]b", "the original title lets a tag vouch for the artist")
     // a tag only vouches for the artist: "LAMIA" by BlackY (tagged with its own title) must not take Lamia's song
     let lamia = Song(["title": "LAMIA", "alternativeTitle": "LAMIA", "artist": "BlackY", "album": "ONGEKI Sound Collection 06",
                       "tags": ["BlackY", "ブラッキー", "ONGEKI Sound Collection 06", "LAMIA"], "songDuration": 150])

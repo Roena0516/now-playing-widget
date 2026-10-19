@@ -275,6 +275,19 @@ enum CoverLyrics {
         if dash.count == 2 && sameTitle(dash[0], title) { return dash[1] }
         return norm(text) != norm(title) ? text : ""
     }
+    /// The original title when Pear has only the translation (the first half of the queue's "original - translation",
+    /// see displayTitle), or nil. Same as src/CoverLyrics.cs.
+    static func originalTitle(_ pearTitle: String, queueTitle: String) -> String? {
+        if displayTitle(pearTitle, queueTitle: queueTitle) == pearTitle { return nil }
+        return dashes.split(featTail.replace(queueTitle, with: "").trimmed)[0].trimmed
+    }
+    /// "カナデトモスソラ ねこぼーろver." -> "カナデトモスソラ": a "○○ver." that only names who sings it. Arrangements
+    /// ("Acoustic ver.", "piano ver.") stay as they are, since their timing differs.
+    static func withoutVersionTag(_ title: String) -> String {
+        if title.isEmpty || looksArranged(title) { return title }
+        let t = Rx(#"[\s\u3000]+\S*\s*(?:ver\.?|version)\s*$"#, ignoreCase: true).replace(title, with: "").trimmed
+        return t.isEmpty ? title : t
+    }
     static func displayTitle(_ pearTitle: String, queueTitle: String) -> String {
         if pearTitle.trimmed.isEmpty || queueTitle.trimmed.isEmpty { return pearTitle }
         let core = featTail.replace(pearTitle, with: "").trimmed

@@ -126,7 +126,9 @@ struct LyricRecord: Decodable {
         if best == nil {
             let alt = song.alternativeTitle.isEmpty ? song.title : song.alternativeTitle
             let artist = Self.artistVariants(song.artist).first ?? ""
-            for text in [alt + " " + artist, Self.cleanTitle(song.title) + " " + artist, Self.cleanTitle(alt)].map(\.trimmed).uniqued() where !text.isEmpty {
+            // the last one without a "○○ver." naming the singer: other versions of the same song are listed by the
+            // bare title, and the artist / title / length checks still decide
+            for text in [alt + " " + artist, Self.cleanTitle(song.title) + " " + artist, CoverLyrics.withoutVersionTag(Self.cleanTitle(alt))].map(\.trimmed).uniqued() where !text.isEmpty {
                 let records = try await attempt([]) { try await search([URLQueryItem(name: "q", value: text)]) }; seen += records
                 if let match = Self.pick(records, song: song, tolerance: artistTolerance) { best = match; how = "q=" + text; break }
             }

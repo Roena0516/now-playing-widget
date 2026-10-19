@@ -94,7 +94,7 @@ struct LrclibFailed: LocalizedError {
 
         // 3) LRCLIB. A cover's own title can only match by title (the uploader isn't the original artist), which
         // picks songs that merely share the name: covers take artist matches only.
-        var result = try await lrclib.find(song, titleOnly: !CoverLyrics.mayBeCover(song))
+        var result = try await lrclib.find(withOriginalTitle(song), titleOnly: !CoverLyrics.mayBeCover(song))
         if case .notFound = result, ytmPlain { result = .plainOnly }
         // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
         if result.isFound { _ = keep(key, song, result) }
@@ -231,6 +231,16 @@ struct LrclibFailed: LocalizedError {
         guard case .synced(let lines, _) = l else { return nil }
         log("INFO lyrics found via original \"\(title)\" on LRCLIB: \(song.artist) - \(song.title)")
         return .synced(lines, source: "LRCLIB · 원곡 검색")
+    }
+
+    /// An album track whose title Pear gives only translated or romanized ("kanade tomosu sora nekobolo version") is
+    /// also searched under its original title, which YouTube Music's lookup already brought ("カナデトモスソラ　ねこぼーろver."):
+    /// LRCLIB mostly lists songs under their original titles. Same as src/Lyrics.cs.
+    private func withOriginalTitle(_ song: Song) -> Song {
+        guard song.mediaType == "AUDIO", let track = ytm.known(song.videoId),
+              let original = CoverLyrics.originalTitle(song.title, queueTitle: track.title) else { return song }
+        var copy = song; copy.alternativeTitle = original
+        return copy
     }
 
     private func lrclibFind(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15) async throws -> LyricsLookup {

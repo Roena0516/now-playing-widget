@@ -222,7 +222,7 @@ namespace PearNowPlaying
             // 3) LRCLIB
             // a cover's own title can only match LRCLIB by title (the uploader isn't the original artist), which picks
             // songs that merely share the name: covers take artist matches only
-            var result = await FindLrclib(song, ct, 3, !CoverLyrics.MayBeCover(song));
+            var result = await FindLrclib(WithOriginalTitle(song), ct, 3, !CoverLyrics.MayBeCover(song));
             // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
             if (!result.Failed && (result.HasSynced || result.Instrumental || (cacheMisses && !ytmError)))
                 Keep(key, song, result);
@@ -353,6 +353,19 @@ namespace PearNowPlaying
             return l.Failed ? l : null;   // LRCLIB busy: let the caller retry later
         }
 
+        /// <summary>
+        /// An album track whose title Pear gives only translated or romanized ("kanade tomosu sora nekobolo version")
+        /// is also searched under its original title, which YouTube Music's lookup already brought
+        /// ("カナデトモスソラ　ねこぼーろver."): LRCLIB mostly lists songs under their original titles.
+        /// </summary>
+        SongInfo WithOriginalTitle(SongInfo song)
+        {
+            if (song.MediaType != "AUDIO") return song;
+            var track = Ytm.Known(song.VideoId);
+            var original = track != null ? CoverLyrics.OriginalTitle(song.Title, track.Title) : null;
+            return original != null ? song.WithAltTitle(original) : song;
+        }
+
         /// <param name="titleOnly">also accept a result whose artist differs if the title and length match</param>
         /// <param name="artistTolerance">how far (seconds) a result by the same artist may be from the song's length</param>
         async Task<LyricsResult> FindLrclib(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3, bool titleOnly = true,
@@ -407,7 +420,10 @@ namespace PearNowPlaying
                 if (best == null)
                 {
                     var alt = string.IsNullOrEmpty(song.AltTitle) ? song.Title : song.AltTitle;
-                    foreach (var text in new[] { alt + " " + FirstArtist(song.Artist), CleanTitle(song.Title) + " " + FirstArtist(song.Artist), CleanTitle(alt) }.Distinct())
+                    // the last one without a "○○ver." naming the singer: other versions of the same song are listed by
+                    // the bare title, and the artist / title / length checks still decide
+                    foreach (var text in new[] { alt + " " + FirstArtist(song.Artist), CleanTitle(song.Title) + " " + FirstArtist(song.Artist),
+                                                 CoverLyrics.WithoutVersionTag(CleanTitle(alt)) }.Distinct())
                     {
                         if (string.IsNullOrWhiteSpace(text)) continue;
                         var qText = text.Trim();

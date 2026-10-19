@@ -87,5 +87,11 @@ import Foundation
     precondition(CoverLyrics.displayTitle("Night Dancer feat. X", queueTitle: "夜のダンサー - Night Dancer feat. X") == "夜のダンサー - Night Dancer feat. X", "display title: Night Dancer feat. X")
     precondition(CoverLyrics.displayTitle("Xaleid_scopiX", queueTitle: "Xaleid◆scopiX - Xaleid_scopiX") == "Xaleid◆scopiX", "display title: Xaleid◆scopiX")
     precondition(CoverLyrics.displayTitle("Lemon", queueTitle: "Lemon - Lemon") == "Lemon", "display title: Lemon - Lemon")
+    // the original title for lyrics searches, and a singer's "○○ver." dropped (expected values from src/CoverLyrics.cs)
+    precondition(CoverLyrics.originalTitle("kanade tomosu sora nekobolo version", queueTitle: "カナデトモスソラ　ねこぼーろver. - kanade tomosu sora nekobolo version") == "カナデトモスソラ　ねこぼーろver.", "original title: カナデトモスソラ")
+    precondition(CoverLyrics.originalTitle("Only Words", queueTitle: "心を刺す言葉だけ - Only Words (feat. KAFU)") == "心を刺す言葉だけ", "original title: Only Words")
+    precondition(CoverLyrics.originalTitle("Lemon", queueTitle: "Lemon") == nil && CoverLyrics.originalTitle("Xaleid_scopiX", queueTitle: "Xaleid◆scopiX - Xaleid_scopiX") == "Xaleid◆scopiX", "original title: none / symbols only")
+    precondition(CoverLyrics.withoutVersionTag("カナデトモスソラ　ねこぼーろver.") == "カナデトモスソラ", "version tag: singer's ver.")
+    precondition(CoverLyrics.withoutVersionTag("夜に駆ける Acoustic ver.") == "夜に駆ける Acoustic ver." && CoverLyrics.withoutVersionTag("Lemon") == "Lemon" && CoverLyrics.withoutVersionTag("ver.") == "ver.", "version tag: arrangements kept")
     print("PASS: album track titles shown as original - translation, like the Windows version")
 }

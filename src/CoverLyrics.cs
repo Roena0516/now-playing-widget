@@ -307,6 +307,27 @@ namespace PearNowPlaying
         /// only in symbols ("Xaleid◆scopiX - Xaleid_scopiX"), the "translation" is the same name retyped, so only the
         /// original is shown.
         /// </summary>
+        /// <summary>
+        /// The original title when Pear has only the translation (the first half of the queue's
+        /// "original - translation", see DisplayTitle), or null.
+        /// </summary>
+        public static string OriginalTitle(string pearTitle, string queueTitle)
+        {
+            if (DisplayTitle(pearTitle, queueTitle) == pearTitle) return null;
+            return Regex.Split(FeatTail.Replace(queueTitle, "").Trim(), @"\s+[-－–—]\s+")[0].Trim();
+        }
+
+        /// <summary>
+        /// "カナデトモスソラ ねこぼーろver." -> "カナデトモスソラ": a "○○ver." that only names who sings it. Arrangements
+        /// ("Acoustic ver.", "piano ver.") stay as they are, since their timing differs.
+        /// </summary>
+        public static string WithoutVersionTag(string title)
+        {
+            if (string.IsNullOrEmpty(title) || LooksArranged(title)) return title ?? "";
+            var t = Regex.Replace(title, @"[\s\u3000]+\S*\s*(?:ver\.?|version)\s*$", "", RegexOptions.IgnoreCase).Trim();
+            return t.Length > 0 ? t : title;
+        }
+
         public static string DisplayTitle(string pearTitle, string queueTitle)
         {
             if (string.IsNullOrWhiteSpace(pearTitle) || string.IsNullOrWhiteSpace(queueTitle)) return pearTitle ?? "";

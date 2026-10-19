@@ -39,6 +39,14 @@ namespace PearNowPlaying
             copy.Title = title;
             return copy;
         }
+
+        /// <summary>A copy with another alternative title (to search lyrics under the original title too).</summary>
+        public SongInfo WithAltTitle(string altTitle)
+        {
+            var copy = (SongInfo)MemberwiseClone();
+            copy.AltTitle = altTitle;
+            return copy;
+        }
     }
 
     /// <summary>
