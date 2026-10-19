@@ -13,7 +13,8 @@ namespace PearNowPlaying
     /// <summary>
     /// One widget: the monitor it is on and where on that monitor ("widget2=BottomLeft" in config.ini, the number
     /// being the menu's "모니터 2"). Custom: where the user dragged it, in px from the monitor's left edge and from
-    /// its top or bottom edge ("widget1=Custom 120 80 bottom").
+    /// its top or bottom edge ("widget1=Custom 120 80 bottom"). Each widget has its own size and transparency
+    /// ("widget1Scale=1.25", "widget1Transparency=0.3").
     /// </summary>
     internal sealed class WidgetPlace
     {
@@ -21,6 +22,17 @@ namespace PearNowPlaying
         public OverlayPosition Position = OverlayPosition.BottomLeft;
         public int CustomX = 40, CustomY = 140;
         public bool CustomFromBottom = true;
+        /// <summary>Size (1.0 = normal).</summary>
+        public double Scale = 1.0;
+        /// <summary>How see-through the whole widget is, text included (0 = not at all).</summary>
+        public double Transparency;
+
+        /// <summary>The same widget on another monitor (a new widget starts like the first one).</summary>
+        public WidgetPlace CopyTo(int monitor)
+        {
+            return new WidgetPlace { Monitor = monitor, Position = Position, CustomX = CustomX, CustomY = CustomY,
+                                     CustomFromBottom = CustomFromBottom, Scale = Scale, Transparency = Transparency };
+        }
 
         public string Spec()
         {
@@ -142,6 +154,13 @@ namespace PearNowPlaying
                 c.MarginX = GetInt(map, "marginX", c.MarginX);
                 c.MarginY = GetInt(map, "marginY", c.MarginY);
                 c.Scale = Clamp(GetDouble(map, "scale", c.Scale), 0.5, 3.0);
+                // per widget; 1.7 and older had one "scale" for all, which each widget starts from
+                foreach (var w in c.Widgets)
+                {
+                    var n = "widget" + (w.Monitor + 1).ToString(CultureInfo.InvariantCulture);
+                    w.Scale = Clamp(GetDouble(map, n + "Scale", c.Scale), 0.5, 3.0);
+                    w.Transparency = Clamp(GetDouble(map, n + "Transparency", 0), 0, 0.8);
+                }
                 c.PanelWidth = Math.Max(260, Math.Min(1200, GetInt(map, "panelWidth", c.PanelWidth)));
                 c.ShowSeconds = Clamp(GetDouble(map, "showSeconds", c.ShowSeconds), 1, 60);
                 c.Opacity = Clamp(GetDouble(map, "opacity", c.Opacity), 0.2, 1.0);
@@ -187,16 +206,23 @@ namespace PearNowPlaying
                 sb.AppendLine("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight,");
                 sb.AppendLine("#       또는 Custom x y bottom|top (트레이 메뉴의 '위젯 끌어서 옮기기'로 놓은 위치, 모니터 왼쪽과 아래/위 가장자리에서 떨어진 px)");
                 foreach (var w in Widgets) sb.AppendLine("widget" + (w.Monitor + 1).ToString(inv) + "=" + w.Spec());
+                sb.AppendLine("# 위젯마다의 크기 배율(1.0 = 기본)과 투명도(0 = 불투명, 최대 0.8). 글자까지 함께 투명해집니다.");
+                foreach (var w in Widgets)
+                {
+                    var n = "widget" + (w.Monitor + 1).ToString(inv);
+                    sb.AppendLine(n + "Scale=" + w.Scale.ToString("0.##", inv));
+                    sb.AppendLine(n + "Transparency=" + w.Transparency.ToString("0.##", inv));
+                }
                 sb.AppendLine("# 화면 가장자리로부터의 여백(px, Custom이 아닌 위치에 적용)");
                 sb.AppendLine("marginX=" + MarginX.ToString(inv));
                 sb.AppendLine("marginY=" + MarginY.ToString(inv));
-                sb.AppendLine("# 크기 배율 (1.0 = 기본)");
+                sb.AppendLine("# 크기 배율 (1.0 = 기본). 위의 widgetNScale이 없는 위젯에 적용됩니다.");
                 sb.AppendLine("scale=" + Scale.ToString("0.##", inv));
                 sb.AppendLine("# 곡 카드와 가사 카드의 너비(px, 배율 적용 전)");
                 sb.AppendLine("panelWidth=" + PanelWidth.ToString(inv));
                 sb.AppendLine("# 곡이 바뀌었을 때 표시하는 시간(초)");
                 sb.AppendLine("showSeconds=" + ShowSeconds.ToString("0.##", inv));
-                sb.AppendLine("# 불투명도 (0.2 ~ 1.0)");
+                sb.AppendLine("# 카드 배경의 불투명도 (0.2 ~ 1.0, 글자는 그대로)");
                 sb.AppendLine("opacity=" + Opacity.ToString("0.##", inv));
                 sb.AppendLine("# true면 사라지지 않고 계속 표시");
                 sb.AppendLine("alwaysShow=" + B(AlwaysShow));

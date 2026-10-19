@@ -23,7 +23,7 @@ namespace PearNowPlaying
         readonly Hotkeys hotkeys;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, albumOnlyItem, retryLyricsItem, lyricsInfoItem, offsetMenu, sizeMenu, monitorMenu, moveItem, titleMenu;
+        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, albumOnlyItem, retryLyricsItem, lyricsInfoItem, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
         readonly ToolStripMenuItem updateItem;
@@ -34,13 +34,17 @@ namespace PearNowPlaying
         readonly double dpiScale;
         readonly System.Windows.Forms.Timer lyricsTimer = new System.Windows.Forms.Timer { Interval = 100 };
         readonly System.Windows.Forms.Timer frameTimer = new System.Windows.Forms.Timer { Interval = 15 };
-        readonly LyricsView lyricsView = new LyricsView();
         readonly System.Windows.Forms.Timer cardFrameTimer = new System.Windows.Forms.Timer { Interval = 16 };
         // a short message card (ShowInfo) temporarily takes the song card's place; this brings the song back
         readonly System.Windows.Forms.Timer infoTimer = new System.Windows.Forms.Timer();
         DateTime infoUntil = DateTime.MinValue;
         readonly Stopwatch marquee = new Stopwatch();
-        CardFrame cardFrame;
+        // One look per distinct widget size: the card and the lyrics are drawn once per size and every window of
+        // that size gets the picture (see PerLook). All lyrics views get the same calls, so the first answers for all.
+        readonly List<double> lookScales = new List<double>();
+        readonly List<LyricsView> lyricsViews = new List<LyricsView>();
+        readonly List<CardFrame> cardFrames = new List<CardFrame>();
+        LyricsView MainView { get { return lyricsViews[0]; } }
 
         string artUrl;
         Image artImage;
@@ -97,14 +101,12 @@ namespace PearNowPlaying
                 var v = pair.Item2;
                 offsetMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item1, null, (s, e) => SetOffset(v)) { Tag = v });
             }
-            monitorMenu = new ToolStripMenuItem("모니터");
-            monitorMenu.DropDownItems.Add(new ToolStripMenuItem("-"));   // filled when the menu opens (screens can change)
+            // filled when the menu opens (screens and widgets can change)
+            displayMenu = new ToolStripMenuItem("표시");
+            placeMenu = new ToolStripMenuItem("위치");
             sizeMenu = new ToolStripMenuItem("크기");
-            foreach (var pair in new[] { Tuple.Create("작게", 0.8), Tuple.Create("보통", 1.0), Tuple.Create("크게", 1.25), Tuple.Create("아주 크게", 1.5) })
-            {
-                var v = pair.Item2;
-                sizeMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item1, null, (s, e) => SetScale(v)) { Tag = v });
-            }
+            transparencyMenu = new ToolStripMenuItem("투명도");
+            foreach (var m in new[] { displayMenu, placeMenu, sizeMenu, transparencyMenu }) m.DropDownItems.Add(new ToolStripMenuItem("-"));
             moveItem = new ToolStripMenuItem("위젯 끌어서 옮기기", null, (s, e) => SetMoveMode(!moveMode));
             titleMenu = new ToolStripMenuItem("영상 곡 제목");
             titleMenu.DropDownItems.Add(new ToolStripMenuItem("곡 제목", null, (s, e) => SetVideoTitle(false)) { Tag = false });
@@ -112,7 +114,7 @@ namespace PearNowPlaying
 
             // widget (song card, where and how big) and lyrics settings live in separate submenus
             var widgetMenu = new ToolStripMenuItem("위젯");
-            widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, titleMenu, monitorMenu, sizeMenu, new ToolStripSeparator(), moveItem });
+            widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, titleMenu, displayMenu, placeMenu, sizeMenu, transparencyMenu, new ToolStripSeparator(), moveItem });
             var lyricsMenu = new ToolStripMenuItem("가사");
             lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, albumOnlyItem, retryLyricsItem, offsetMenu });
 
@@ -335,49 +337,51 @@ namespace PearNowPlaying
             }
 
             // (re)layout when the song, size or width changed
-            var layoutKey = lyricsKey + "|" + Scale.ToString("0.###") + "|" + PanelWidth;
+            var layoutKey = lyricsKey + "|" + string.Join(",", lookScales.Select(v => v.ToString("0.###"))) + "|" + cfg.PanelWidth;
             if (layoutKey != lyricsLayoutKey)
             {
                 // the next song's lyrics while the panel is open: scroll on from the last song's line
-                lyricsView.SetLines(lyrics.Lines, Scale, PanelWidth, lyricsWin.IsPresent && lyricsViewSong != null && lyricsViewSong != lyricsKey);
-                lyricsView.SetNext(nextLinesFor == lyricsKey ? nextLines : null);
+                bool carry = lyricsWin.IsPresent && lyricsViewSong != null && lyricsViewSong != lyricsKey;
+                for (int k = 0; k < lyricsViews.Count; k++)
+                {
+                    lyricsViews[k].SetLines(lyrics.Lines, lookScales[k], PanelWidthFor(lookScales[k]), carry);
+                    lyricsViews[k].SetNext(nextLinesFor == lyricsKey ? nextLines : null);
+                }
                 lyricsViewSong = lyricsKey;
                 lyricsLayoutKey = layoutKey;
                 force = true;
             }
 
             int ms = (int)Math.Round(PlaybackPosition * 1000) + cfg.LyricsOffsetMs;
-            int entry = lyricsView.EntryFor(lyrics.IndexAt(ms));
+            int entry = MainView.EntryFor(lyrics.IndexAt(ms));
             bool paused = !pear.IsPlaying;
 
             if (!lyricsWin.IsPresent)
             {
                 // appear at the right line without scrolling through everything before it
-                lyricsView.SetCurrent(entry, false);
+                foreach (var v in lyricsViews) v.SetCurrent(entry, false);
                 lyricPaused = paused;
-                var bmp = lyricsView.Render(paused, cfg.Opacity);
-                lyricsWin.ShowCard(bmp, PlaceLyrics, null);
+                lyricsWin.ShowCard(PerLook(k => lyricsViews[k].Render(paused, cfg.Opacity)), PlaceLyrics, null);
                 Reposition();
                 return;
             }
 
-            bool changed = entry != lyricsView.Current;
-            if (changed) lyricsView.SetCurrent(entry, true);
+            bool changed = entry != MainView.Current;
+            if (changed) foreach (var v in lyricsViews) v.SetCurrent(entry, true);
             if (changed || paused != lyricPaused || force)
             {
                 lyricPaused = paused;
                 LyricsFrame();
-                if (lyricsView.Animating) frameTimer.Start();
+                if (MainView.Animating) frameTimer.Start();
             }
         }
 
         /// <summary>One animation frame of the lyrics panel (runs at ~60fps only while it scrolls).</summary>
         void LyricsFrame()
         {
-            if (!lyricsWin.IsShowing || !lyricsView.HasLines) { frameTimer.Stop(); return; }
-            var bmp = lyricsView.Render(lyricPaused, cfg.Opacity);
-            lyricsWin.UpdateCard(bmp, PlaceLyrics);
-            if (!lyricsView.Animating) frameTimer.Stop();
+            if (!lyricsWin.IsShowing || !MainView.HasLines) { frameTimer.Stop(); return; }
+            lyricsWin.UpdateCard(PerLook(k => lyricsViews[k].Render(lyricPaused, cfg.Opacity)), PlaceLyrics);
+            if (!MainView.Animating) frameTimer.Stop();
         }
 
         /// <summary>
@@ -434,8 +438,8 @@ namespace PearNowPlaying
         {
             nextLines = lines;
             nextLinesFor = lyricsKey;
-            if (lyricsLayoutKey == null || !lyricsView.HasLines) return;   // laid out with them when it happens
-            lyricsView.SetNext(lines);
+            if (lyricsLayoutKey == null || !MainView.HasLines) return;   // laid out with them when it happens
+            foreach (var v in lyricsViews) v.SetNext(lines);
             TickLyrics(true);
         }
 
@@ -618,9 +622,9 @@ namespace PearNowPlaying
             infoUntil = DateTime.MinValue;
             song.Elapsed = PlaybackPositionFor(song);
             if (!cardWin.IsPresent || kind == CardKind.NowPlaying) marquee.Restart();
-            SetCardFrame(CardRenderer.BuildCard(ForCard(song), kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
-            var bmp = cardFrame.Compose(MarqueeOffset());
-            cardWin.ShowCard(bmp, PlaceCard, KeepCard ? (double?)null : cfg.ShowSeconds);
+            var forCard = ForCard(song);
+            BuildCards(scale => CardRenderer.BuildCard(forCard, kind, null, artImage, cfg.ShowAlbumArt, scale, cfg.Opacity, PanelWidthFor(scale), true));
+            cardWin.ShowCard(PerLook(ComposeCard), PlaceCard, KeepCard ? (double?)null : cfg.ShowSeconds);
             Reposition();
             StartMarquee();
         }
@@ -628,14 +632,13 @@ namespace PearNowPlaying
         void ShowInfo(string text)
         {
             marquee.Restart();
-            SetCardFrame(CardRenderer.BuildCard(null, CardKind.Info, text, null, false, Scale, cfg.Opacity, PanelWidth, true));
-            var bmp = cardFrame.Compose(MarqueeOffset());
+            BuildCards(scale => CardRenderer.BuildCard(null, CardKind.Info, text, null, false, scale, cfg.Opacity, PanelWidthFor(scale), true));
             // While "always show" keeps the song card up, the message only borrows its place for a few seconds
             // and the song card comes back; otherwise the message fades out like a normal card.
             bool restore = KeepCard && pear.Current.HasData;
             double secs = restore ? 3.5 : Math.Max(3, cfg.ShowSeconds);
             // while dragging the widget around, a message with no song behind it stays until the mode ends
-            cardWin.ShowCard(bmp, PlaceCard, restore || moveMode ? (double?)null : secs);
+            cardWin.ShowCard(PerLook(ComposeCard), PlaceCard, restore || moveMode ? (double?)null : secs);
             infoUntil = DateTime.Now.AddSeconds(secs);
             infoTimer.Stop();
             if (restore) { infoTimer.Interval = (int)(secs * 1000); infoTimer.Start(); }
@@ -661,32 +664,39 @@ namespace PearNowPlaying
             var kind = lastKind;
             if (cardWin.IsPinned && kind == CardKind.Resumed) kind = CardKind.NowPlaying;
             song.Elapsed = PlaybackPositionFor(song);
-            SetCardFrame(CardRenderer.BuildCard(ForCard(song), kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
-            var bmp = cardFrame.Compose(MarqueeOffset());
-            cardWin.UpdateCard(bmp, PlaceCard);
+            var forCard = ForCard(song);
+            BuildCards(scale => CardRenderer.BuildCard(forCard, kind, null, artImage, cfg.ShowAlbumArt, scale, cfg.Opacity, PanelWidthFor(scale), true));
+            cardWin.UpdateCard(PerLook(ComposeCard), PlaceCard);
             StartMarquee();
         }
 
         // ---- scrolling title ---------------------------------------------------------
 
-        void SetCardFrame(CardFrame f)
+        /// <summary>The card at every look's size.</summary>
+        void BuildCards(Func<double, CardFrame> build)
         {
-            var old = cardFrame;
-            cardFrame = f;
-            if (old != null) old.Dispose();
+            var old = cardFrames.ToList();
+            cardFrames.Clear();
+            foreach (var scale in lookScales) cardFrames.Add(build(scale));
+            foreach (var f in old) f.Dispose();
         }
+
+        Bitmap ComposeCard(int look) { return cardFrames[look].Compose(MarqueeOffset(look)); }
+
+        bool CardScrolls { get { return cardFrames.Any(f => f.Scrolls); } }
 
         void StartMarquee()
         {
-            if (cardFrame != null && cardFrame.Scrolls) cardFrameTimer.Start(); else cardFrameTimer.Stop();
+            if (CardScrolls) cardFrameTimer.Start(); else cardFrameTimer.Stop();
         }
 
         /// <summary>Hold the start for a moment, slide left at a steady speed, loop seamlessly, hold again.</summary>
-        float MarqueeOffset()
+        float MarqueeOffset(int look)
         {
-            if (cardFrame == null || !cardFrame.Scrolls) return 0;
+            var cardFrame = cardFrames[look];
+            if (!cardFrame.Scrolls) return 0;
             const double hold = 1.8;
-            double speed = 36 * Scale;
+            double speed = 36 * lookScales[look];
             double travel = cardFrame.Cycle / speed;
             double t = marquee.Elapsed.TotalSeconds % (hold + travel);
             return t < hold ? 0f : (float)((t - hold) * speed);
@@ -694,9 +704,8 @@ namespace PearNowPlaying
 
         void CardFrameTick()
         {
-            if (!cardWin.IsShowing || cardFrame == null || !cardFrame.Scrolls) { cardFrameTimer.Stop(); return; }
-            var bmp = cardFrame.Compose(MarqueeOffset());
-            cardWin.UpdateCard(bmp, PlaceCard);
+            if (!cardWin.IsShowing || !CardScrolls) { cardFrameTimer.Stop(); return; }
+            cardWin.UpdateCard(PerLook(ComposeCard), PlaceCard);
         }
 
         double PlaybackPositionFor(SongInfo song)
@@ -712,9 +721,48 @@ namespace PearNowPlaying
             lyricsWin.MoveTo(PlaceLyrics);
         }
 
-        double Scale { get { return cfg.Scale * dpiScale; } }
-        int PanelWidth { get { return (int)Math.Round(cfg.PanelWidth * Scale); } }
-        int Gap { get { return (int)Math.Round(10 * Scale); } }
+        /// <summary>Widget i's size in device pixels per 96-dpi pixel.</summary>
+        double ScaleOf(int i) { return shown[i].Scale * dpiScale; }
+        int PanelWidthFor(double scale) { return (int)Math.Round(cfg.PanelWidth * scale); }
+        int GapOf(int i) { return (int)Math.Round(10 * ScaleOf(i)); }
+        int LookOf(int i) { return lookScales.IndexOf(ScaleOf(i)); }
+
+        /// <summary>
+        /// Each window's bitmap for OverlayGroup: drawn once per look (draw(look)); the last window of a look takes
+        /// the bitmap and the others a copy, since every window owns and disposes its own.
+        /// </summary>
+        Func<int, Bitmap> PerLook(Func<int, Bitmap> draw)
+        {
+            var made = new Bitmap[lookScales.Count];
+            var left = new int[lookScales.Count];
+            for (int i = 0; i < shown.Count; i++) left[LookOf(i)]++;
+            return i =>
+            {
+                int k = LookOf(i);
+                if (made[k] == null) made[k] = draw(k);
+                return --left[k] == 0 ? made[k] : made[k].Clone(new Rectangle(Point.Empty, made[k].Size), System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            };
+        }
+
+        /// <summary>One look per distinct widget size (call after the widgets or their sizes change).</summary>
+        void UpdateLooks()
+        {
+            var scales = shown.Select((w, i) => ScaleOf(i)).Distinct().ToList();
+            for (int i = 0; i < shown.Count; i++)
+            {
+                cardWin.SetMaxAlpha(i, 1 - shown[i].Transparency);
+                lyricsWin.SetMaxAlpha(i, 1 - shown[i].Transparency);
+            }
+            if (scales.SequenceEqual(lookScales)) return;
+            lookScales.Clear();
+            lookScales.AddRange(scales);
+            lyricsViews.Clear();
+            foreach (var scale in scales) lyricsViews.Add(new LyricsView());
+            foreach (var f in cardFrames) f.Dispose();
+            cardFrames.Clear();
+            lyricsLayoutKey = null;
+            lyricsViewSong = null;   // laid out afresh, nothing to carry over
+        }
 
         // The song card and the lyrics panel form one column, lyrics always under the card, on each widget's monitor.
         // Bottom corners: the lyrics sit on the margin and the card stacks above them.
@@ -728,8 +776,8 @@ namespace PearNowPlaying
             if (IsTop(w)) y = b.Top + MarginY(w);
             else
             {
-                var lyr = lyricsWin.IsPresent ? lyricsWin.ContentSize : Size.Empty;
-                y = b.Bottom - MarginY(w) - size.Height - (lyr.IsEmpty ? 0 : lyr.Height + Gap);
+                var lyr = lyricsWin.IsPresent ? lyricsWin.ContentSizeAt(i) : Size.Empty;
+                y = b.Bottom - MarginY(w) - size.Height - (lyr.IsEmpty ? 0 : lyr.Height + GapOf(i));
             }
             return new Point(AlignX(w, b, size.Width), y);
         }
@@ -742,8 +790,8 @@ namespace PearNowPlaying
             int y;
             if (IsTop(w))
             {
-                var card = cardWin.IsPresent ? cardWin.ContentSize : Size.Empty;
-                y = b.Top + MarginY(w) + (card.IsEmpty ? 0 : card.Height + Gap);
+                var card = cardWin.IsPresent ? cardWin.ContentSizeAt(i) : Size.Empty;
+                y = b.Top + MarginY(w) + (card.IsEmpty ? 0 : card.Height + GapOf(i));
             }
             else y = b.Bottom - MarginY(w) - size.Height;
             return new Point(AlignX(w, b, size.Width), y);
@@ -785,8 +833,7 @@ namespace PearNowPlaying
             if (list.Count == 0 && widgets.Count > 0)
             {
                 var main = Array.IndexOf(Screen.AllScreens, Screen.PrimaryScreen);
-                list.Add(new WidgetPlace { Monitor = Math.Max(0, main), Position = widgets[0].Position, CustomX = widgets[0].CustomX,
-                                           CustomY = widgets[0].CustomY, CustomFromBottom = widgets[0].CustomFromBottom });
+                list.Add(widgets[0].CopyTo(Math.Max(0, main)));
             }
             return list;
         }
@@ -797,6 +844,7 @@ namespace PearNowPlaying
             cardWin.Reset(shown.Count);
             lyricsWin.Reset(shown.Count);
             cardWin.Interactive = lyricsWin.Interactive = moveMode;
+            UpdateLooks();
         }
 
         /// <summary>Widgets added, removed or moved to another monitor: new windows, then show what was showing.</summary>
@@ -849,12 +897,38 @@ namespace PearNowPlaying
         }
 
 
-        void SetScale(double v)
+        static readonly Tuple<string, double>[] Sizes =
+            { Tuple.Create("작게", 0.8), Tuple.Create("보통", 1.0), Tuple.Create("크게", 1.25), Tuple.Create("아주 크게", 1.5) };
+        static readonly Tuple<string, double>[] Transparencies =
+            { Tuple.Create("없음", 0.0), Tuple.Create("20%", 0.2), Tuple.Create("40%", 0.4), Tuple.Create("60%", 0.6) };
+
+        /// <summary>The saved widget behind the one shown on this monitor (the first one when it stands in on the main monitor).</summary>
+        WidgetPlace SavedWidget(int monitor)
         {
-            cfg.Scale = v;
+            return cfg.Widgets.FirstOrDefault(w => w.Monitor == monitor) ?? (shown.Count == 1 ? cfg.Widgets[0] : null);
+        }
+
+        void SetWidgetScale(int monitor, double v)
+        {
+            var widget = SavedWidget(monitor);
+            if (widget == null) return;
+            widget.Scale = v;
             cfg.Save();
+            shown = ShownWidgets(cfg.Widgets, Screen.AllScreens.Length);   // same widgets, new sizes
+            UpdateLooks();
             TickLyrics(true);
             ShowNow(CurrentKind());
+        }
+
+        void SetWidgetTransparency(int monitor, double v)
+        {
+            var widget = SavedWidget(monitor);
+            if (widget == null) return;
+            widget.Transparency = v;
+            cfg.Save();
+            shown = ShownWidgets(cfg.Widgets, Screen.AllScreens.Length);
+            UpdateLooks();
+            ShowNow(CurrentKind());   // so the change can be seen
         }
 
         void SetVideoTitle(bool videoTitle)
@@ -864,33 +938,69 @@ namespace PearNowPlaying
             if (cardWin.IsShowing) ShowNow(CurrentKind());
         }
 
-        /// <summary>One submenu per monitor: whether it has a widget, and where on it.</summary>
-        void BuildMonitorMenu()
+        static string MonitorName(Screen[] screens, int i)
         {
-            monitorMenu.DropDownItems.Clear();
+            var b = screens[i].Bounds;
+            return "모니터 " + (i + 1) + " (" + (screens[i].Primary ? "주 모니터, " : "") + b.Width + "×" + b.Height + ")";
+        }
+
+        /// <summary>
+        /// 표시: which monitors have a widget (only with several monitors). 위치 / 크기 / 투명도: set per widget,
+        /// one submenu per monitor with a widget, or the choices directly when there is one widget.
+        /// </summary>
+        void BuildWidgetMenus()
+        {
             var screens = Screen.AllScreens;
+
+            displayMenu.DropDownItems.Clear();
+            displayMenu.Available = screens.Length > 1;   // nothing to choose with one monitor
             for (int i = 0; i < screens.Length; i++)
             {
                 int index = i;
-                var b = screens[i].Bounds;
-                var widget = cfg.Widgets.FirstOrDefault(w => w.Monitor == i);
-                var item = new ToolStripMenuItem("모니터 " + (i + 1) + " (" + (screens[i].Primary ? "주 모니터, " : "") + b.Width + "×" + b.Height + ")") { Checked = widget != null };
-                item.DropDownItems.Add(new ToolStripMenuItem("이 모니터에 표시", null, (s, e) => ToggleMonitor(index))
+                var on = cfg.Widgets.Any(w => w.Monitor == i);
+                displayMenu.DropDownItems.Add(new ToolStripMenuItem(MonitorName(screens, i), null, (s, e) => ToggleMonitor(index))
                 {
-                    Checked = widget != null,
-                    Enabled = widget == null || cfg.Widgets.Count > 1,   // the last widget can't be turned off
+                    Checked = on,
+                    Enabled = !on || cfg.Widgets.Count > 1,   // the last widget can't be turned off
                 });
-                item.DropDownItems.Add(new ToolStripSeparator());
+            }
+
+            FillPerWidget(placeMenu, screens, w =>
+            {
+                var items = new List<ToolStripItem>();
                 foreach (OverlayPosition p in Enum.GetValues(typeof(OverlayPosition)))
                 {
-                    var pos = p;
-                    if (pos == OverlayPosition.Custom) item.DropDownItems.Add(new ToolStripSeparator());
-                    item.DropDownItems.Add(new ToolStripMenuItem(PositionName(pos), null, (s, e) => SetWidgetPosition(index, pos))
-                    {
-                        Checked = widget != null && widget.Position == pos,
-                    });
+                    var pos = p; var monitor = w.Monitor;
+                    if (pos == OverlayPosition.Custom) items.Add(new ToolStripSeparator());
+                    items.Add(new ToolStripMenuItem(PositionName(pos), null, (s, e) => SetWidgetPosition(monitor, pos)) { Checked = w.Position == pos });
                 }
-                monitorMenu.DropDownItems.Add(item);
+                return items;
+            });
+            FillPerWidget(sizeMenu, screens, w => Choices(w, Sizes, w.Scale, SetWidgetScale));
+            FillPerWidget(transparencyMenu, screens, w => Choices(w, Transparencies, w.Transparency, SetWidgetTransparency));
+        }
+
+        static List<ToolStripItem> Choices(WidgetPlace w, Tuple<string, double>[] choices, double current, Action<int, double> set)
+        {
+            return choices.Select(c =>
+            {
+                var monitor = w.Monitor; var v = c.Item2;
+                return (ToolStripItem)new ToolStripMenuItem(c.Item1, null, (s, e) => set(monitor, v)) { Checked = Math.Abs(current - v) < 0.01 };
+            }).ToList();
+        }
+
+        /// <summary>Each shown widget's items: one submenu per monitor, or the items directly for a single widget.</summary>
+        void FillPerWidget(ToolStripMenuItem menu, Screen[] screens, Func<WidgetPlace, List<ToolStripItem>> itemsFor)
+        {
+            menu.DropDownItems.Clear();
+            var widgets = shown.ToList();
+            foreach (var w in widgets)
+            {
+                var items = itemsFor(w).ToArray();
+                if (widgets.Count == 1) { menu.DropDownItems.AddRange(items); break; }
+                var item = new ToolStripMenuItem(w.Monitor < screens.Length ? MonitorName(screens, w.Monitor) : "모니터 " + (w.Monitor + 1));
+                item.DropDownItems.AddRange(items);
+                menu.DropDownItems.Add(item);
             }
         }
 
@@ -905,9 +1015,7 @@ namespace PearNowPlaying
             else
             {
                 // a new widget starts where the first one is (as a preset or the same dragged offsets)
-                var first = cfg.Widgets[0];
-                cfg.Widgets.Add(new WidgetPlace { Monitor = monitor, Position = first.Position, CustomX = first.CustomX,
-                                                  CustomY = first.CustomY, CustomFromBottom = first.CustomFromBottom });
+                cfg.Widgets.Add(cfg.Widgets[0].CopyTo(monitor));
                 cfg.Widgets = cfg.Widgets.OrderBy(w => w.Monitor).ToList();
             }
             cfg.Save();
@@ -916,10 +1024,11 @@ namespace PearNowPlaying
 
         void SetWidgetPosition(int monitor, OverlayPosition pos)
         {
-            var widget = cfg.Widgets.FirstOrDefault(w => w.Monitor == monitor);
-            if (widget == null) { ToggleMonitor(monitor); widget = cfg.Widgets.First(w => w.Monitor == monitor); }
+            var widget = SavedWidget(monitor);
+            if (widget == null) return;
             widget.Position = pos;
             cfg.Save();
+            shown = ShownWidgets(cfg.Widgets, Screen.AllScreens.Length);
             TickLyrics(true);
             ShowNow(CurrentKind());
         }
@@ -976,10 +1085,10 @@ namespace PearNowPlaying
             dragging = false;
             dragIndex = -1;
             var column = Rectangle.Empty;
-            if (cardWin.IsPresent) column = new Rectangle(cardWin.LocationOf(i), cardWin.ContentSize);
+            if (cardWin.IsPresent) column = new Rectangle(cardWin.LocationOf(i), cardWin.ContentSizeAt(i));
             if (lyricsWin.IsPresent)
             {
-                var l = new Rectangle(lyricsWin.LocationOf(i), lyricsWin.ContentSize);
+                var l = new Rectangle(lyricsWin.LocationOf(i), lyricsWin.ContentSizeAt(i));
                 column = column.IsEmpty ? l : Rectangle.Union(column, l);
             }
             if (column.IsEmpty || i >= shown.Count) return;
@@ -1036,9 +1145,8 @@ namespace PearNowPlaying
             moveItem.Checked = moveMode;
             updateItem.Text = update != null ? "업데이트 설치 (" + update.Version + ")" : "업데이트 확인";
             foreach (ToolStripMenuItem it in titleMenu.DropDownItems) it.Checked = (bool)it.Tag == cfg.VideoTitle;
-            BuildMonitorMenu();
+            BuildWidgetMenus();
             foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
-            foreach (ToolStripMenuItem it in sizeMenu.DropDownItems) it.Checked = Math.Abs((double)it.Tag - cfg.Scale) < 0.01;
         }
 
         static void OpenFile(string path)

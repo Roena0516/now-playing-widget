@@ -1,15 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Imaging;
 
 namespace PearNowPlaying
 {
     /// <summary>
     /// The same overlay (song card or lyrics panel) on several monitors: one OverlayWindow per widget, all showing
-    /// the same picture and fading together, each placed by its own widget's rule. The picture is drawn once and
-    /// every extra window gets a copy (each window owns and disposes its bitmap). State questions (showing, present,
-    /// size) are answered by the first window, since all of them change together.
+    /// the same thing and fading together, each placed by its own widget's rule and drawn at its own size (the
+    /// caller hands each window its own bitmap, which the window owns and disposes). State questions (showing,
+    /// present) are answered by the first window, since all of them change together; sizes differ per window.
     /// </summary>
     internal sealed class OverlayGroup : IDisposable
     {
@@ -48,9 +47,9 @@ namespace PearNowPlaying
         public bool IsShowing { get { return First.IsShowing; } }
         public bool IsPinned { get { return First.IsPinned; } }
         public bool IsPresent { get { return First.IsPresent; } }
-        public Size ContentSize { get { return First.ContentSize; } }
-
+        public Size ContentSizeAt(int i) { return windows[i].ContentSize; }
         public Point LocationOf(int i) { return windows[i].ContentLocation; }
+        public void SetMaxAlpha(int i, double alpha) { windows[i].MaxAlpha = alpha; }
         public bool IsShowingAt(int i) { return windows[i].IsShowing; }
 
         public bool Interactive
@@ -59,14 +58,15 @@ namespace PearNowPlaying
             set { interactive = value; foreach (var w in windows) w.Interactive = value; }
         }
 
-        public void ShowCard(Bitmap bmp, Func<int, Size, Point> place, double? holdSeconds)
+        /// <summary>bitmapFor(i) is called once per window, in order.</summary>
+        public void ShowCard(Func<int, Bitmap> bitmapFor, Func<int, Size, Point> place, double? holdSeconds)
         {
-            for (int i = 0; i < windows.Count; i++) windows[i].ShowCard(CopyFor(i, bmp), place(i, bmp.Size), holdSeconds);
+            for (int i = 0; i < windows.Count; i++) { var bmp = bitmapFor(i); windows[i].ShowCard(bmp, place(i, bmp.Size), holdSeconds); }
         }
 
-        public void UpdateCard(Bitmap bmp, Func<int, Size, Point> place)
+        public void UpdateCard(Func<int, Bitmap> bitmapFor, Func<int, Size, Point> place)
         {
-            for (int i = 0; i < windows.Count; i++) windows[i].UpdateCard(CopyFor(i, bmp), place(i, bmp.Size));
+            for (int i = 0; i < windows.Count; i++) { var bmp = bitmapFor(i); windows[i].UpdateCard(bmp, place(i, bmp.Size)); }
         }
 
         /// <summary>Glide every window to where its widget wants it.</summary>
@@ -82,12 +82,6 @@ namespace PearNowPlaying
         public void JumpTo(int i, Point at) { windows[i].JumpTo(at); }
 
         public void Dismiss() { foreach (var w in windows) w.Dismiss(); }
-
-        /// <summary>The last window takes the original bitmap, the others a copy (each disposes its own).</summary>
-        Bitmap CopyFor(int i, Bitmap bmp)
-        {
-            return i == windows.Count - 1 ? bmp : bmp.Clone(new Rectangle(Point.Empty, bmp.Size), PixelFormat.Format32bppArgb);
-        }
 
         public void Dispose()
         {

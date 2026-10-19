@@ -2,6 +2,8 @@ import AppKit
 import QuartzCore
 
 final class OverlayPanel: NSPanel {
+    /// The widget's own opacity (its transparency setting); fades go between 0 and this.
+    var maxAlpha: CGFloat = 1
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
@@ -34,6 +36,7 @@ final class OverlayPanel: NSPanel {
     init(_ place: WidgetSetting) {
         self.place = place
         card.contentView = cardCanvas; lyrics.contentView = lyricsCanvas
+        card.maxAlpha = place.opacity; lyrics.maxAlpha = place.opacity
     }
 }
 
@@ -100,8 +103,8 @@ final class OverlayPanel: NSPanel {
         }
         layout()
         for w in widgets {
-            if cardVisible { w.card.alphaValue = 1; w.card.orderFrontRegardless() }
-            if lyricsVisible { w.lyrics.alphaValue = 1; w.lyrics.orderFrontRegardless() }
+            if cardVisible { w.card.alphaValue = w.card.maxAlpha; w.card.orderFrontRegardless() }
+            if lyricsVisible { w.lyrics.alphaValue = w.lyrics.maxAlpha; w.lyrics.orderFrontRegardless() }
         }
         redraw()
     }
@@ -114,7 +117,7 @@ final class OverlayPanel: NSPanel {
     private func fade(_ panels: [OverlayPanel], to alpha: CGFloat, duration: Double, then done: (() -> Void)? = nil) {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = duration
-            for p in panels { p.animator().alphaValue = alpha }
+            for p in panels { p.animator().alphaValue = alpha * p.maxAlpha }
         }, completionHandler: { MainActor.assumeIsolated { done?() } })
     }
 
@@ -238,12 +241,11 @@ final class OverlayPanel: NSPanel {
         let screens = NSScreen.screens
         guard !screens.isEmpty else { return }
         let config = client.settings
-        let scale = config.scale
-        let cardHeight = NativeRenderer.cardLayout(client, kind: kind).height * scale
-        let lyricHeight = lyrics.height * scale
+        let cardHeight = NativeRenderer.cardLayout(client, kind: kind).height
         for w in widgets where w !== dragging {   // the mouse decides for the one being dragged
             let screen = screens[min(max(0, w.place.monitor), screens.count - 1)].visibleFrame
-            let frames = NativePlacement.frames(screen: screen, config: config.placed(w.place), cardHeight: cardHeight, lyricHeight: lyricHeight,
+            let placed = config.placed(w.place), scale = placed.scale   // each widget has its own size
+            let frames = NativePlacement.frames(screen: screen, config: placed, cardHeight: cardHeight * scale, lyricHeight: lyrics.height * scale,
                                                 cardVisible: cardVisible, lyricsVisible: lyricsVisible)
             w.cardCanvas.scale = scale; w.lyricsCanvas.scale = scale
             move(w.card, to: frames.card)

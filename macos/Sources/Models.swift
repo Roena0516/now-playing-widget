@@ -10,6 +10,11 @@ struct WidgetSetting: Codable, Equatable {
     var customX: Double = 24
     var customY: Double = 24
     var customFromBottom = true
+    /// This widget's size; nil until set (1.7 configs: the shared `scale`)
+    var scale: Double?
+    /// How see-through the whole widget is, text included (0 = not at all, at most 0.8)
+    var transparency: Double?
+    var opacity: CGFloat { CGFloat(1 - min(0.8, max(0, transparency ?? 0))) }
 }
 
 struct Settings: Codable {
@@ -61,6 +66,7 @@ struct Settings: Codable {
         var s = self
         s.monitor = widget.monitor; s.position = widget.position
         s.customX = widget.customX; s.customY = widget.customY; s.customFromBottom = widget.customFromBottom
+        if let size = widget.scale, (0.5...3).contains(size) { s.scale = size }
         return s
     }
     // Keys missing from an older config.json keep their defaults instead of discarding the whole file.
@@ -111,6 +117,10 @@ struct Settings: Codable {
         guard (positionLayoutVersion ?? 0) < 1 else { return }
         if marginX == 40 && marginY == 140 { marginX = 24; marginY = 24 }
         positionLayoutVersion = 1
+    }
+    /// The saved widget behind the one shown on this screen (the first one when it stands in on the main screen).
+    func savedWidgetIndex(monitor: Int, screenCount: Int) -> Int? {
+        widgets.firstIndex { $0.monitor == monitor } ?? (shownWidgets(screenCount: screenCount).count == 1 ? 0 : nil)
     }
     /// The widgets whose screen is connected; the first widget on the main screen if none is.
     func shownWidgets(screenCount: Int) -> [WidgetSetting] {

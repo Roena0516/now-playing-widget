@@ -111,6 +111,15 @@ namespace PearNowPlaying
             }
         }
 
+        double maxAlpha = 1;
+
+        /// <summary>The widget's own opacity (its transparency setting), on top of the fade.</summary>
+        public double MaxAlpha
+        {
+            get { return maxAlpha; }
+            set { maxAlpha = Math.Max(0, Math.Min(1, value)); if (phase != Phase.Hidden) Push(); }
+        }
+
         public bool IsShowing { get { return phase != Phase.Hidden; } }
         public bool IsPinned { get { return phase == Phase.Pinned; } }
         public bool IsFadingOut { get { return phase == Phase.FadingOut; } }
@@ -269,7 +278,7 @@ namespace PearNowPlaying
                 {
                     BlendOp = Native.AC_SRC_OVER,
                     BlendFlags = 0,
-                    SourceConstantAlpha = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(255 * Ease(alpha)))),
+                    SourceConstantAlpha = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(255 * Ease(alpha) * maxAlpha))),
                     AlphaFormat = Native.AC_SRC_ALPHA
                 };
                 Native.UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, Native.ULW_ALPHA);

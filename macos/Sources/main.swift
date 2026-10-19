@@ -155,27 +155,48 @@ import CoreText
         add(titles, "곡 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle != "video", represented: "song")
         add(titles, "영상 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
         submenu(widget, "영상 곡 제목", titles)
-        // one submenu per screen: whether it has a widget, and where on it (like the Windows version)
-        let monitors = NSMenu()
-        for (index, screen) in NSScreen.screens.enumerated() {
-            let size = screen.frame.size
-            let place = client.settings.widgets.first { $0.monitor == index }
-            let screenMenu = NSMenu()
-            let toggle = NSMenuItem(title: "이 모니터에 표시", action: place == nil || client.settings.widgets.count > 1 ? #selector(toggleMonitor(_:)) : nil, keyEquivalent: "")
-            toggle.target = self; toggle.state = place != nil ? .on : .off; toggle.representedObject = index
-            screenMenu.addItem(toggle)   // the last widget can't be turned off (no action = greyed out)
-            screenMenu.addItem(.separator())
-            for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래"), ("Custom", "직접 옮긴 위치")] {
-                if value == "Custom" { screenMenu.addItem(.separator()) }
-                add(screenMenu, label, #selector(widgetPosition(_:)), state: place?.position == value, represented: "\(index)|\(value)")
-            }
-            let title = "모니터 \(index + 1) (\(index == 0 ? "주 모니터, " : "")\(Int(size.width))×\(Int(size.height)))"
-            let entry = NSMenuItem(title: title, action: nil, keyEquivalent: ""); entry.submenu = screenMenu; entry.state = place != nil ? .on : .off
-            monitors.addItem(entry)
+        // like the Windows version: 표시 picks the screens with a widget; 위치 / 크기 / 투명도 are set per widget, one
+        // submenu per screen with a widget, or the choices directly when there is one widget
+        let screens = NSScreen.screens
+        func screenTitle(_ index: Int) -> String {
+            guard index < screens.count else { return "모니터 \(index + 1)" }
+            let size = screens[index].frame.size
+            return "모니터 \(index + 1) (\(index == 0 ? "주 모니터, " : "")\(Int(size.width))×\(Int(size.height)))"
         }
-        submenu(widget, "모니터", monitors)
-        let sizes = NSMenu(); for (scale, label) in [(0.8, "작게"), (1.0, "보통"), (1.25, "크게"), (1.5, "아주 크게")] { add(sizes, label, #selector(size(_:)), state: client.settings.scale == scale, represented: scale) }
-        submenu(widget, "크기", sizes)
+        // 표시: which screens have a widget (only with several screens)
+        if screens.count > 1 {
+            let display = NSMenu()
+            for index in screens.indices {
+                let on = client.settings.widgets.contains { $0.monitor == index }
+                let entry = NSMenuItem(title: screenTitle(index), action: !on || client.settings.widgets.count > 1 ? #selector(toggleMonitor(_:)) : nil, keyEquivalent: "")
+                entry.target = self; entry.state = on ? .on : .off; entry.representedObject = index
+                display.addItem(entry)   // the last widget can't be turned off (no action = greyed out)
+            }
+            submenu(widget, "표시", display)
+        }
+        let shown = client.settings.shownWidgets(screenCount: screens.count)
+        /// Each shown widget's items: one submenu per screen, or the items directly for a single widget.
+        func perWidget(_ title: String, _ fill: (NSMenu, WidgetSetting) -> Void) {
+            let menu = NSMenu()
+            for w in shown {
+                let target = shown.count == 1 ? menu : NSMenu()
+                fill(target, w)
+                if shown.count > 1 { let entry = NSMenuItem(title: screenTitle(w.monitor), action: nil, keyEquivalent: ""); entry.submenu = target; menu.addItem(entry) }
+            }
+            submenu(widget, title, menu)
+        }
+        perWidget("위치") { menu, w in
+            for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래"), ("Custom", "직접 옮긴 위치")] {
+                if value == "Custom" { menu.addItem(.separator()) }
+                add(menu, label, #selector(widgetPosition(_:)), state: w.position == value, represented: "\(w.monitor)|\(value)")
+            }
+        }
+        func choices(_ list: [(Double, String)], _ action: Selector, _ value: @escaping (WidgetSetting) -> Double) -> (NSMenu, WidgetSetting) -> Void {
+            { [unowned self] menu, w in for (v, label) in list { self.add(menu, label, action, state: abs(value(w) - v) < 0.01, represented: "\(w.monitor)|\(v)") } }
+        }
+        let settings = client.settings
+        perWidget("크기", choices([(0.8, "작게"), (1.0, "보통"), (1.25, "크게"), (1.5, "아주 크게")], #selector(size(_:))) { settings.placed($0).scale })
+        perWidget("투명도", choices([(0, "없음"), (0.2, "20%"), (0.4, "40%"), (0.6, "60%")], #selector(transparency(_:))) { $0.transparency ?? 0 })
         widget.addItem(.separator())
         add(widget, "위젯 끌어서 옮기기", #selector(toggleMoveMode), state: overlay?.moveMode ?? false)
         submenu(menu, "위젯", widget)
@@ -243,16 +264,20 @@ import CoreText
     }
     @objc func widgetPosition(_ sender: NSMenuItem) {
         let parts = (sender.representedObject as! String).split(separator: "|").map(String.init)
-        let index = Int(parts[0])!
-        if let found = client.settings.widgets.firstIndex(where: { $0.monitor == index }) {
-            client.settings.widgets[found].position = parts[1]
-        } else {
-            var widget = WidgetSetting(); widget.monitor = index; widget.position = parts[1]
-            client.settings.widgets.append(widget); client.settings.widgets.sort { $0.monitor < $1.monitor }
-        }
+        guard let monitor = Int(parts[0]), let index = client.settings.savedWidgetIndex(monitor: monitor, screenCount: NSScreen.screens.count) else { return }
+        client.settings.widgets[index].position = parts[1]
         client.settings.save(); overlay.rebuildWidgets(); overlay.show(); updateMenu()
     }
-    @objc func size(_ sender: NSMenuItem) { client.settings.scale = sender.representedObject as! Double; save() }
+    /// "monitor|value" from the 크기 / 투명도 menus: change that widget and lay the widgets out again.
+    private func setWidget(_ sender: NSMenuItem, _ change: (inout WidgetSetting, Double) -> Void) {
+        let parts = (sender.representedObject as! String).split(separator: "|").map(String.init)
+        guard let monitor = Int(parts[0]), let value = Double(parts[1]),
+              let index = client.settings.savedWidgetIndex(monitor: monitor, screenCount: NSScreen.screens.count) else { return }
+        change(&client.settings.widgets[index], value)
+        client.settings.save(); overlay.rebuildWidgets(); overlay.show(); updateMenu()
+    }
+    @objc func size(_ sender: NSMenuItem) { setWidget(sender) { $0.scale = $1 } }
+    @objc func transparency(_ sender: NSMenuItem) { setWidget(sender) { $0.transparency = $1 } }
     @objc func offset(_ sender: NSMenuItem) { client.settings.lyricsOffsetMs = Double(sender.representedObject as! Int); save() }
     @objc func previous() { client.control("previous") }
     @objc func togglePlay() { client.control("toggle-play") }

@@ -256,5 +256,16 @@ func testCustomPlacement() {
     let left = NativePlacement.frames(screen: wide, config: many.placed(many.widgets[0]), cardHeight: 100, lyricHeight: 0, cardVisible: true, lyricsVisible: false)
     let right = NativePlacement.frames(screen: wide, config: many.placed(many.widgets[1]), cardHeight: 100, lyricHeight: 0, cardVisible: true, lyricsVisible: false)
     precondition(left.card.minX < 100 && left.card.minY < 100 && right.card.maxX > 1800 && right.card.maxY > 1000, "each widget follows its own position")
-    print("PASS: dragged position (screen choice, top/bottom anchor, clamping), custom placement, new defaults, one widget per screen with its own position")
+    // each widget has its own size and transparency; 1.7 configs start every widget from the shared scale
+    let old = try! JSONDecoder().decode(Settings.self, from: Data(#"{"scale":1.25,"widgets":[{"monitor":0,"position":"BottomLeft","customX":24,"customY":24,"customFromBottom":true},{"monitor":1,"position":"TopRight","customX":24,"customY":24,"customFromBottom":true}]}"#.utf8))
+    precondition(old.widgets.allSatisfy { old.placed($0).scale == 1.25 && $0.opacity == 1 }, "1.7 widgets keep the shared size and stay opaque")
+    var sized = old; sized.widgets[1].scale = 0.8; sized.widgets[1].transparency = 0.4
+    let round = try! JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(sized))
+    precondition(round.placed(round.widgets[0]).scale == 1.25 && round.placed(round.widgets[1]).scale == 0.8 && abs(round.widgets[1].opacity - 0.6) < 0.001, "per-widget size and transparency saved and read back")
+    var faint = WidgetSetting(); faint.transparency = 5
+    precondition(abs(faint.opacity - 0.2) < 0.001, "transparency is capped so a widget never disappears")
+    precondition(old.savedWidgetIndex(monitor: 0, screenCount: 1) == 0 && old.savedWidgetIndex(monitor: 1, screenCount: 2) == 1, "menu choices find their widget")
+    var away = old; away.widgets = [old.widgets[1]]
+    precondition(away.savedWidgetIndex(monitor: 0, screenCount: 1) == 0, "the widget standing in on the main screen is the saved first one")
+    print("PASS: dragged position (screen choice, top/bottom anchor, clamping), custom placement, new defaults, one widget per screen with its own position, size and transparency")
 }
