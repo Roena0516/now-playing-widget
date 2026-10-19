@@ -118,6 +118,10 @@ namespace PearNowPlaying
             var lyricsMenu = new ToolStripMenuItem("가사");
             lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, albumOnlyItem, retryLyricsItem, offsetMenu });
 
+            // at the top, so a new version ("업데이트 설치 (x.y.z)") is seen first
+            updateItem = new ToolStripMenuItem("업데이트 확인", null, (s, e) => UpdateClicked());
+            menu.Items.Add(updateItem);
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(statusItem);
             menu.Items.Add(lyricsInfoItem);
             menu.Items.Add(new ToolStripSeparator());
@@ -134,8 +138,6 @@ namespace PearNowPlaying
             menu.Items.Add(new ToolStripMenuItem("설정 파일 열기", null, (s, e) => OpenFile(Config.FilePath)));
             menu.Items.Add(new ToolStripMenuItem("설정 다시 불러오기", null, (s, e) => ReloadConfig()));
             menu.Items.Add(new ToolStripMenuItem("오류 기록 열기", null, (s, e) => OpenFile(Config.LogPath)));
-            updateItem = new ToolStripMenuItem("업데이트 확인", null, (s, e) => UpdateClicked());
-            menu.Items.Add(updateItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("종료", null, (s, e) => ExitThread()));
             menu.Opening += (s, e) => SyncMenuChecks();

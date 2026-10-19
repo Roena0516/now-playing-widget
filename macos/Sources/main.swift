@@ -138,6 +138,9 @@ import CoreText
     func updateMenu() {
         guard item != nil else { return }
         let menu = NSMenu()
+        // at the top, so a new version ("업데이트 설치 (x.y.z)") is seen first (like the Windows version)
+        add(menu, update.map { "업데이트 설치 (\($0.version))" } ?? "업데이트 확인", #selector(updateClicked))
+        menu.addItem(.separator())
         add(menu, preview ? "미리보기 모드" : client.status, nil)
         add(menu, client.lyricsStatus, nil)
         menu.addItem(.separator())
@@ -216,7 +219,6 @@ import CoreText
         add(menu, "설정 파일 열기", #selector(openConfig))
         add(menu, "설정 다시 불러오기", #selector(reload))
         add(menu, "오류 기록 열기", #selector(openLog))
-        add(menu, update.map { "업데이트 설치 (\($0.version))" } ?? "업데이트 확인", #selector(updateClicked))
         menu.addItem(.separator())
         add(menu, "종료", #selector(quit))
         item.menu = menu
