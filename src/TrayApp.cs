@@ -154,7 +154,7 @@ namespace PearNowPlaying
             hotkeys = new Hotkeys();
             RegisterHotkeys();
 
-            lyricsProvider = new LyricsProvider(cfg.LyricsServer) { Ytm = new YtmLyrics(), Disk = new LyricsDiskCache(LyricsDiskCache.DefaultDir) };
+            lyricsProvider = new LyricsProvider(cfg.LyricsServer) { Ytm = new YtmLyrics(), More = new MoreLyrics(), Disk = new LyricsDiskCache(LyricsDiskCache.DefaultDir) };
             ApplyLyricsSources();
             lyricsTimer.Tick += (s, e) => TickLyrics();
             lyricsTimer.Start();
@@ -451,6 +451,7 @@ namespace PearNowPlaying
             if (!song.HasData) { ShowInfo("재생 중인 곡이 없어요"); return; }
             lyricsProvider.Forget(song);
             lyricsProvider.Ytm.ResetPause();
+            lyricsProvider.More.ResetPause();
             lyricsKey = null;
             announceKey = song.VideoId + "|" + song.Title;
             ShowInfo("가사를 다시 찾는 중이에요");
@@ -1111,6 +1112,7 @@ namespace PearNowPlaying
         void ApplyLyricsSources()
         {
             lyricsProvider.UseYtm = cfg.YtmLyrics;
+            lyricsProvider.UseMore = cfg.MoreLyrics;
             lyricsProvider.Ytm.ProxyBase = string.IsNullOrWhiteSpace(cfg.YtmLyricsProxy) ? YtmLyrics.DefaultProxy : cfg.YtmLyricsProxy.Trim();
         }
 

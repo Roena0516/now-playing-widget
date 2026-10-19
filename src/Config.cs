@@ -105,6 +105,8 @@ namespace PearNowPlaying
         public string LyricsServer = "https://lrclib.net";
         public bool YtmLyrics = true;
         public string YtmLyricsProxy = PearNowPlaying.YtmLyrics.DefaultProxy;
+        /// <summary>Ask Kugou and NetEase when LRCLIB has no synced lyrics.</summary>
+        public bool MoreLyrics = true;
 
         // Hotkeys ("없음" or empty = disabled)
         public string HotkeyLyrics = "Ctrl+Alt+L";
@@ -183,6 +185,7 @@ namespace PearNowPlaying
                 c.LyricsServer = Get(map, "lyricsServer", c.LyricsServer);
                 c.YtmLyrics = GetBool(map, "ytmLyrics", c.YtmLyrics);
                 c.YtmLyricsProxy = Get(map, "ytmLyricsProxy", c.YtmLyricsProxy);
+                c.MoreLyrics = GetBool(map, "moreLyrics", c.MoreLyrics);
                 c.HotkeyLyrics = Get(map, "hotkeyLyrics", c.HotkeyLyrics);
                 c.HotkeyShow = Get(map, "hotkeyShow", c.HotkeyShow);
                 c.HotkeyToggle = Get(map, "hotkeyToggle", c.HotkeyToggle);
@@ -253,6 +256,8 @@ namespace PearNowPlaying
                 sb.AppendLine("ytmLyrics=" + B(YtmLyrics));
                 sb.AppendLine("# YouTube Music 가사 중계 서버 (Pear Desktop이 쓰는 외부 서버)");
                 sb.AppendLine("ytmLyricsProxy=" + YtmLyricsProxy);
+                sb.AppendLine("# LRCLIB에 싱크 가사가 없으면 Kugou와 NetEase(网易云音乐)에서도 찾기. 메뉴에는 없는 설정입니다.");
+                sb.AppendLine("moreLyrics=" + B(MoreLyrics));
                 sb.AppendLine();
                 sb.AppendLine("# 새 버전이 있는지 GitHub에서 확인 (켜 두면 시작할 때와 하루에 한 번, 설치는 메뉴에서 직접 누를 때만 함)");
                 sb.AppendLine("checkUpdates=" + B(CheckUpdates));

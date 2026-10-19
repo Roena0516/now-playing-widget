@@ -28,7 +28,7 @@ import Combine
     private var socket: URLSessionWebSocketTask?
     private var anchor = Date()
     private var token: String?
-    let lyrics = LyricsFinder(lrclib: LyricsProvider(log: Log.write), ytm: YTMusicProvider(log: Log.write),
+    let lyrics = LyricsFinder(lrclib: LyricsProvider(log: Log.write), ytm: YTMusicProvider(log: Log.write), more: MoreLyrics(log: Log.write),
                               disk: LyricsDiskCache(log: Log.write), log: Log.write)
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
@@ -44,6 +44,7 @@ import Combine
     }
     func applyLyricsSources() {
         lyrics.useYtm = settings.ytmLyrics
+        lyrics.useMore = settings.moreLyrics
         lyrics.ytm.proxyBase = settings.ytmLyricsProxy
         lyrics.lrclib.baseURL = settings.lyricsServer
     }
@@ -211,7 +212,7 @@ import Combine
             prefetchNext(after: track)
             return
         }
-        if force { lyrics.forget(track); lyrics.ytm.resetPause(); onLyricsNotice?("가사를 다시 찾는 중이에요") }
+        if force { lyrics.forget(track); lyrics.ytm.resetPause(); lyrics.more?.resetPause(); onLyricsNotice?("가사를 다시 찾는 중이에요") }
         lyricTask = Task {
             // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
             let delays = LyricsProvider.lookupRetryDelays

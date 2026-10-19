@@ -15,14 +15,17 @@ struct LrclibFailed: LocalizedError {
     let lrclib: LyricsProvider
     let ytm: YTMusicProvider
     var useYtm = true
-    /// Lyrics found on LRCLIB kept between runs; nil = memory only.
+    /// Kugou / NetEase, asked when LRCLIB has no synced lyrics (when useMore is on); nil = not at all.
+    let more: MoreLyrics?
+    var useMore = true
+    /// Lyrics found on LRCLIB, Kugou or NetEase kept between runs; nil = memory only.
     let disk: LyricsDiskCache?
     private let log: (String) -> Void
     private var cache: [String: LyricsLookup] = [:]
     private var prefetched: [String: LyricsLookup] = [:]
 
-    init(lrclib: LyricsProvider, ytm: YTMusicProvider, disk: LyricsDiskCache? = nil, log: @escaping (String) -> Void = { _ in }) {
-        self.lrclib = lrclib; self.ytm = ytm; self.disk = disk; self.log = log
+    init(lrclib: LyricsProvider, ytm: YTMusicProvider, more: MoreLyrics? = nil, disk: LyricsDiskCache? = nil, log: @escaping (String) -> Void = { _ in }) {
+        self.lrclib = lrclib; self.ytm = ytm; self.more = more; self.disk = disk; self.log = log
     }
 
     private static func key(_ song: Song) -> String { song.videoId + "|" + song.title }
@@ -89,22 +92,32 @@ struct LrclibFailed: LocalizedError {
         // 2) covers: the original song linked in the description, if the music wasn't changed
         // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics off)
         if coverCandidate && !ytm.paused, let original = try await fromOriginal(song, description) {
-            return keep(key, song, original)
+            return original.standIn ? remember(key, original.lookup) : keep(key, song, original.lookup)
         }
 
         // 3) LRCLIB. A cover's own title can only match by title (the uploader isn't the original artist), which
         // picks songs that merely share the name: covers take artist matches only.
-        var result = try await lrclib.find(withOriginalTitle(song), titleOnly: !CoverLyrics.mayBeCover(song))
+        let found = try await findSynced(withOriginalTitle(song), titleOnly: !CoverLyrics.mayBeCover(song))
+        var result = found.lookup
         if case .notFound = result, ytmPlain { result = .plainOnly }
-        // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
-        if result.isFound { _ = keep(key, song, result) }
-        else if cacheMisses && !ytmError { cache[key] = result }
+        // a "not found" is only final when YouTube Music (and Kugou / NetEase) answered too; otherwise ask again next time
+        if result.isFound { _ = found.standIn ? remember(key, result) : keep(key, song, result) }
+        else if cacheMisses && !ytmError && !found.unsure { cache[key] = result }
         return result
     }
 
     private func remember(_ key: String, _ result: LyricsLookup) -> LyricsLookup { cache[key] = result; return result }
 
-    /// Remembered for this run, and on disk when it came from LRCLIB.
+    /// A lookup's outcome. `unsure`: nothing was found and Kugou / NetEase couldn't be asked, so the miss isn't final.
+    /// `standIn`: found on Kugou / NetEase only because LRCLIB failed (busy); remembered for this run but not saved to
+    /// disk, so the next run asks LRCLIB again (it may have the song).
+    struct Synced {
+        var lookup: LyricsLookup
+        var unsure = false
+        var standIn = false
+    }
+
+    /// Remembered for this run, and on disk when it came from LRCLIB, Kugou or NetEase.
     private func keep(_ key: String, _ song: Song, _ result: LyricsLookup) -> LyricsLookup {
         if LyricsDiskCache.keeps(result) { disk?.save(song, result) }
         return remember(key, result)
@@ -147,7 +160,7 @@ struct LrclibFailed: LocalizedError {
     /// the first linked video whose length is within a few seconds of the cover, and use its YouTube Music
     /// lyrics (or LRCLIB with the original's title/artist). Covers that say they are remixes/arrangements and
     /// candidates whose length differs are skipped, since the timing would drift. Nil = not usable.
-    private func fromOriginal(_ song: Song, _ description: Task<VideoDescription?, Never>?) async throws -> LyricsLookup? {
+    private func fromOriginal(_ song: Song, _ description: Task<VideoDescription?, Never>?) async throws -> Synced? {
         if CoverLyrics.looksArranged(song.title) || CoverLyrics.looksArranged(song.alternativeTitle) {
             log("INFO cover: title says arranged/remixed, original's lyrics not used: \(song.title)")
             return nil
@@ -169,7 +182,7 @@ struct LrclibFailed: LocalizedError {
                 if diff > CoverLyrics.maxLengthDiff { log("INFO cover: candidate \(label) differs from the cover by \(Int(diff))s, skipped"); originalTooLong = true; continue }
                 if !orig.lines.isEmpty {
                     log("INFO lyrics found via original \(label) on YouTube Music: \(song.artist) - \(song.title)")
-                    return .synced(orig.lines, source: "YouTube Music · 원곡")
+                    return Synced(lookup: .synced(orig.lines, source: "YouTube Music · 원곡"))
                 }
                 if useYtm {
                     // the link is usually the original's music video; its official audio track has the timed lyrics
@@ -177,7 +190,7 @@ struct LrclibFailed: LocalizedError {
                     let coverName = CoverLyrics.guessOriginal(song, description: desc?.text).title
                     if let audio = try await audioTrackLyrics(orig, otherNames: [coverName]) {
                         log("INFO lyrics found via original \(label)'s official audio on YouTube Music: \(song.artist) - \(song.title)")
-                        return .synced(audio, source: "YouTube Music · 원곡")
+                        return Synced(lookup: .synced(audio, source: "YouTube Music · 원곡"))
                     }
                 }
                 if !orig.title.isEmpty {
@@ -187,12 +200,12 @@ struct LrclibFailed: LocalizedError {
                     var original = Song(title: orig.title, alternativeTitle: primary != orig.title ? primary : "", artist: orig.artist, videoId: id, duration: orig.duration)
                     original.tags = CoverLyrics.artistsInTitle(orig.title, songName: primary)
                     let l = try await lrclibFind(original)
-                    if case .synced(let lines, _) = l {
-                        log("INFO lyrics found via original \(label) on LRCLIB: \(song.artist) - \(song.title)")
-                        return .synced(lines, source: "LRCLIB · 원곡")
+                    if case .synced(let lines, let source) = l.lookup {
+                        log("INFO lyrics found via original \(label) on \(source): \(song.artist) - \(song.title)")
+                        return Synced(lookup: .synced(lines, source: source + " · 원곡"), standIn: l.standIn)
                     }
                 }
-                log("INFO cover: original \(label) has no synced lyrics on LRCLIB under that name")
+                log("INFO cover: original \(label) has no synced lyrics under that name")
                 break   // the first usable link decides; don't wander through unrelated links
             }
 
@@ -218,7 +231,7 @@ struct LrclibFailed: LocalizedError {
     /// so it can't be used for this.) The original must be within a few seconds of the cover's length.
     /// `byArtist`: only an original artist named by the title or description, and only results by that artist within
     /// the cover's length tolerance (the linked original didn't fit).
-    private func fromSearch(_ song: Song, _ desc: VideoDescription?, byArtist: Bool = false) async throws -> LyricsLookup? {
+    private func fromSearch(_ song: Song, _ desc: VideoDescription?, byArtist: Bool = false) async throws -> Synced? {
         let (title, artist) = CoverLyrics.guessOriginal(song, description: desc?.text)
         if title.isEmpty { log("INFO cover: couldn't tell the song title from \"\(song.title)\""); return nil }
         if byArtist && artist.isEmpty {
@@ -233,9 +246,9 @@ struct LrclibFailed: LocalizedError {
         let l = try await lrclibFind(Song(title: title, artist: artist, videoId: song.videoId + "#original", duration: song.duration),
                                      titleTolerance: CoverLyrics.maxLengthDiff, titleOnly: !byArtist,
                                      artistTolerance: byArtist ? CoverLyrics.maxLengthDiff : 15, titleCopies: artist.isEmpty ? 1 : 3)
-        guard case .synced(let lines, _) = l else { return nil }
-        log("INFO lyrics found via original \"\(title)\" on LRCLIB: \(song.artist) - \(song.title)")
-        return .synced(lines, source: "LRCLIB · 원곡 검색")
+        guard case .synced(let lines, let source) = l.lookup else { return nil }
+        log("INFO lyrics found via original \"\(title)\" on \(source): \(song.artist) - \(song.title)")
+        return Synced(lookup: .synced(lines, source: source + " · 원곡 검색"), standIn: l.standIn)
     }
 
     /// An album track whose title Pear gives only translated or romanized ("kanade tomosu sora nekobolo version") is
@@ -248,8 +261,35 @@ struct LrclibFailed: LocalizedError {
         return copy
     }
 
-    private func lrclibFind(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15, titleCopies: Int = 1) async throws -> LyricsLookup {
-        do { return try await lrclib.find(song, titleTolerance: titleTolerance, titleOnly: titleOnly, artistTolerance: artistTolerance, titleCopies: titleCopies) }
+    /// LRCLIB, then (when it has no synced lyrics or is busy) Kugou and NetEase. Their catalogs are bigger and looser,
+    /// so a title-only match there needs the exact title and length (`titleTolerance` up to 3s, and no "several identical
+    /// uploads" rule to lean on): with a wider tolerance or that rule, artist matches only. Throws LRCLIB's error when
+    /// nothing was found and LRCLIB failed. Same as FindSynced in src/Lyrics.cs.
+    private func findSynced(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15,
+                            titleCopies: Int = 1) async throws -> Synced {
+        var result: LyricsLookup = .notFound
+        var lrclibError: Error?
+        do { result = try await lrclib.find(song, titleTolerance: titleTolerance, titleOnly: titleOnly, artistTolerance: artistTolerance, titleCopies: titleCopies) }
+        catch {
+            if Task.isCancelled { throw CancellationError() }
+            lrclibError = error
+        }
+        if result.isFound { return Synced(lookup: result) }
+        guard let more, useMore else {
+            if let lrclibError { throw lrclibError }
+            return Synced(lookup: result)
+        }
+        let m = try await more.find(song, titleTolerance: titleOnly && titleCopies <= 1 && titleTolerance <= 3 ? titleTolerance : -1,
+                                    artistTolerance: artistTolerance)
+        if case .found(let lines, let source) = m { return Synced(lookup: .synced(lines, source: source), standIn: lrclibError != nil) }
+        if let lrclibError { throw lrclibError }   // LRCLIB busy: retried later
+        if case .failed = m { return Synced(lookup: result, unsure: true) }
+        return Synced(lookup: result)
+    }
+
+    /// findSynced for a cover's original: a failure ends the whole lookup (LrclibFailed) so it is retried later.
+    private func lrclibFind(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15, titleCopies: Int = 1) async throws -> Synced {
+        do { return try await findSynced(song, titleTolerance: titleTolerance, titleOnly: titleOnly, artistTolerance: artistTolerance, titleCopies: titleCopies) }
         catch {
             if Task.isCancelled { throw CancellationError() }
             throw LrclibFailed(underlying: error)

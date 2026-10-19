@@ -1,6 +1,6 @@
 import Foundation
 
-/// Lyrics found on LRCLIB, kept on disk between runs so songs played again don't ask LRCLIB again (its
+/// Lyrics found on LRCLIB (or Kugou / NetEase), kept on disk between runs so songs played again don't ask LRCLIB again (its
 /// uncached lookups are often refused as "busy"). One small JSON file per YouTube video ID, under
 /// ~/Library/Caches/PearNowPlaying-macOS/lyrics. Only found lyrics are stored, never misses or failures;
 /// "find lyrics again" removes the entry. Same format as the Windows version (src/LyricsDiskCache.cs).
@@ -40,10 +40,11 @@ import Foundation
         Self.videoId.matches(videoId) ? directory.appendingPathComponent(videoId + ".json") : nil
     }
 
-    /// Worth keeping: lyrics (or "instrumental") that came from LRCLIB.
+    /// Worth keeping: lyrics (or "instrumental") that came from LRCLIB, or from Kugou / NetEase (LyricsFinder doesn't
+    /// keep their stand-ins for a busy LRCLIB).
     static func keeps(_ result: LyricsLookup) -> Bool {
         switch result {
-        case .synced(let lines, let source): return !lines.isEmpty && source.hasPrefix("LRCLIB")
+        case .synced(let lines, let source): return !lines.isEmpty && ["LRCLIB", "Kugou", "NetEase"].contains { source.hasPrefix($0) }
         case .instrumental: return true   // only LRCLIB reports instrumentals
         default: return false
         }

@@ -25,6 +25,11 @@ namespace PearNowPlaying
         public bool Instrumental;
         /// <summary>The lookup failed (timeout, server error). Not cached, worth retrying.</summary>
         public bool Failed;
+        /// <summary>Nothing found, but a lyrics source couldn't be asked (Kugou / NetEase failing): not cached as "none".</summary>
+        public bool Unsure;
+        /// <summary>Found on Kugou / NetEase only because LRCLIB failed (busy): kept for this run but not saved to disk,
+        /// so the next run asks LRCLIB again (it may have the song).</summary>
+        public bool StandIn;
         public string Source = "";
         public bool HasSynced { get { return Lines != null && Lines.Count > 0; } }
 
@@ -118,6 +123,9 @@ namespace PearNowPlaying
         /// <summary>YouTube Music lyrics (tried first when UseYtm is on); null = LRCLIB only.</summary>
         public YtmLyrics Ytm;
         public bool UseYtm;
+        /// <summary>Kugou / NetEase, asked when LRCLIB has no synced lyrics (when UseMore is on); null = not at all.</summary>
+        public MoreLyrics More;
+        public bool UseMore;
 
         public Task<LyricsResult> Find(SongInfo song, CancellationToken ct) { return Find(song, ct, true); }
 
@@ -222,9 +230,9 @@ namespace PearNowPlaying
             // 3) LRCLIB
             // a cover's own title can only match LRCLIB by title (the uploader isn't the original artist), which picks
             // songs that merely share the name: covers take artist matches only
-            var result = await FindLrclib(WithOriginalTitle(song), ct, 3, !CoverLyrics.MayBeCover(song));
-            // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
-            if (!result.Failed && (result.HasSynced || result.Instrumental || (cacheMisses && !ytmError)))
+            var result = await FindSynced(WithOriginalTitle(song), ct, 3, !CoverLyrics.MayBeCover(song));
+            // a "not found" is only final when YouTube Music (and Kugou / NetEase) answered too; otherwise ask again next time
+            if (!result.Failed && (result.HasSynced || result.Instrumental || (cacheMisses && !ytmError && !result.Unsure)))
                 Keep(key, song, result);
             return result;
         }
@@ -292,18 +300,18 @@ namespace PearNowPlaying
                         // "ビノミ - Binomi": also try the title without the romanized/translated half
                         var primary = CoverLyrics.PrimaryTitle(orig.Title, orig.Artist);
                         // artist names in the title count too (as tags: they vouch for results with this title)
-                        var l = await FindLrclib(new SongInfo { Title = orig.Title, AltTitle = primary != orig.Title ? primary : "",
+                        var l = await FindSynced(new SongInfo { Title = orig.Title, AltTitle = primary != orig.Title ? primary : "",
                                                                 Artist = orig.Artist, Duration = orig.Duration, VideoId = id,
                                                                 Tags = CoverLyrics.ArtistsInTitle(orig.Title, primary) }, ct);
                         if (l.HasSynced)
                         {
-                            l.Source = "LRCLIB · 원곡";
-                            Log.Info("lyrics found via original " + label + " on LRCLIB: " + song.Artist + " - " + song.Title);
+                            l.Source += " · 원곡";
+                            Log.Info("lyrics found via original " + label + " on " + l.Source + ": " + song.Artist + " - " + song.Title);
                             return l;
                         }
                         if (l.Failed) return l;   // LRCLIB busy: retried later
                     }
-                    Log.Info("cover: original " + label + " has no synced lyrics on LRCLIB under that name");
+                    Log.Info("cover: original " + label + " has no synced lyrics under that name");
                     break;   // the first usable link decides; don't wander through unrelated links
                 }
 
@@ -347,12 +355,12 @@ namespace PearNowPlaying
             // With the original artist named, another singer's lyrics only count when they are the well-known version
             // (the same timing uploaded at least 3 times): one cover of the song is no proof (Bad Apple!!: the PV's
             // lyrics, not FalKKonE's or an English cover's).
-            var l = await FindLrclib(new SongInfo { Title = title, Artist = artist, Duration = song.Duration, VideoId = song.VideoId + "#original" }, ct,
+            var l = await FindSynced(new SongInfo { Title = title, Artist = artist, Duration = song.Duration, VideoId = song.VideoId + "#original" }, ct,
                                      CoverLyrics.MaxLengthDiff, !byArtist, byArtist ? CoverLyrics.MaxLengthDiff : 15, artist.Length > 0 ? 3 : 1);
             if (l.HasSynced)
             {
-                l.Source = "LRCLIB · 원곡 검색";
-                Log.Info("lyrics found via original \"" + title + "\" on LRCLIB: " + song.Artist + " - " + song.Title);
+                l.Source += " · 원곡 검색";
+                Log.Info("lyrics found via original \"" + title + "\" on " + l.Source + ": " + song.Artist + " - " + song.Title);
                 return l;
             }
             return l.Failed ? l : null;   // LRCLIB busy: let the caller retry later
@@ -369,6 +377,22 @@ namespace PearNowPlaying
             var track = Ytm.Known(song.VideoId);
             var original = track != null ? CoverLyrics.OriginalTitle(song.Title, track.Title) : null;
             return original != null ? song.WithAltTitle(original) : song;
+        }
+
+        /// <summary>
+        /// LRCLIB, then (when it has no synced lyrics or is busy) Kugou and NetEase. Their catalogs are bigger and
+        /// looser, so a title-only match there needs the exact title and length (titleMatchTolerance up to 3s, and no
+        /// "several identical uploads" rule to lean on): with a wider tolerance or that rule, artist matches only.
+        /// </summary>
+        async Task<LyricsResult> FindSynced(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3, bool titleOnly = true,
+                                            double artistTolerance = 15, int titleMatchCopies = 1)
+        {
+            var l = await FindLrclib(song, ct, titleMatchTolerance, titleOnly, artistTolerance, titleMatchCopies);
+            if (l.HasSynced || l.Instrumental || More == null || !UseMore) return l;
+            var m = await More.Find(song, ct, titleOnly && titleMatchCopies <= 1 && titleMatchTolerance <= 3 ? titleMatchTolerance : -1, artistTolerance);
+            if (m.HasSynced) { m.StandIn = l.Failed; return m; }
+            if (l.Failed) return l;   // LRCLIB busy: retried later
+            return m.Failed ? new LyricsResult { Lines = new List<LyricLine>(), Unsure = true } : l;
         }
 
         /// <param name="titleOnly">also accept a result whose artist differs if the title and length match</param>
@@ -545,7 +569,7 @@ namespace PearNowPlaying
             if (Disk != null) Disk.Forget(song.VideoId);
         }
 
-        /// <summary>Lyrics found on LRCLIB kept between runs; null = memory only.</summary>
+        /// <summary>Lyrics found on LRCLIB, Kugou or NetEase kept between runs; null = memory only.</summary>
         public LyricsDiskCache Disk;
 
         void Keep(string key, SongInfo song, LyricsResult r)
@@ -668,7 +692,7 @@ namespace PearNowPlaying
             return t.Length > 0 && new[] { song.Title, song.AltTitle }.Any(x => Norm(WithoutFeat(x)) == t);
         }
 
-        static string WithoutFeat(string title)
+        internal static string WithoutFeat(string title)
         {
             if (string.IsNullOrEmpty(title)) return "";
             var t = Regex.Replace(title, @"[\(\[（][^\)\]）]*\b(feat|ft|with)\b[^\)\]）]*[\)\]）]", " ", RegexOptions.IgnoreCase);
@@ -741,7 +765,7 @@ namespace PearNowPlaying
             return lines.Count + "|" + Math.Round(lines[0].TimeMs / 1000.0) + "|" + Math.Round(lines[lines.Count - 1].TimeMs / 1000.0);
         }
 
-        static string Norm(string s)
+        internal static string Norm(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
             var sb = new StringBuilder();
@@ -751,7 +775,7 @@ namespace PearNowPlaying
         }
 
         /// <summary>"비비 (BIBI) & 윤하" -> {"비비 (bibi)", "비비", "bibi", "윤하"}</summary>
-        static HashSet<string> ArtistVariants(string artist)
+        internal static HashSet<string> ArtistVariants(string artist)
         {
             var set = new HashSet<string>();
             if (string.IsNullOrEmpty(artist)) return set;
@@ -770,7 +794,7 @@ namespace PearNowPlaying
             return set;
         }
 
-        static string FirstArtist(string artist)
+        internal static string FirstArtist(string artist)
         {
             var v = ArtistVariants(artist);
             return v.Count > 0 ? v.First() : "";
@@ -778,7 +802,7 @@ namespace PearNowPlaying
 
         internal static string CleanTitleForTest(string title) { return CleanTitle(title); }
 
-        static string CleanTitle(string title)
+        internal static string CleanTitle(string title)
         {
             if (string.IsNullOrEmpty(title)) return "";
             // video uploads: "【歌ってみた】曲名 / covered by 誰か", "曲名【MV】", "Title (Official Video)"
@@ -824,12 +848,12 @@ namespace PearNowPlaying
             return jaro + prefix * 0.1 * (1 - jaro);
         }
 
-        static string Str(IDictionary<string, object> d, string k)
+        internal static string Str(IDictionary<string, object> d, string k)
         {
             object v; return d.TryGetValue(k, out v) && v is string ? (string)v : "";
         }
 
-        static double Num(IDictionary<string, object> d, string k)
+        internal static double Num(IDictionary<string, object> d, string k)
         {
             object v;
             if (!d.TryGetValue(k, out v) || v == null) return 0;
@@ -841,6 +865,6 @@ namespace PearNowPlaying
             object v; return d.TryGetValue(k, out v) && v is bool && (bool)v;
         }
 
-        public void Dispose() { http.Dispose(); if (Ytm != null) Ytm.Dispose(); }
+        public void Dispose() { http.Dispose(); if (Ytm != null) Ytm.Dispose(); if (More != null) More.Dispose(); }
     }
 }

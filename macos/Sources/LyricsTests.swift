@@ -372,6 +372,69 @@ import Foundation
         for i in 0..<6 { small.save(Song(title: "t", artist: "a", videoId: "prune00000\(i)"), .synced([LyricLine(id: 0, time: 1, text: "x")], source: "LRCLIB")) }
         let kept = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".json") }.count
         precondition(kept <= 3, "Kept under the size limit (\(kept))")
-        print("PASS: lookup order (YouTube Music, official audio, cover originals by link and by title, LRCLIB), caching rules, look-ahead misses and retries, busy LRCLIB, cover description in parallel, LRCLIB lyrics on disk")
+
+        // Kugou / NetEase: matching rules
+        typealias C = MoreLyrics.Candidate
+        let usagi = Song(title: "回る空うさぎ", artist: "Orangestar", duration: 173)
+        let chosen = MoreLyrics.choose([C(title: "アスノヨゾラ哨戒班", artist: "Orangestar, IA", duration: 177),
+                                        C(title: "回る空うさぎ（Cover Orangestar / 初音未来）", artist: "シンシン", duration: 176),
+                                        C(title: "回る空うさぎ", artist: "Orangestar、初音ミク", duration: 174)], song: usagi, titleTolerance: 3, artistTolerance: 15)
+        precondition(chosen.map(\.duration) == [174], "same artist and title only, not the artist's other song or a cover: \(chosen)")
+        precondition(MoreLyrics.choose([C(title: "トンデモワンダーズ (Self Remix)", artist: "sasakure.UK", duration: 200), C(title: "トンデモワンダーズ", artist: "sasakure.UK, 初音ミク", duration: 197)],
+                                       song: Song(title: "トンデモワンダーズ", artist: "sasakure.UK", duration: 195), titleTolerance: 3, artistTolerance: 15).map(\.duration) == [197], "no remix for the original")
+        precondition(MoreLyrics.choose([C(title: "호랑풍류가 (시드노벨 - ′나와 호랑이님′ 주제가)", artist: "나래", duration: 250)],
+                                       song: Song(title: "호랑풍류가", artist: "나래", duration: 251), titleTolerance: 3, artistTolerance: 15).count == 1, "bracketed notes ignored")
+        let anyone = Song(title: "メランコリック", artist: "", duration: 220)
+        precondition(MoreLyrics.choose([C(title: "メランコリック", artist: "Junky", duration: 226)], song: anyone, titleTolerance: -1, artistTolerance: 10).isEmpty, "title-only off")
+        precondition(MoreLyrics.choose([C(title: "メランコリック", artist: "Junky", duration: 221)], song: anyone, titleTolerance: 3, artistTolerance: 10).count == 1, "exact title within 3s")
+        var tagged = Song(title: "プロポーズ", artist: "Naisho no Pierced Earrings", duration: 232); tagged.tags = ["内緒のピアス", "プロポーズ"]
+        precondition(MoreLyrics.choose([C(title: "プロポーズ", artist: "内緒のピアス", duration: 232)], song: tagged, titleTolerance: -1, artistTolerance: 15).count == 1, "Pear's tag names the artist")
+        let cleaned = MoreLyrics.cleanLines(parseLRC("[00:00.00]プロポーズ - 内緒のピアス\n[00:00.24]词：内緒のピアス\n[00:00.41]曲：内緒のピアス\n[00:00.62]例えば君が明日死ぬなら\n[00:01.00] 作曲 : X\n[00:06.21]僕は今から笑って"),
+                                            C(title: "プロポーズ", artist: "内緒のピアス"))
+        precondition(cleaned.map(\.text) == ["例えば君が明日死ぬなら", "僕は今から笑って"] && cleaned.map(\.id) == [0, 1], "credits dropped: \(cleaned.map(\.text))")
+        precondition(MoreLyrics.cleanLines(parseLRC("[00:00.00] 作词 : A\n[00:01.00] 作曲 : B"), C(title: "Z")).isEmpty, "credits only: no lyrics")
+
+        // Kugou / NetEase in the lookup: after LRCLIB finds nothing (or is busy), kept on disk; a failing source isn't a final miss
+        let kugouLrc = Data("[00:00.00]Song - Band\n[00:01.00]From Kugou\n[00:02.00]two\n[00:03.00]three".utf8).base64EncodedString()
+        var moreAsked: [String] = []
+        func more(kugouDown: Bool = false, kugouHas: Bool = true) -> MoreLyrics {
+            MoreLyrics(transport: { request in
+                let path = request.url!.path; moreAsked.append(path)
+                func ok(_ body: Any) throws -> (Data, HTTPURLResponse) { (try JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
+                if kugouDown && request.url!.host == "lyrics.kugou.com" { return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!) }
+                switch path {
+                case "/search": return try ok(["candidates": kugouHas ? [["id": "1", "accesskey": "k", "song": "Song", "singer": "Band", "duration": 201000]] : []])
+                case "/download": return try ok(["content": kugouLrc])
+                case "/api/cloudsearch/pc": return try ok(["result": ["songs": [["id": 7, "name": "Song (feat. X)", "ar": [["name": "Other"]], "dt": 200000]]]])
+                case "/api/song/lyric": return try ok(["lrc": ["lyric": "[00:00.00] 作词 : A\n[00:01.00]From NetEase\n[00:02.00]b\n[00:03.00]c"]])
+                default: preconditionFailure("unexpected \(path)")
+                }
+            })
+        }
+        let moreDir = FileManager.default.temporaryDirectory.appendingPathComponent("pear-lyrics-more-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: moreDir) }
+        let withKugou = LyricsFinder(lrclib: lrclib { url in url.path.hasSuffix("/get") ? (404, "") : (200, "[]") }, ytm: YTMusicProvider(transport: noTab),
+                                     more: more(), disk: LyricsDiskCache(directory: moreDir))
+        guard case .synced(let kLines, "Kugou") = try await withKugou.find(song), kLines.first?.text == "From Kugou" else { preconditionFailure("Kugou after LRCLIB had none") }
+        precondition(LyricsDiskCache(directory: moreDir).load(song.videoId) != nil, "Kugou lyrics saved")
+        let busyDir = FileManager.default.temporaryDirectory.appendingPathComponent("pear-lyrics-busy-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: busyDir) }
+        let lrclibBusy = LyricsFinder(lrclib: lrclib { _ in (503, "") }, ytm: YTMusicProvider(transport: noTab), more: more(kugouHas: false),
+                                      disk: LyricsDiskCache(directory: busyDir))
+        guard case .synced(let nLines, "NetEase") = try await lrclibBusy.find(song), nLines.first?.text == "From NetEase" else { preconditionFailure("NetEase (exact title within 3s) while LRCLIB is busy") }
+        precondition(LyricsDiskCache(directory: busyDir).load(song.videoId) == nil, "a stand-in for a busy LRCLIB is not saved to disk")
+        guard case .synced = lrclibBusy.known(song) else { preconditionFailure("but it is remembered for this run") }
+        moreAsked = []
+        let kugouFailing = LyricsFinder(lrclib: lrclib { url in url.path.hasSuffix("/get") ? (404, "") : (200, "[]") }, ytm: YTMusicProvider(transport: noTab), more: more(kugouDown: true))
+        let offSong = Song(title: "Nothing", artist: "Nobody", videoId: "audioVideo2", mediaType: "AUDIO", duration: 200)
+        if case .notFound = try await kugouFailing.find(offSong) {} else { preconditionFailure("nothing to find") }
+        let firstMore = moreAsked.count
+        _ = try await kugouFailing.find(offSong)
+        precondition(moreAsked.count > firstMore, "a miss while Kugou failed is asked again")
+        kugouFailing.useMore = false; moreAsked = []
+        _ = try await kugouFailing.find(Song(title: "Else", artist: "Nobody", videoId: "audioVideo3", mediaType: "AUDIO", duration: 200))
+        precondition(moreAsked.isEmpty, "moreLyrics off: not asked")
+        precondition(LyricsDiskCache.keeps(.synced([LyricLine(id: 0, time: 1, text: "x")], source: "NetEase · 원곡")))
+        print("PASS: lookup order (YouTube Music, official audio, cover originals by link and by title, LRCLIB, Kugou / NetEase), caching rules, look-ahead misses and retries, busy LRCLIB, cover description in parallel, found lyrics on disk")
     } catch { fputs("Finder tests failed: \(error)\n", stderr); exit(1) }
 }

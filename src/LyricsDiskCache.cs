@@ -11,7 +11,7 @@ using System.Web.Script.Serialization;
 namespace PearNowPlaying
 {
     /// <summary>
-    /// Lyrics found on LRCLIB, kept on disk between runs so songs played again don't ask LRCLIB again (its
+    /// Lyrics found on LRCLIB (or Kugou / NetEase), kept on disk between runs so songs played again don't ask LRCLIB again (its
     /// uncached lookups are often refused as "busy"). One small JSON file per YouTube video ID, under
     /// %LocalAppData%\PearNowPlaying\lyrics-cache. Only found lyrics are stored, never misses or failures;
     /// "find lyrics again" removes the entry. The macOS version keeps the same format (LyricsDiskCache.swift).
@@ -44,10 +44,13 @@ namespace PearNowPlaying
             this.maxEntries = maxEntries;
         }
 
-        /// <summary>Worth keeping: lyrics (or "instrumental") that came from LRCLIB.</summary>
+        /// <summary>
+        /// Worth keeping: lyrics (or "instrumental") that came from LRCLIB, or from Kugou / NetEase when LRCLIB answered
+        /// it has none (not stand-ins for a busy LRCLIB).
+        /// </summary>
         public static bool Keeps(LyricsResult r)
         {
-            return r != null && !r.Failed && (r.HasSynced || r.Instrumental) && (r.Source ?? "").StartsWith("LRCLIB", StringComparison.Ordinal);
+            return r != null && !r.Failed && !r.StandIn && (r.HasSynced || r.Instrumental) && new[] { "LRCLIB", "Kugou", "NetEase" }.Any(s => (r.Source ?? "").StartsWith(s, StringComparison.Ordinal));
         }
 
         string PathFor(string videoId)
