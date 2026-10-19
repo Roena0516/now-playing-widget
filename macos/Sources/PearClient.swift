@@ -3,12 +3,20 @@ import Combine
 
 @MainActor final class PearClient: ObservableObject {
     @Published var song = Song()
-    @Published var status = "Pear Desktop 기다리는 중"
+    // status lines, worded as the Windows version's tray (TrayApp.StatusText and the lyrics line)
+    static let starting = "연결 준비 중", waiting = "Pear Desktop 기다리는 중 (API 서버 확인)",
+               authorizing = "Pear Desktop에서 허용 대기 중", denied = "Pear Desktop에서 연결 거부됨", connected = "Pear Desktop에 연결됨"
+    @Published var status = PearClient.starting
     @Published var lines: [LyricLine] = []
-    @Published var lyricsStatus = "가사 대기 중"
+    @Published var lyricsStatus = "가사: -"
+    /// How the last lyrics lookup ended (nil while looking), for the "가사 표시" toggle's message.
+    private(set) var lyricsOutcome: LyricsLookup?
+    private(set) var lyricsFailed = false
+    private var everConnected = false
     @Published var artwork: Data?
     /// Bumped when an album track's display title becomes known (see cardTitle).
     @Published var titleRevision = 0
+    /// Show a message card (nil = show the song card), like the Windows version's ShowInfo.
     var onLyricsNotice: ((String?) -> Void)?
     @Published var settings = Settings.load()
     private var connection: Task<Void, Never>?
@@ -18,8 +26,8 @@ import Combine
     private var socket: URLSessionWebSocketTask?
     private var anchor = Date()
     private var token: String?
-    let lyrics = LyricsFinder(lrclib: LyricsProvider(log: LyricsLog.write), ytm: YTMusicProvider(log: LyricsLog.write),
-                              disk: LyricsDiskCache(log: LyricsLog.write), log: LyricsLog.write)
+    let lyrics = LyricsFinder(lrclib: LyricsProvider(log: Log.write), ytm: YTMusicProvider(log: Log.write),
+                              disk: LyricsDiskCache(log: Log.write), log: Log.write)
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.connectionProxyDictionary = [:]
@@ -52,20 +60,41 @@ import Combine
         try Data(value.utf8).write(to: tokenFile, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenFile.path)
     }
+    /// The last connection problem written to the log: a stopped Pear is retried every 3 seconds, so the same
+    /// failure is logged once, and again only when it changes or after the connection worked.
+    private var lastFailure = ""
+    private func noteFailure(_ text: String) { if text != lastFailure { lastFailure = text; Log.write(text) } }
+
     private func run() async {
         token = try? String(contentsOf: tokenFile, encoding: .utf8)
         while !Task.isCancelled {
+            var closeInfo = ""
             do {
                 if token == nil {
-                    status = "연결 시도 중 · Pear의 권한 창을 허용해 주세요"
                     var req = URLRequest(url: baseURL.appendingPathComponent("auth/pear-now-playing-macos"))
                     req.httpMethod = "POST"; req.httpBody = Data()
+                    // A refused connection fails at once. If Pear holds the request open, it is showing its
+                    // allow/deny dialog, and only then do we tell the user to click "허용".
+                    let dialogHint = Task {
+                        try? await Task.sleep(for: .milliseconds(800))
+                        if !Task.isCancelled { status = PearClient.authorizing; onLyricsNotice?("Pear Desktop에서 '허용'을 눌러주세요") }
+                    }
+                    defer { dialogHint.cancel() }
                     let (data, response) = try await session.data(for: req)
+                    dialogHint.cancel()
                     try Task.checkCancellation()
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    if code == 403 { status = "권한 거부됨 · 메뉴에서 연결 권한 다시 요청"; return }
-                    guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any], let value = obj["accessToken"] as? String, !value.isEmpty else { throw URLError(.badServerResponse) }
+                    if code == 403 {
+                        status = PearClient.denied; Log.info("auth denied by Pear (403)")
+                        onLyricsNotice?("Pear Desktop에서 연결이 거부됐어요. 메뉴의 'Pear 연결 권한 다시 요청'으로 다시 시도할 수 있어요.")
+                        return
+                    }
+                    guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any], let value = obj["accessToken"] as? String, !value.isEmpty else {
+                        noteFailure("WARN Pear auth returned \(code)")
+                        throw URLError(.badServerResponse)
+                    }
                     token = value; try persistToken(value)
+                    Log.info("got a token from Pear")
                 }
                 var components = URLComponents(url: baseURL.appendingPathComponent("api/v1/ws"), resolvingAgainstBaseURL: false)!
                 components.scheme = "ws"
@@ -77,15 +106,33 @@ import Combine
                         try Task.checkCancellation()
                         let data: Data
                         switch message { case .string(let text): data = Data(text.utf8); case .data(let bytes): data = bytes; @unknown default: continue }
-                        if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] { status = "Pear Desktop 연결됨"; handle(obj) }
+                        if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            let firstMessage = status != PearClient.connected
+                            if firstMessage { Log.info("connected to Pear at \(baseURL.absoluteString)"); lastFailure = "" }
+                            status = PearClient.connected; handle(obj)
+                            if firstMessage && !everConnected {
+                                everConnected = true
+                                if song.title.isEmpty { onLyricsNotice?("Pear Desktop에 연결됐어요") }
+                            }
+                        }
                     }
                 } catch {
-                    if ws.closeCode == .policyViolation || (ws.response as? HTTPURLResponse)?.statusCode == 401 { token = nil; try? FileManager.default.removeItem(at: tokenFile) }
+                    let http = (ws.response as? HTTPURLResponse)?.statusCode ?? 0
+                    if ws.closeCode != .invalid {
+                        closeInfo = ", closed with \(ws.closeCode.rawValue)" + (ws.closeReason.flatMap { String(data: $0, encoding: .utf8) }.map { " " + $0 } ?? "")
+                    }
+                    if http != 0 && http != 101 { closeInfo += ", HTTP \(http)" }
+                    if ws.closeCode == .policyViolation || http == 401 {
+                        Log.info("token rejected by Pear\(closeInfo), requesting a new one")
+                        token = nil; try? FileManager.default.removeItem(at: tokenFile)
+                    }
                     throw error
                 }
             } catch {
                 if Task.isCancelled { return }
-                status = "Pear 연결 실패 · 서버/연결 권한 확인 (\((error as NSError).code))"
+                let e = error as NSError
+                noteFailure("WARN Pear connection failed: \(e.domain) \(e.code) \(e.localizedDescription)\(closeInfo)")
+                status = PearClient.waiting
                 if !song.paused { song.elapsed = elapsed; song.paused = true; anchor = Date() }
             }
             try? await Task.sleep(for: .seconds(3))
@@ -119,9 +166,9 @@ import Combine
                 if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
                 let (_, response) = try await session.data(for: req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if code == 401 { retryAuth() }
-                else if !(200...299).contains(code) { status = "재생 제어 실패 (\(code))" }
-            } catch { status = "재생 제어 연결 실패" }
+                if code == 401 { Log.info("control \(action): token rejected (401), requesting a new one"); retryAuth() }
+                else if !(200...299).contains(code) { Log.info("control \(action) returned \(code)") }
+            } catch { Log.error("control \(action)", error) }
         }
     }
     private func fetchArtwork() {
@@ -129,13 +176,17 @@ import Combine
         guard let url = URL(string: song.imageSrc), url.scheme == "https" else { return }
         let identity = song.identity
         artTask = Task {
-            if let (data, response) = try? await session.data(from: url), (response as? HTTPURLResponse)?.statusCode == 200, !Task.isCancelled, song.identity == identity { artwork = data }
+            do {
+                let (data, response) = try await session.data(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { Log.info("album art returned \((response as? HTTPURLResponse)?.statusCode ?? 0)"); return }
+                if !Task.isCancelled, song.identity == identity { artwork = data }
+            } catch { if !Task.isCancelled { Log.error("album art", error) } }
         }
     }
     func findLyrics(force: Bool = false) {
-        lyricTask?.cancel(); prefetchTask?.cancel(); lines = []; lyricsStatus = "가사 검색 중"
+        lyricTask?.cancel(); prefetchTask?.cancel(); lines = []; lyricsStatus = "가사: 찾는 중"; lyricsOutcome = nil; lyricsFailed = false
         let track = song
-        guard !track.title.isEmpty else { lyricsStatus = "가사 대기 중"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
+        guard !track.title.isEmpty else { lyricsStatus = "가사: -"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
         if force { lyrics.forget(track); lyrics.ytm.resetPause(); onLyricsNotice?("가사를 다시 찾는 중이에요") }
         lyricTask = Task {
             // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
@@ -143,17 +194,17 @@ import Combine
             for (attempt, delay) in delays.enumerated() {
                 do {
                     if delay > 0 {
-                        lyricsStatus = "가사 서버 연결 실패, 다시 시도 중 (\(attempt)/\(delays.count - 1))"
+                        lyricsStatus = "가사: 연결 실패, 다시 시도 중 (\(attempt)/\(delays.count - 1))"
                         try await Task.sleep(for: .seconds(delay))
                     }
                     let result = try await lyrics.find(track)
                     try Task.checkCancellation()
                     guard song.identity == track.identity else { return }
+                    lyricsOutcome = result
                     switch result {
-                    case .synced(let found, let source): lines = found; lyricsStatus = "싱크 가사 있음 · \(source) · \(found.count)줄"
-                    case .instrumental: lyricsStatus = "연주곡 · 가사 없음"
-                    case .plainOnly: lyricsStatus = "일반 가사만 있음 · 싱크 가사 없음"
-                    case .notFound: lyricsStatus = "싱크 가사를 찾지 못함"
+                    case .synced(let found, let source): lines = found; lyricsStatus = "가사: 싱크 가사 있음 (\(source))"
+                    case .instrumental: lyricsStatus = "가사: 연주곡"
+                    case .plainOnly, .notFound: lyricsStatus = "가사: 찾지 못함"
                     }
                     if force { onLyricsNotice?(LyricsNotice.message(for: result)) }
                     prefetchNext(after: track)
@@ -161,11 +212,11 @@ import Combine
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    LyricsLog.write("WARN lyrics lookup failed (\(attempt + 1)/\(delays.count)) for \(track.artist) - \(track.title): \(error.localizedDescription)")
+                    Log.write("WARN lyrics lookup failed (\(attempt + 1)/\(delays.count)) for \(track.artist) - \(track.title): \(error.localizedDescription)")
                 }
             }
             guard song.identity == track.identity else { return }
-            lyricsStatus = "가사 서버에 연결하지 못함 · 가사 진단 기록 확인"
+            lyricsStatus = "가사: 가사 서버에 연결하지 못함"; lyricsFailed = true
             if force { onLyricsNotice?("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
         }
     }
@@ -186,7 +237,7 @@ import Combine
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    LyricsLog.write("INFO fetching ahead failed (\(error.localizedDescription)), will try again while this song plays")
+                    Log.write("INFO fetching ahead failed (\(error.localizedDescription)), will try again while this song plays")
                 }
             }
         }
@@ -212,7 +263,7 @@ import Combine
         guard settings.ytmLyrics, !lyrics.ytm.paused else { return }
         Task {
             do { _ = try await lyrics.ytm.lookup(track.videoId, withLyrics: false) }
-            catch { if !Task.isCancelled { LyricsLog.write("INFO title lookup failed for \(track.videoId): \(error.localizedDescription)") }; return }
+            catch { if !Task.isCancelled { Log.write("INFO title lookup failed for \(track.videoId): \(error.localizedDescription)") }; return }
             if song.videoId == track.videoId { titleRevision += 1 }
         }
     }
@@ -259,8 +310,7 @@ enum LyricsNotice {
         switch result {
         case .synced: return nil
         case .instrumental: return "연주곡이에요"
-        case .plainOnly: return "이 곡은 일반 가사만 있고 싱크 가사는 없어요"
-        case .notFound: return "이 곡은 싱크 가사를 찾지 못했어요"
+        case .plainOnly, .notFound: return "이 곡은 싱크 가사를 찾지 못했어요"
         }
     }
 }

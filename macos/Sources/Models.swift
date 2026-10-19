@@ -19,6 +19,8 @@ struct Settings: Codable {
     var showSeconds: Double = 6
     var opacity: Double = 0.92
     var alwaysShow = true
+    var showOnPause = true
+    var showAlbumArt = true
     /// title shown for videos (not album tracks): "song" = Pear's title, "video" = the video's own title
     /// (Pear's alternativeTitle, what Pear's Discord status shows)
     var videoTitle = "song"
@@ -27,6 +29,13 @@ struct Settings: Codable {
     var ytmLyrics = true
     var ytmLyricsProxy = YTMusicProvider.defaultProxy
     var lyricsServer = "https://lrclib.net"
+    // hotkeys, same format as the Windows config ("Ctrl" = Control, "Alt" = Option); empty = off
+    var hotkeyShow = "Ctrl+Alt+Up"
+    var hotkeyToggle = "Ctrl+Alt+Down"
+    var hotkeyNext = "Ctrl+Alt+Right"
+    var hotkeyPrevious = "Ctrl+Alt+Left"
+    var hotkeyAlwaysShow = "Ctrl+Alt+P"
+    var hotkeyLyrics = "Ctrl+Alt+L"
     var positionLayoutVersion: Int? = 1
     init() {}
     // Keys missing from an older config.json keep their defaults instead of discarding the whole file.
@@ -40,6 +49,10 @@ struct Settings: Codable {
         showSeconds = try value(.showSeconds, showSeconds); opacity = try value(.opacity, opacity)
         alwaysShow = try value(.alwaysShow, alwaysShow); showLyrics = try value(.showLyrics, showLyrics)
         videoTitle = try value(.videoTitle, videoTitle)
+        showOnPause = try value(.showOnPause, showOnPause); showAlbumArt = try value(.showAlbumArt, showAlbumArt)
+        hotkeyShow = try value(.hotkeyShow, hotkeyShow); hotkeyToggle = try value(.hotkeyToggle, hotkeyToggle)
+        hotkeyNext = try value(.hotkeyNext, hotkeyNext); hotkeyPrevious = try value(.hotkeyPrevious, hotkeyPrevious)
+        hotkeyAlwaysShow = try value(.hotkeyAlwaysShow, hotkeyAlwaysShow); hotkeyLyrics = try value(.hotkeyLyrics, hotkeyLyrics)
         lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
         ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
         lyricsServer = try value(.lyricsServer, lyricsServer)

@@ -1,4 +1,5 @@
 import Foundation
+import Carbon
 import CoreGraphics
 
 @MainActor func runSelfTests() {
@@ -30,6 +31,15 @@ import CoreGraphics
     let old = try! JSONDecoder().decode(Settings.self, from: Data(#"{"host":"127.0.0.1","port":26538,"scale":1.25,"position":"TopRight","showLyrics":false}"#.utf8))
     precondition(old.scale == 1.25 && old.position == "TopRight" && !old.showLyrics && old.ytmLyrics && old.ytmLyricsProxy == YTMusicProvider.defaultProxy && old.lyricsServer == "https://lrclib.net")
     precondition(Song(["mediaType": "USER_GENERATED_CONTENT", "title": "x"]).mediaType == "USER_GENERATED_CONTENT")
+    // hotkeys use the Windows config format
+    precondition(Hotkeys.parse("Ctrl+Alt+Up")! == (UInt32(kVK_UpArrow), UInt32(controlKey | optionKey)))
+    precondition(Hotkeys.parse("ctrl + shift + F9")! == (UInt32(kVK_F9), UInt32(controlKey | shiftKey)))
+    precondition(Hotkeys.parse("Win+1")! == (UInt32(kVK_ANSI_1), UInt32(cmdKey)) && Hotkeys.parse("Alt+D1")! == (UInt32(kVK_ANSI_1), UInt32(optionKey)))
+    precondition(Hotkeys.parse("Ctrl+Alt") == nil && Hotkeys.parse("Ctrl+A+B") == nil && Hotkeys.parse("Ctrl++P") == nil && Hotkeys.parse("Ctrl+Nope") == nil)
+    let fresh = Settings()
+    precondition(fresh.showOnPause && fresh.showAlbumArt && fresh.lyricsOffsetMs == 300 && fresh.hotkeyLyrics == "Ctrl+Alt+L" && fresh.hotkeyShow == "Ctrl+Alt+Up")
+    let olderConfig = try! JSONDecoder().decode(Settings.self, from: Data(#"{"hotkeyNext":"","showAlbumArt":false}"#.utf8))
+    precondition(olderConfig.hotkeyNext.isEmpty && !olderConfig.showAlbumArt && olderConfig.hotkeyToggle == "Ctrl+Alt+Down")
     // the card's title for videos: the song title by default, the video's own title (as Pear's Discord status) if chosen
     let titled = PearClient(loadRemoteAssets: false)
     precondition(titled.settings.videoTitle == "song" || Settings().videoTitle == "song")

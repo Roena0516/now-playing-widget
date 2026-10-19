@@ -224,15 +224,3 @@ struct LyricRecord: Decodable {
         return jaro + Double(prefix) * 0.1 * (1 - jaro)
     }
 }
-struct LyricsLog {
-    static let file = Settings.directory.appendingPathComponent("lyrics.log")
-    static func write(_ message: String) {
-        do {
-            try FileManager.default.createDirectory(at: Settings.directory, withIntermediateDirectories: true)
-            if let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size]) as? NSNumber, size.intValue > 512 * 1024 { try FileManager.default.removeItem(at: file) }
-            if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
-            let handle = try FileHandle(forWritingTo: file); defer { try? handle.close() }
-            try handle.seekToEnd(); try handle.write(contentsOf: Data((ISO8601DateFormatter().string(from: Date()) + " " + message + "\n").utf8))
-        } catch { NSLog("Lyrics log: %@", error.localizedDescription) }
-    }
-}

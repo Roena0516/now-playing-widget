@@ -215,6 +215,16 @@ final class OverlayPanel: NSPanel {
             hideTask = Task { try? await Task.sleep(for: .seconds(client.settings.showSeconds)); guard !Task.isCancelled else { return }; hide() }
         }
     }
+    /// Play/pause without a song change, like the Windows version's OnPlayState: with "show on pause" the card
+    /// appears (Paused / Resumed); otherwise a card already up just updates its label and keeps its timing.
+    func playStateChanged() {
+        if client.settings.showOnPause { show(); return }
+        wasPaused = client.song.paused
+        guard cardVisible, kind != .info else { return }
+        kind = client.song.paused ? .paused : .nowPlaying
+        refresh()
+    }
+
     func showInfo(_ message: String) {
         hideTask?.cancel(); kind = .info; infoText = message; marqueeStart = Date()
         let wasVisible = cardVisible; cardVisible = true

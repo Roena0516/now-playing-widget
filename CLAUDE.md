@@ -5,7 +5,7 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 합니다체)
 - 버전: Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.5.2.0)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
-- macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`).
+- macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). **맥 버전은 웬만하면 Windows 버전을 따라갑니다**(사용자 방침): 메뉴 구성과 이름, 상태·안내 문구, 기본값, 설정 키(단축키 문자열 형식 `Ctrl+Alt+Up` 포함), 로그 파일 이름과 형식, 동작 규칙을 Windows와 같게 맞추고, 플랫폼 차이 때문에 어쩔 수 없을 때만 다르게 합니다. 지금 남아 있는 차이: 설정 파일 형식(Windows `config.ini`, 맥 `config.json`), 여백 기본값과 단위(Windows 40/140px, 맥 Dock과 메뉴 막대를 뺀 영역 기준 24/24pt), 맥의 "Pear 연결 권한 다시 요청"이 음악 앱의 `config.json`에서 API 서버를 켜 주는 기능(PR #1에서 온 것), 맥 버전에 없는 `https` 설정, Windows의 안내 풍선(맥은 안내 카드로 대신함). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`).
 
 ## 작업 방식
 
@@ -17,7 +17,7 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 - 커밋 메시지는 한국어로 짧게 씁니다(예: "트레이 가사 다시 찾기에 결과 표시").
 - 릴리스 본문은 합니다체로 씁니다.
 - 루트에 있는 `PearNowPlaying.exe`, `_capture/`, `*.zip`은 커밋하지 않습니다(`.gitignore`).
-- 실행 로그는 `%AppData%\PearNowPlaying\error.log`, 설정은 `%AppData%\PearNowPlaying\config.ini`에 있습니다. 가사가 표시되지 않는다는 제보를 받으면 로그부터 확인합니다. 가사를 검색하는 단계마다 INFO 줄이 기록됩니다.
+- 실행 로그는 `%AppData%\PearNowPlaying\error.log`(맥은 `~/Library/Application Support/PearNowPlaying-macOS/error.log`, `Log.swift`), 설정은 `%AppData%\PearNowPlaying\config.ini`(맥은 같은 폴더의 `config.json`)에 있습니다. 맥 로그에는 연결이 끊긴 이유(WebSocket 종료 코드, HTTP 상태, 오류 도메인과 코드)도 남습니다. 가사가 표시되지 않는다는 제보를 받으면 로그부터 확인합니다. 가사를 검색하는 단계마다 INFO 줄이 기록됩니다.
 
 ## 문서 작성 규칙
 

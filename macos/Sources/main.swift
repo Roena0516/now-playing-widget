@@ -13,6 +13,8 @@ import CoreText
     let preview = CommandLine.arguments.contains("--preview")
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        Log.migrate()
+        Log.info("start \(appVersion)")
         registerFonts()
         client.settings.save()
         overlay = OverlayController(client: client, preview: preview)
@@ -25,16 +27,18 @@ import CoreText
         item.button?.setAccessibilityLabel("Pear Now Playing")
         client.$status.combineLatest(client.$lyricsStatus).sink { [weak self] _, _ in DispatchQueue.main.async { self?.updateMenu(); self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$song.map { $0.identity + "|" + String($0.paused) }.removeDuplicates().dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async { guard let self else { return }; if !self.client.song.title.isEmpty { self.overlay.show() }; self.updateMenu() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let identity = self.client.song.identity
+                if identity != self.lastIdentity { self.lastIdentity = identity; if !self.client.song.title.isEmpty { self.overlay.show() } }
+                else { self.overlay.playStateChanged() }
+                self.updateMenu()
+            }
         }.store(in: &subscriptions)
         client.$lines.sink { [weak self] _ in DispatchQueue.main.async { guard let self else { return }; self.overlay.refresh() } }.store(in: &subscriptions)
         client.$titleRevision.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$artwork.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
-        hotkeys.action = { [weak self] id in
-            guard let self else { return }
-            switch id { case 0: self.show(); case 1: self.client.control("toggle-play"); case 2: self.client.control("next"); case 3: self.client.control("previous"); case 4: self.togglePinned(); case 5: self.toggleLyrics(); default: break }
-        }
-        if !hotkeys.register() { NSLog("일부 단축키 등록 실패: 다른 앱의 Ctrl+Option 단축키를 확인하세요.") }
+        registerHotkeys()
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.overlay.layout(); self?.updateMenu() } }
         updateMenu()
         if preview {
@@ -44,7 +48,27 @@ import CoreText
         } else { client.start(); overlay.show() }
     }
     func registerFonts() { NativeTheme.registerFonts() }
-    func applicationWillTerminate(_ notification: Notification) { overlay?.stop(); setupTask?.cancel(); client.stop(); hotkeys.unregister(); if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) } }
+    var lastIdentity = ""
+
+    /// Hotkeys from the config (Windows format, "Ctrl+Alt+Up"); unregistered ones are reported like on Windows.
+    func registerHotkeys() {
+        hotkeys.unregisterAll()
+        let s = client.settings
+        let errors = [
+            hotkeys.register(s.hotkeyShow) { [weak self] in self?.show() },
+            hotkeys.register(s.hotkeyToggle) { [weak self] in self?.client.control("toggle-play") },
+            hotkeys.register(s.hotkeyNext) { [weak self] in self?.client.control("next") },
+            hotkeys.register(s.hotkeyPrevious) { [weak self] in self?.client.control("previous") },
+            hotkeys.register(s.hotkeyAlwaysShow) { [weak self] in self?.togglePinned() },
+            hotkeys.register(s.hotkeyLyrics) { [weak self] in self?.toggleLyrics() },
+        ].compactMap { $0 }
+        if !errors.isEmpty {
+            Log.write("WARN hotkeys not registered: " + errors.joined(separator: ", "))
+            overlay?.showInfo("단축키를 등록하지 못했어요: " + errors.joined(separator: ", "))
+        }
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        Log.info("exit"); overlay?.stop(); setupTask?.cancel(); client.stop(); hotkeys.unregister(); if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) } }
     func add(_ menu: NSMenu, _ title: String, _ action: Selector?, state: Bool = false, represented: Any? = nil) {
         let entry = NSMenuItem(title: title, action: action, keyEquivalent: ""); entry.target = self
         entry.state = state ? .on : .off; entry.representedObject = represented; menu.addItem(entry)
@@ -55,16 +79,16 @@ import CoreText
         add(menu, preview ? "미리보기 모드" : client.status, nil)
         add(menu, client.lyricsStatus, nil)
         menu.addItem(.separator())
-        add(menu, "지금 곡 다시 보기    ⌃⌥↑", #selector(show))
+        add(menu, "지금 곡 보기", #selector(show))
         menu.addItem(.separator())
-        add(menu, "이전 곡    ⌃⌥←", #selector(previous))
-        add(menu, "재생 / 일시정지    ⌃⌥↓", #selector(togglePlay))
-        add(menu, "다음 곡    ⌃⌥→", #selector(next))
+        add(menu, "이전 곡", #selector(previous))
+        add(menu, "재생 / 일시정지", #selector(togglePlay))
+        add(menu, "다음 곡", #selector(next))
         menu.addItem(.separator())
 
         // widget (song card, where and how big) and lyrics settings live in separate submenus
         let widget = NSMenu()
-        add(widget, "곡 정보 계속 표시    ⌃⌥P", #selector(togglePinned), state: client.settings.alwaysShow)
+        add(widget, "곡 정보 계속 표시", #selector(togglePinned), state: client.settings.alwaysShow)
         let titles = NSMenu()
         add(titles, "곡 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle != "video", represented: "song")
         add(titles, "영상 제목 (Discord 상태와 같음)", #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
@@ -91,20 +115,19 @@ import CoreText
         submenu(menu, "위젯", widget)
 
         let lyrics = NSMenu()
-        add(lyrics, "가사 표시    ⌃⌥L", #selector(toggleLyrics), state: client.settings.showLyrics)
+        add(lyrics, "가사 표시", #selector(toggleLyrics), state: client.settings.showLyrics)
         add(lyrics, "가사 다시 찾기", #selector(findLyrics))
-        let timing = NSMenu(); for delta in [-1000, -500, -100, 0, 100, 500, 1000] {
-            let title = delta == 0 ? "보정 초기화" : (delta > 0 ? "\(delta)ms 빠르게" : "\(-delta)ms 늦게")
-            add(timing, title, #selector(offset(_:)), represented: delta)
+        let timing = NSMenu()
+        for (title, value) in [("1초 빠르게", 1300), ("0.5초 빠르게", 800), ("기본", 300), ("0.5초 늦게", -200), ("1초 늦게", -700)] {
+            add(timing, title, #selector(offset(_:)), state: Int(client.settings.lyricsOffsetMs) == value, represented: value)
         }
-        submenu(lyrics, "가사 타이밍 (\(Int(client.settings.lyricsOffsetMs))ms)", timing)
-        add(lyrics, "가사 진단 기록 열기", #selector(openLyricsLog))
+        submenu(lyrics, "가사 타이밍", timing)
         submenu(menu, "가사", lyrics)
         menu.addItem(.separator())
         add(menu, "Pear 연결 권한 다시 요청", #selector(retry))
-        add(menu, "YouTube Music 열기", #selector(openPlayer))
         add(menu, "설정 파일 열기", #selector(openConfig))
         add(menu, "설정 다시 불러오기", #selector(reload))
+        add(menu, "오류 기록 열기", #selector(openLog))
         menu.addItem(.separator())
         add(menu, "종료", #selector(quit))
         item.menu = menu
@@ -116,15 +139,27 @@ import CoreText
     func save() { client.settings.save(); client.applyLyricsSources(); overlay.show(); updateMenu() }
     @objc func show() { overlay.show() }
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
-    @objc func toggleLyrics() { client.settings.showLyrics.toggle(); save() }
+    @objc func toggleLyrics() {
+        client.settings.showLyrics.toggle(); client.settings.save(); updateMenu()
+        // the same messages as the Windows version's ToggleLyrics
+        if !client.settings.showLyrics { overlay.refresh(); overlay.showInfo("가사 표시를 껐어요"); return }
+        overlay.refresh()
+        if client.lyricsFailed { overlay.showInfo("가사 서버에 연결하지 못했어요"); return }
+        guard let outcome = client.lyricsOutcome else { return }   // still looking
+        if case .synced = outcome { return }
+        overlay.showInfo("이 곡은 싱크 가사를 찾지 못했어요")
+    }
     @objc func findLyrics() { client.findLyrics(force: true) }
     @objc func videoTitle(_ sender: NSMenuItem) { client.settings.videoTitle = sender.representedObject as! String; save() }
     @objc func toggleMoveMode() { overlay.setMoveMode(!overlay.moveMode); updateMenu() }
     @objc func monitor(_ sender: NSMenuItem) { client.settings.monitor = sender.representedObject as! Int; save() }
-    @objc func openLyricsLog() { LyricsLog.write("진단 기록 열기"); NSWorkspace.shared.open(LyricsLog.file) }
+    @objc func openLog() {
+        if !FileManager.default.fileExists(atPath: Log.file.path) { Log.info("log opened") }
+        NSWorkspace.shared.open(Log.file)
+    }
     @objc func position(_ sender: NSMenuItem) { client.settings.position = sender.representedObject as! String; save() }
     @objc func size(_ sender: NSMenuItem) { client.settings.scale = sender.representedObject as! Double; save() }
-    @objc func offset(_ sender: NSMenuItem) { let delta = sender.representedObject as! Int; client.settings.lyricsOffsetMs = delta == 0 ? 0 : client.settings.lyricsOffsetMs + Double(delta); save() }
+    @objc func offset(_ sender: NSMenuItem) { client.settings.lyricsOffsetMs = Double(sender.representedObject as! Int); save() }
     @objc func previous() { client.control("previous") }
     @objc func togglePlay() { client.control("toggle-play") }
     @objc func next() { client.control("next") }
@@ -152,6 +187,7 @@ import CoreText
                     client.retryAuth()
                 }
             } catch {
+                Log.error("player setup", error)
                 let alert = NSAlert()
                 alert.messageText = "Pear 연결 설정을 적용하지 못했습니다"
                 alert.informativeText = error.localizedDescription
@@ -187,13 +223,16 @@ import CoreText
         _ = try PlayerSetup.apply(to: PlayerSetup.configURL(), port: client.settings.port)
         _ = try await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
-    @objc func openPlayer() { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/YouTube Music.app")) }
     @objc func openConfig() { NSWorkspace.shared.open(Settings.file) }
-    @objc func reload() { client.reload(); overlay.show(); updateMenu() }
+    @objc func reload() { client.reload(); registerHotkeys(); overlay.show(); updateMenu() }
     @objc func quit() { NSApp.terminate(nil) }
 }
 
 MainActor.assumeIsolated {
+// test and audit runs log to a scratch file, not the user's error.log
+if CommandLine.arguments.dropFirst().contains(where: { $0.hasPrefix("--") && $0 != "--preview" }) {
+    Log.file = FileManager.default.temporaryDirectory.appendingPathComponent("pear-now-playing-test-\(ProcessInfo.processInfo.processIdentifier).log")
+}
 if CommandLine.arguments.contains("--ytmusic-tests") {
     Task { await runYTMusicTests() }
     RunLoop.main.run()
