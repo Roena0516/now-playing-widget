@@ -116,6 +116,7 @@ import CoreText
 
         let lyrics = NSMenu()
         add(lyrics, "가사 표시", #selector(toggleLyrics), state: client.settings.showLyrics)
+        add(lyrics, "앨범 곡만 가사 표시", #selector(toggleAlbumOnly), state: client.settings.lyricsAlbumOnly)
         add(lyrics, "가사 다시 찾기", #selector(findLyrics))
         let timing = NSMenu()
         for (title, value) in [("1초 빠르게", 1300), ("0.5초 빠르게", 800), ("기본", 300), ("0.5초 늦게", -200), ("1초 늦게", -700)] {
@@ -139,6 +140,11 @@ import CoreText
     func save() { client.settings.save(); client.applyLyricsSources(); overlay.show(); updateMenu() }
     @objc func show() { overlay.show() }
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
+    @objc func toggleAlbumOnly() {
+        client.settings.lyricsAlbumOnly.toggle(); client.settings.save(); updateMenu()
+        overlay.showInfo(client.settings.lyricsAlbumOnly ? "앨범 곡에서만 가사를 표시해요" : "모든 곡에서 가사를 표시해요")
+        client.findLyrics()   // decide again for the current song
+    }
     @objc func toggleLyrics() {
         client.settings.showLyrics.toggle(); client.settings.save(); updateMenu()
         // the same messages as the Windows version's ToggleLyrics

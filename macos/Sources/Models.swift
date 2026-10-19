@@ -25,6 +25,8 @@ struct Settings: Codable {
     /// (Pear's alternativeTitle, what Pear's Discord status shows)
     var videoTitle = "song"
     var showLyrics = true
+    /// lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up
+    var lyricsAlbumOnly = false
     var lyricsOffsetMs: Double = 300
     var ytmLyrics = true
     var ytmLyricsProxy = YTMusicProvider.defaultProxy
@@ -54,6 +56,7 @@ struct Settings: Codable {
         hotkeyNext = try value(.hotkeyNext, hotkeyNext); hotkeyPrevious = try value(.hotkeyPrevious, hotkeyPrevious)
         hotkeyAlwaysShow = try value(.hotkeyAlwaysShow, hotkeyAlwaysShow); hotkeyLyrics = try value(.hotkeyLyrics, hotkeyLyrics)
         lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
+        lyricsAlbumOnly = try value(.lyricsAlbumOnly, lyricsAlbumOnly)
         ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
         lyricsServer = try value(.lyricsServer, lyricsServer)
         positionLayoutVersion = try c.decodeIfPresent(Int.self, forKey: .positionLayoutVersion)

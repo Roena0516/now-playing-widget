@@ -187,6 +187,13 @@ import Combine
         lyricTask?.cancel(); prefetchTask?.cancel(); lines = []; lyricsStatus = "가사: 찾는 중"; lyricsOutcome = nil; lyricsFailed = false
         let track = song
         guard !track.title.isEmpty else { lyricsStatus = "가사: -"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
+        if !wantsLyrics(track) {
+            // "앨범 곡만 가사 표시": not an album track, so no lookup at all
+            lyricsStatus = "가사: 앨범 곡이 아니라 찾지 않음"
+            if force { onLyricsNotice?("앨범 곡이 아니라 가사를 표시하지 않아요") }
+            prefetchNext(after: track)
+            return
+        }
         if force { lyrics.forget(track); lyrics.ytm.resetPause(); onLyricsNotice?("가사를 다시 찾는 중이에요") }
         lyricTask = Task {
             // LRCLIB is sometimes slow or briefly down: retry a few times while the same song plays
@@ -221,6 +228,9 @@ import Combine
         }
     }
 
+    /// Whether this song's lyrics are wanted ("앨범 곡만 가사 표시" skips everything but album tracks).
+    func wantsLyrics(_ track: Song) -> Bool { !settings.lyricsAlbumOnly || track.mediaType == "AUDIO" }
+
     /// While this song plays, look up the next one in Pear's queue so its lyrics are ready when it starts.
     /// Waits a little first so quickly skipped songs don't trigger lookups. LRCLIB's "busy" answers usually clear
     /// within seconds, so a failed look-ahead is tried again later in the song instead of when the next one starts.
@@ -232,7 +242,14 @@ import Combine
                 do {
                     try await Task.sleep(for: .seconds(wait))
                     // asked each time: the queue may have changed
-                    guard let next = try await nextSong(), next.videoId + "|" + next.title != current.videoId + "|" + current.title else { return }
+                    guard var next = try await nextSong(), next.videoId + "|" + next.title != current.videoId + "|" + current.title else { return }
+                    if settings.lyricsAlbumOnly {
+                        // the queue doesn't say whether it's an album track; YouTube Music does (this is the
+                        // lookup's first request anyway, remembered for when the song starts)
+                        guard settings.ytmLyrics, !lyrics.ytm.paused,
+                              try await lyrics.ytm.lookup(next.videoId).videoType == "MUSIC_VIDEO_TYPE_ATV" else { return }
+                        next.mediaType = "AUDIO"
+                    }
                     try await lyrics.prefetch(next)
                     return
                 } catch {

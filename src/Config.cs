@@ -44,6 +44,8 @@ namespace PearNowPlaying
 
         // Lyrics
         public bool ShowLyrics = true;
+        /// <summary>Lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up.</summary>
+        public bool LyricsAlbumOnly = false;
         public bool LyricsShowNext = true;
         public int LyricsOffsetMs = 300;
         public string LyricsServer = "https://lrclib.net";
@@ -95,6 +97,7 @@ namespace PearNowPlaying
                 c.ShowAlbumArt = GetBool(map, "showAlbumArt", c.ShowAlbumArt);
                 c.VideoTitle = GetBool(map, "videoTitle", c.VideoTitle);
                 c.ShowLyrics = GetBool(map, "showLyrics", c.ShowLyrics);
+                c.LyricsAlbumOnly = GetBool(map, "lyricsAlbumOnly", c.LyricsAlbumOnly);
                 c.LyricsShowNext = GetBool(map, "lyricsShowNext", c.LyricsShowNext);
                 c.LyricsOffsetMs = Math.Max(-10000, Math.Min(10000, GetInt(map, "lyricsOffsetMs", c.LyricsOffsetMs)));
                 c.LyricsServer = Get(map, "lyricsServer", c.LyricsServer);
@@ -156,6 +159,8 @@ namespace PearNowPlaying
                 sb.AppendLine();
                 sb.AppendLine("# 가사 (LRCLIB 싱크 가사가 있는 곡만 표시)");
                 sb.AppendLine("showLyrics=" + B(ShowLyrics));
+                sb.AppendLine("# true면 앨범 곡(공식 음원)에서만 가사를 찾아 표시 (MV·커버 등은 찾지 않음)");
+                sb.AppendLine("lyricsAlbumOnly=" + B(LyricsAlbumOnly));
                 sb.AppendLine("# 다음 줄 가사도 작게 표시");
                 sb.AppendLine("lyricsShowNext=" + B(LyricsShowNext));
                 sb.AppendLine("# 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다.");

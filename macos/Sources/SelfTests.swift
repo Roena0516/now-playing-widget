@@ -36,6 +36,17 @@ import CoreGraphics
     precondition(Hotkeys.parse("ctrl + shift + F9")! == (UInt32(kVK_F9), UInt32(controlKey | shiftKey)))
     precondition(Hotkeys.parse("Win+1")! == (UInt32(kVK_ANSI_1), UInt32(cmdKey)) && Hotkeys.parse("Alt+D1")! == (UInt32(kVK_ANSI_1), UInt32(optionKey)))
     precondition(Hotkeys.parse("Ctrl+Alt") == nil && Hotkeys.parse("Ctrl+A+B") == nil && Hotkeys.parse("Ctrl++P") == nil && Hotkeys.parse("Ctrl+Nope") == nil)
+    // "앨범 곡만 가사 표시": off by default; when on, only album tracks are looked up
+    let albums = PearClient(loadRemoteAssets: false)
+    precondition(!Settings().lyricsAlbumOnly)
+    albums.settings.lyricsAlbumOnly = false
+    precondition(albums.wantsLyrics(Song(title: "x", artist: "y", mediaType: "USER_GENERATED_CONTENT")))
+    albums.settings.lyricsAlbumOnly = true
+    precondition(albums.wantsLyrics(Song(title: "x", artist: "y", mediaType: "AUDIO")) && !albums.wantsLyrics(Song(title: "x", artist: "y", mediaType: "ORIGINAL_MUSIC_VIDEO")))
+    albums.song = Song(["title": "MV", "mediaType": "ORIGINAL_MUSIC_VIDEO", "videoId": "mv"])
+    albums.findLyrics()
+    precondition(albums.lyricsStatus == "가사: 앨범 곡이 아니라 찾지 않음" && albums.lines.isEmpty, "non-album track: no lookup")
+    albums.stop()
     let fresh = Settings()
     precondition(fresh.showOnPause && fresh.showAlbumArt && fresh.lyricsOffsetMs == 300 && fresh.hotkeyLyrics == "Ctrl+Alt+L" && fresh.hotkeyShow == "Ctrl+Alt+Up")
     let olderConfig = try! JSONDecoder().decode(Settings.self, from: Data(#"{"hotkeyNext":"","showAlbumArt":false}"#.utf8))

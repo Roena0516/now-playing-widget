@@ -4,14 +4,14 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 합니다체)
-- 버전: Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.5.2.0)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
+- 버전: 올리는 기준과 고칠 곳은 `VERSIONING.md`에 있습니다. Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.5.2.0, User-Agent도 이 값을 읽음)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
 - macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). **맥 버전은 웬만하면 Windows 버전을 따라갑니다**(사용자 방침): 메뉴 구성과 이름, 상태·안내 문구, 기본값, 설정 키(단축키 문자열 형식 `Ctrl+Alt+Up` 포함), 로그 파일 이름과 형식, 동작 규칙을 Windows와 같게 맞추고, 플랫폼 차이 때문에 어쩔 수 없을 때만 다르게 합니다. 지금 남아 있는 차이: 설정 파일 형식(Windows `config.ini`, 맥 `config.json`), 여백 기본값과 단위(Windows 40/140px, 맥 Dock과 메뉴 막대를 뺀 영역 기준 24/24pt), 맥의 "Pear 연결 권한 다시 요청"이 음악 앱의 `config.json`에서 API 서버를 켜 주는 기능(PR #1에서 온 것), 맥 버전에 없는 `https` 설정, Windows의 안내 풍선(맥은 안내 카드로 대신함). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`).
 
 ## 작업 방식
 
 - 사용자(로에나)는 대화할 때 반말 한국어(임/함체)로 짧고 직접적인 답을 받기를 선호합니다.
 - 커밋, 푸시, 릴리스 업로드는 사용자가 직접 합니다. Windows 릴리스 zip에는 `PearNowPlaying.exe`, `README.md`, `PretendardJP-OFL.txt`를 `PearNowPlaying/` 폴더째 넣습니다.
-- 릴리스 파일 이름에는 버전을 넣습니다: `PearNowPlaying-Windows-<버전>.zip`, `PearNowPlaying-macOS-<버전>.dmg`(예: `PearNowPlaying-Windows-1.5.3.zip`). 1.5.2까지의 릴리스는 버전 없는 이름으로 올라가 있으며, 그 파일들은 바꾸지 않습니다.
+- 릴리스 파일 이름에는 버전을 넣습니다: `PearNowPlaying-Windows-<버전>.zip`, `PearNowPlaying-macOS-<버전>.dmg`(예: `PearNowPlaying-Windows-1.6.0.zip`). 1.5.2까지의 릴리스는 버전 없는 이름으로 올라가 있으며, 그 파일들은 바꾸지 않습니다.
 - macOS 릴리스는 `./macos/build.sh --universal --dmg`로 만든 `macos/build/PearNowPlaying-macOS-<버전>.dmg`를 올립니다(arm64+x86_64). zip은 올리지 않습니다. 앱은 ad-hoc 서명만 하고 공증은 받지 않습니다.
 - DMG 창의 모양(창 크기, 아이콘 위치, 배경)은 `macos/dmg-settings.py`에 있고, `dmgbuild`(1.6.7로 고정, 처음 `--dmg`로 빌드할 때 `macos/build/dmg-venv`에 설치됨)가 Finder 없이 만듭니다. 앱 아이콘(`macos/Resources/AppIcon.icns`)과 DMG 배경(`macos/Resources/dmg-background.tiff`)은 `xcrun swift macos/Tools/make-art.swift`로 다시 그릴 수 있으며, 결과 파일은 커밋되어 있습니다. 배경의 아이콘 위치를 바꾸면 `dmg-settings.py`의 `icon_locations`도 함께 바꿉니다.
 - 커밋 메시지는 한국어로 짧게 씁니다(예: "트레이 가사 다시 찾기에 결과 표시").
@@ -21,7 +21,7 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 
 ## 문서 작성 규칙
 
-- `README.md`, `macos/README.md`, `macos/ORIGINAL-BEHAVIOR-AUDIT.ko.md`, 이 `CLAUDE.md`를 포함한 모든 문서는 합니다체로 씁니다.
+- `README.md`, `macos/README.md`, `macos/ORIGINAL-BEHAVIOR-AUDIT.ko.md`, `VERSIONING.md`, 이 `CLAUDE.md`를 포함한 모든 문서는 합니다체로 씁니다.
 - 문서를 쓸 때는 사용자가 제공한 한국어 작성 지침(`~/Desktop/fluent-korean-not-coding.md`)을 따릅니다. 예를 들어 의미가 있는 문장 성분과 조사를 생략하지 않고, 문장은 서술어와 종결어미로 끝내며, 비유적인 어휘와 엠대시(—)는 피합니다.
 - 이 지침은 프로젝트 문서에만 적용합니다. 사용자와 대화할 때는 위의 "작업 방식"에 적은 대로 반말(임/함체)을 사용합니다.
 - 앱의 UI 문자열은 문서가 아니므로 지금처럼 해요체를 유지합니다. 다만 DMG 배경에 들어가는 설치 안내 문구는 문서로 보고 합니다체로 씁니다. 코드 주석과 로그는 영어로 씁니다. 문서에서 UI 문구를 인용할 때는 실제 문구를 그대로 옮깁니다.

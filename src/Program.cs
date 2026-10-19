@@ -14,6 +14,12 @@ using System.Windows.Forms;
 
 namespace PearNowPlaying
 {
+    /// <summary>The app's version, from AssemblyVersion above (the one place to change it; see VERSIONING.md).</summary>
+    internal static class AppInfo
+    {
+        public static readonly string Version = typeof(AppInfo).Assembly.GetName().Version.ToString(3);
+    }
+
     internal static class Program
     {
         [STAThread]
