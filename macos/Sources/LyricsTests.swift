@@ -282,6 +282,24 @@ import Foundation
         let rang = Song(title: "호랑풍류가 [나와 호랑이님 OST] / 코가네 랑 (Cogane Rang) Cover", artist: "코가네 랑 COGANE RANG", videoId: "rangCover01", mediaType: "USER_GENERATED_CONTENT", duration: 253)
         guard case .synced(let rangLines, _) = try await named.find(rang), rangLines.first?.text == "right" else { preconditionFailure("the artist the description names finds the original") }
 
+        // an original titled "日本語 - English" that LRCLIB lists only under the English half (MIMI's Only Words)
+        let halves = LyricsFinder(lrclib: lrclib { url in
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            if url.path.hasSuffix("/get") {
+                return items.first { $0.name == "track_name" }?.value == "Only Words" ? (200, #"{"trackName":"Only Words","artistName":"MIMI","duration":192,"syncedLyrics":"[00:01.00]only words"}"#) : (404, "")
+            }
+            return (200, "[]")
+        }, ytm: YTMusicProvider(transport: { request in
+            let body = FakeYouTube.body(request)
+            if request.url!.path.hasSuffix("/player") { return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "原曲: https://youtu.be/mimiOnlyMV1"]]) }
+            switch body["videoId"] as? String ?? "" {
+            case "mimiOnlyMV1": return try FakeYouTube.ok(request, FakeYouTube.next("mimiOnlyMV1", title: "心を刺す言葉だけ - Only Words (feat. Hatsune Miku & KAFU)", artist: "MIMI", length: "3:12", type: "MUSIC_VIDEO_TYPE_OMV"))
+            case let id: return try FakeYouTube.ok(request, FakeYouTube.next(id))
+            }
+        }))
+        let enCover = Song(title: "心を刺す言葉だけ/ MIMI covered byえん × yureru.", artist: "えん / neG", videoId: "enCover0001", mediaType: "USER_GENERATED_CONTENT", duration: 196)
+        guard case .synced(let halfLines, _) = try await halves.find(enCover), halfLines.first?.text == "only words" else { preconditionFailure("the English half of the original's title finds it") }
+
         // LRCLIB busy while looking for the original: the lookup fails (retried later), nothing cached
         var busyCalls = 0
         let busy = LyricsFinder(lrclib: lrclib { _ in busyCalls += 1; return (503, "") }, ytm: YTMusicProvider(transport: { request in

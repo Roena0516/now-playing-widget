@@ -288,6 +288,11 @@ enum CoverLyrics {
         let t = Rx(#"[\s\u3000]+\S*\s*(?:ver\.?|version)\s*$"#, ignoreCase: true).replace(title, with: "").trimmed
         return t.isEmpty ? title : t
     }
+    /// "心を刺す言葉だけ - Only Words" -> both halves (a song LRCLIB may list under either), else none. Same as src/CoverLyrics.cs.
+    static func titleHalves(_ title: String) -> [String] {
+        let parts = dashes.split(title).map(\.trimmed)
+        return parts.count == 2 && parts.allSatisfy({ !norm($0).isEmpty }) ? parts : []
+    }
     static func displayTitle(_ pearTitle: String, queueTitle: String) -> String {
         if pearTitle.trimmed.isEmpty || queueTitle.trimmed.isEmpty { return pearTitle }
         let core = featTail.replace(pearTitle, with: "").trimmed

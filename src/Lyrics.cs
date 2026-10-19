@@ -397,7 +397,9 @@ namespace PearNowPlaying
                 var getTitles = new List<string> { song.Title };
                 if (!string.IsNullOrEmpty(song.AltTitle)) getTitles.Add(song.AltTitle);
                 getTitles.Add(CleanTitle(song.Title));
-                foreach (var gt in getTitles.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(3))
+                // "心を刺す言葉だけ - Only Words": LRCLIB may list the song under either half (this one only as "Only Words")
+                getTitles.AddRange(CoverLyrics.TitleHalves(CleanTitle(song.Title)));
+                foreach (var gt in getTitles.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(4))
                 {
                     try { best = await Get(new SongInfo { Title = gt, Artist = song.Artist, Album = song.Album, Duration = song.Duration }, ct); }
                     catch (OperationCanceledException) { throw; }

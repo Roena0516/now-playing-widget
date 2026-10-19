@@ -328,6 +328,13 @@ namespace PearNowPlaying
             return t.Length > 0 ? t : title;
         }
 
+        /// <summary>"心を刺す言葉だけ - Only Words" -> both halves (a song LRCLIB may list under either), else none.</summary>
+        public static List<string> TitleHalves(string title)
+        {
+            var parts = Regex.Split(title ?? "", @"\s+[-－–—]\s+").Select(x => x.Trim()).ToList();
+            return parts.Count == 2 && parts.All(x => Norm(x).Length > 0) ? parts : new List<string>();
+        }
+
         public static string DisplayTitle(string pearTitle, string queueTitle)
         {
             if (string.IsNullOrWhiteSpace(pearTitle) || string.IsNullOrWhiteSpace(queueTitle)) return pearTitle ?? "";

@@ -118,7 +118,9 @@ struct LyricRecord: Decodable {
         // 1) exact signature lookup (artist + title + album + duration): one row, usually fast
         // also under the alternative / cleaned-up title ("ビノミ - Binomi" -> "ビノミ"): exact lookups are cheap
         if !song.artist.isEmpty && song.duration > 0 {
-            for title in [song.title, song.alternativeTitle, Self.cleanTitle(song.title)].filter({ !$0.trimmed.isEmpty }).uniqued().prefix(3) {
+            // "心を刺す言葉だけ - Only Words": LRCLIB may list the song under either half (this one only as "Only Words")
+            let names = [song.title, song.alternativeTitle, Self.cleanTitle(song.title)] + CoverLyrics.titleHalves(Self.cleanTitle(song.title))
+            for title in names.filter({ !$0.trimmed.isEmpty }).uniqued().prefix(4) {
                 let record: LyricRecord? = try await attempt(nil) {
                     let (data, status) = try await fetch("get", [URLQueryItem(name: "artist_name", value: song.artist), URLQueryItem(name: "track_name", value: title),
                                                                  URLQueryItem(name: "album_name", value: song.album), URLQueryItem(name: "duration", value: String(Int(song.duration.rounded(.toNearestOrEven))))])
