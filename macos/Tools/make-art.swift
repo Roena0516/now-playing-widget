@@ -113,11 +113,12 @@ func text(_ string: String, size: CGFloat, medium: Bool = false, color: NSColor,
     attributed.draw(at: CGPoint(x: centerX - width / 2, y: top))
 }
 
+// Light on purpose: Finder draws the icon names in black over a background picture, even in Dark Mode.
 func drawBackground() {
     let size = CGSize(width: 640, height: 400)
-    NSGradient(colors: [hex("#232326"), hex("#19191b")])!.draw(in: CGRect(origin: .zero, size: size), angle: -90)
+    NSGradient(colors: [hex("#fbf8f9"), hex("#f2ecee")])!.draw(in: CGRect(origin: .zero, size: size), angle: -90)
     // a soft coral glow behind the app
-    NSGradient(colors: [hex("#ff4e45", 0.20), hex("#ff4e45", 0)])!
+    NSGradient(colors: [hex("#ff4e45", 0.13), hex("#ff4e45", 0)])!
         .draw(fromCenter: CGPoint(x: 160, y: 200), radius: 0, toCenter: CGPoint(x: 160, y: 200), radius: 150, options: [])
 
     // arrow from the app to Applications
@@ -125,14 +126,14 @@ func drawBackground() {
     arrow.lineWidth = 5; arrow.lineCapStyle = .round; arrow.lineJoinStyle = .round
     arrow.setLineDash([2, 12], count: 2, phase: 0)
     arrow.move(to: CGPoint(x: 262, y: 200)); arrow.line(to: CGPoint(x: 362, y: 200))
-    hex("#ff9294").setStroke(); arrow.stroke()
+    hex("#ff6b62").setStroke(); arrow.stroke()
     let head = NSBezierPath()
     head.lineWidth = 5; head.lineCapStyle = .round; head.lineJoinStyle = .round
     head.move(to: CGPoint(x: 362, y: 186)); head.line(to: CGPoint(x: 378, y: 200)); head.line(to: CGPoint(x: 362, y: 214))
     head.stroke()
 
-    text("처음 실행할 때 열리지 않으면 시스템 설정 → 개인정보 보호 및 보안에서 '그래도 열기'를 눌러요",
-         size: 11.5, color: hex("#8a8087"), centerX: 320, top: 340)
+    text("처음 실행할 때 열리지 않으면 시스템 설정 → 개인정보 보호 및 보안에서 '그래도 열기'를 누릅니다.",
+         size: 11.5, color: hex("#81777d"), centerX: 320, top: 348)
 }
 
 let bg1 = work.appendingPathComponent("bg.png"), bg2 = work.appendingPathComponent("bg@2x.png")
