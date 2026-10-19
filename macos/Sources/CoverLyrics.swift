@@ -83,8 +83,8 @@ enum CoverLyrics {
     static let brackets = Rx(#"【([^】]*)】|\[([^\]]*)\]|〖([^〗]*)〗"#)
     static let tagWords = Rx(#"歌ってみた|踊ってみた|弾いてみた|cover|カバー|커버|mv|m/v|official|公式|オリジナル|original|full|フル|ver\.?|version|歌枠|live|ライブ|周年|記念|生誕|誕生日|コラボ|collab|ホロライブ|にじさんじ|vtuber|新衣装|3d"#, ignoreCase: true)
     static let coverTail = Rx(#"\s*[\(\[（]?\s*(?<![A-Za-z])(?:covered\s*by|cover\s*by|cover\s*ver\.?|cover|カバー|커버|歌ってみた|踊ってみた|弾いてみた)(?![A-Za-z])[^\)\]）]*[\)\]）]?"#, ignoreCase: true)
-    static let descOriginal = Rx(#"^\s*[・\-*#■□◆◇▼▽>]*\s*(?:原曲|本家|元曲|original(?:\s*song)?|オリジナル|원곡)\s*(?:様|さま)?\s*[:：\-－/／]?\s*(.+)$"#, ignoreCase: true)
-    static let descComposer = Rx(#"^\s*[・\-*#■□◆◇▼▽>]*\s*(?:music|作詞\s*[・/&]?\s*作曲|作曲|作編曲|composer|song\s*by)\s*[:：\-－/／]\s*(.+)$"#, ignoreCase: true)
+    static let descOriginal = Rx(#"^[^\p{L}\p{N}]*(?:原曲|ご?本家|元曲|original(?:\s*song)?|オリジナル|원곡)\s*(?:様|さま)?\s*[:：\-－/／]?\s*(.+)$"#, ignoreCase: true)
+    static let descComposer = Rx(#"^[^\p{L}\p{N}]*(?:music|作詞\s*[・/&]?\s*作曲|作曲|作編曲|composer|song\s*by)\s*[:：\-－/／]\s*(.+)$"#, ignoreCase: true)
     static let quoted = Rx(#"「([^」]+)」|『([^』]+)』|([♕♔♪♬♫★☆♡♥◆◇●○✿❀✨]+)\s*([^♕♔♪♬♫★☆♡♥◆◇●○✿❀✨]+?)\s*\3"#)
     static let subtitles = Rx(#"한글\s*자막|한국어\s*자막|자막|가사|번역|歌詞付き|歌詞|中文字幕|字幕|日本語訳|\blyrics?\s*video\b|\blyrics?\b|\bsub(?:bed|titles?)?\b"#, ignoreCase: true)
     static let honorific = Rx(#"\s*(?:[（(]\s*@[^)）]*[)）])?\s*(?:様|さま|さん|氏)?\s*(?:[（(]\s*@[^)）]*[)）])?\s*$"#)
@@ -140,9 +140,11 @@ enum CoverLyrics {
                 guard let m = descOriginal.firstGroups(url.replace(line, with: " ")) else { continue }
                 let v = honorific.replace(m[1].trimmed, with: "")
                 let segs = Rx(#"\s*[/／]\s*"#).split(v).filter { !$0.trimmed.isEmpty }
-                // "原曲：ワールドイズマイン / ryo様" or "原曲：ryo様"
-                if segs.count >= 2 { artist = honorific.replace(segs[1].trimmed, with: ""); break }
-                if segs.count == 1 && norm(segs[0]) != norm(title) { artist = segs[0].trimmed; break }
+                // "原曲：ワールドイズマイン / ryo様", "Original: 상록수 feat. 나래 - 호랑풍류가" or "原曲：ryo様"
+                if segs.count >= 2 { artist = honorific.replace(segs[1].trimmed, with: "") }
+                else if segs.count == 1 { artist = artistBesideTitle(segs[0].trimmed, title) }
+                if !norm(artist).isEmpty { break }   // "ご本家様 → (link)" names nobody
+                artist = ""
             }
             if artist.isEmpty {
                 for line in lines {
@@ -265,6 +267,14 @@ enum CoverLyrics {
     /// When the queue title is exactly that pair and its second half is Pear's title, show both; otherwise
     /// (no translation, Pear already showing the original, titles that merely contain " - ") keep Pear's title.
     /// "(feat. …)" follows Pear's title: kept if Pear has it, not added otherwise. Same as src/CoverLyrics.cs.
+    /// The artist in "artist - title" or "title - artist" (the side that isn't the song), the whole text when it
+    /// isn't the song itself, or "". Same as src/CoverLyrics.cs.
+    static func artistBesideTitle(_ text: String, _ title: String) -> String {
+        let dash = dashes.split(text).map(\.trimmed).filter { !$0.isEmpty }
+        if dash.count == 2 && sameTitle(dash[1], title) { return dash[0] }
+        if dash.count == 2 && sameTitle(dash[0], title) { return dash[1] }
+        return norm(text) != norm(title) ? text : ""
+    }
     static func displayTitle(_ pearTitle: String, queueTitle: String) -> String {
         if pearTitle.trimmed.isEmpty || queueTitle.trimmed.isEmpty { return pearTitle }
         let core = featTail.replace(pearTitle, with: "").trimmed

@@ -79,7 +79,8 @@ struct LyricRecord: Decodable {
 
     /// `titleTolerance`: allowed length difference when only the title matches (covers looked up by title use 10s).
     /// `titleOnly`: also accept a result whose artist differs if the title and length match.
-    func find(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true) async throws -> LyricsLookup {
+    /// `artistTolerance`: how far (seconds) a result by the same artist may be from the song's length.
+    func find(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15) async throws -> LyricsLookup {
         try Task.checkCancellation()
         var best: LyricRecord?
         var how = "not found"
@@ -120,14 +121,14 @@ struct LyricRecord: Decodable {
             var query = [URLQueryItem(name: "artist_name", value: song.artist), URLQueryItem(name: "track_name", value: song.title)]
             if !song.album.isEmpty { query.append(URLQueryItem(name: "album_name", value: song.album)) }
             let records = try await attempt([]) { try await search(query) }; seen += records
-            best = Self.pick(records, song: song); if best != nil { how = "search" }
+            best = Self.pick(records, song: song, tolerance: artistTolerance); if best != nil { how = "search" }
         }
         if best == nil {
             let alt = song.alternativeTitle.isEmpty ? song.title : song.alternativeTitle
             let artist = Self.artistVariants(song.artist).first ?? ""
             for text in [alt + " " + artist, Self.cleanTitle(song.title) + " " + artist, Self.cleanTitle(alt)].map(\.trimmed).uniqued() where !text.isEmpty {
                 let records = try await attempt([]) { try await search([URLQueryItem(name: "q", value: text)]) }; seen += records
-                if let match = Self.pick(records, song: song) { best = match; how = "q=" + text; break }
+                if let match = Self.pick(records, song: song, tolerance: artistTolerance) { best = match; how = "q=" + text; break }
             }
         }
 
@@ -154,7 +155,7 @@ struct LyricRecord: Decodable {
     /// often hold the artist's other spellings), but a tag only vouches for the artist: tags that are the song or
     /// album name are left out, and a result matched through a tag must also have the song's title. Otherwise
     /// "LAMIA" by BlackY (tagged "LAMIA") took a song by the rapper Lamia. Same as src/Lyrics.cs.
-    static func pick(_ records: [LyricRecord], song: Song) -> LyricRecord? {
+    static func pick(_ records: [LyricRecord], song: Song, tolerance: Double = 15) -> LyricRecord? {
         let ours = artistVariants(song.artist)
         let names = Set([song.title, song.alternativeTitle, cleanTitle(song.title), cleanTitle(song.alternativeTitle), song.album].map(norm).filter { !$0.isEmpty })
         let tags = song.tags.map { $0.lowercased() }.filter { !ours.contains($0) && !names.contains(norm($0)) }
@@ -165,7 +166,7 @@ struct LyricRecord: Decodable {
             return tags.contains { a in theirs.contains { b in jaroWinkler(a, b) > 0.9 } }
         }
         if song.duration > 0 {
-            candidates = candidates.filter { abs(($0.duration ?? 0) - song.duration) <= 15 }
+            candidates = candidates.filter { abs(($0.duration ?? 0) - song.duration) <= tolerance }
                 .sorted { abs(($0.duration ?? 0) - song.duration) < abs(($1.duration ?? 0) - song.duration) }
         }
         // prefer entries that actually have timestamps

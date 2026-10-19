@@ -242,6 +242,22 @@ import Foundation
         guard case .notFound = try await homonym.find(voisona) else { preconditionFailure("a same-name song must not stand in for a known original") }
         precondition(homonymAsked > 0, "the cover's own LRCLIB search still runs, with artist matches only")
 
+        // the linked original's video is 16s longer, but the description names the artist: found by that artist
+        // within the cover's tolerance (코가네 랑's 호랑풍류가), and never another artist's song of the same name
+        let named = LyricsFinder(lrclib: lrclib { url in
+            if url.path.hasSuffix("/get") { return (404, "") }
+            return (200, #"[{"trackName":"호랑풍류가","artistName":"다른 가수","duration":253,"syncedLyrics":"[00:01.00]wrong"},{"trackName":"호랑풍류가 (시드노벨 - ′나와 호랑이님′ 주제가)","artistName":"나래 (Narae)","duration":251,"syncedLyrics":"[00:01.00]right"}]"#)
+        }, ytm: YTMusicProvider(transport: { request in
+            let body = FakeYouTube.body(request)
+            if request.url!.path.hasSuffix("/player") { return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "🐯Original: 상록수 feat. 나래(Narae) - 호랑풍류가\nhttps://youtu.be/horangMV001"]]) }
+            switch body["videoId"] as? String ?? "" {
+            case "horangMV001": return try FakeYouTube.ok(request, FakeYouTube.next("horangMV001", title: "[Music] 상록수 feat. 나래(Narae) - 호랑풍류가", artist: "SQUARE MUSIQ", length: "4:29", type: "MUSIC_VIDEO_TYPE_UGC"))
+            case let id: return try FakeYouTube.ok(request, FakeYouTube.next(id))
+            }
+        }))
+        let rang = Song(title: "호랑풍류가 [나와 호랑이님 OST] / 코가네 랑 (Cogane Rang) Cover", artist: "코가네 랑 COGANE RANG", videoId: "rangCover01", mediaType: "USER_GENERATED_CONTENT", duration: 253)
+        guard case .synced(let rangLines, _) = try await named.find(rang), rangLines.first?.text == "right" else { preconditionFailure("the artist the description names finds the original") }
+
         // LRCLIB busy while looking for the original: the lookup fails (retried later), nothing cached
         var busyCalls = 0
         let busy = LyricsFinder(lrclib: lrclib { _ in busyCalls += 1; return (503, "") }, ytm: YTMusicProvider(transport: { request in

@@ -305,13 +305,11 @@ namespace PearNowPlaying
                     break;   // the first usable link decides; don't wander through unrelated links
                 }
 
-                // The original is known but its length doesn't fit: guessing from the title would only find that
-                // original again (out of sync) or another song with the same name. No lyrics beats wrong lyrics.
-                if (originalTooLong)
-                {
-                    Log.Info("cover: the original differs in length, no lyrics rather than a title guess: " + song.Title);
-                    return null;
-                }
+                // The original's video is known but its length doesn't fit (it often has an intro or outro the
+                // recording doesn't). A title guess alone would find that video's song out of sync or another song
+                // of the same name, so only an artist the description names may look it up: same artist, and a
+                // length within the cover's tolerance. No lyrics beats wrong lyrics.
+                if (originalTooLong) return await FromSearch(song, desc, ct, true);
                 // no usable link: work out the song from the title / description and look it up on LRCLIB
                 return await FromSearch(song, desc, ct);
             }
@@ -329,15 +327,23 @@ namespace PearNowPlaying
         /// and look the original up on LRCLIB. (YouTube Music's own search doesn't list songs without signing in,
         /// so it can't be used for this.) The original must be within a few seconds of the cover's length.
         /// </summary>
-        async Task<LyricsResult> FromSearch(SongInfo song, VideoDescription desc, CancellationToken ct)
+        /// <param name="byArtist">only an original artist named by the title or description, and only results by that
+        /// artist within the cover's length tolerance (the linked original didn't fit)</param>
+        async Task<LyricsResult> FromSearch(SongInfo song, VideoDescription desc, CancellationToken ct, bool byArtist = false)
         {
             var guess = CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null);
             string title = guess.Item1, artist = guess.Item2;
             if (title.Length == 0) { Log.Info("cover: couldn't tell the song title from \"" + song.Title + "\""); return null; }
-            Log.Info("cover: looking up the original on LRCLIB: \"" + title + "\"" + (artist.Length > 0 ? " by \"" + artist + "\"" : " (artist unknown)"));
+            if (byArtist && artist.Length == 0)
+            {
+                Log.Info("cover: the original differs in length and no artist is named, no lyrics rather than a title guess: " + song.Title);
+                return null;
+            }
+            Log.Info("cover: looking up the original on LRCLIB: \"" + title + "\"" + (artist.Length > 0 ? " by \"" + artist + "\"" : " (artist unknown)")
+                     + (byArtist ? ", that artist only" : ""));
 
             var l = await FindLrclib(new SongInfo { Title = title, Artist = artist, Duration = song.Duration, VideoId = song.VideoId + "#original" }, ct,
-                                     CoverLyrics.MaxLengthDiff);
+                                     CoverLyrics.MaxLengthDiff, !byArtist, byArtist ? CoverLyrics.MaxLengthDiff : 15);
             if (l.HasSynced)
             {
                 l.Source = "LRCLIB · 원곡 검색";
@@ -348,7 +354,9 @@ namespace PearNowPlaying
         }
 
         /// <param name="titleOnly">also accept a result whose artist differs if the title and length match</param>
-        async Task<LyricsResult> FindLrclib(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3, bool titleOnly = true)
+        /// <param name="artistTolerance">how far (seconds) a result by the same artist may be from the song's length</param>
+        async Task<LyricsResult> FindLrclib(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3, bool titleOnly = true,
+                                            double artistTolerance = 15)
         {
             LyricsResult result = LyricsResult.None;
             string how = "not found";
@@ -393,7 +401,7 @@ namespace PearNowPlaying
                     if (!string.IsNullOrEmpty(song.Album)) q.Add(new KeyValuePair<string, string>("album_name", song.Album));
                     var items = await attempt(() => Search(q, ct));
                     seen.AddRange(items);
-                    best = Pick(items, song);
+                    best = Pick(items, song, artistTolerance);
                     if (best != null) how = "search";
                 }
                 if (best == null)
@@ -405,7 +413,7 @@ namespace PearNowPlaying
                         var qText = text.Trim();
                         var items = await attempt(() => Search(new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("q", qText) }, ct));
                         seen.AddRange(items);
-                        best = Pick(items, song);
+                        best = Pick(items, song, artistTolerance);
                         if (best != null) { how = "q=" + text.Trim(); break; }
                     }
                 }
@@ -593,7 +601,7 @@ namespace PearNowPlaying
         /// album name are left out, and a result matched through a tag must also have the song's title. Otherwise
         /// "LAMIA" by BlackY (tagged "LAMIA") took a song by the rapper Lamia.
         /// </summary>
-        static IDictionary<string, object> Pick(List<IDictionary<string, object>> items, SongInfo song)
+        static IDictionary<string, object> Pick(List<IDictionary<string, object>> items, SongInfo song, double tolerance = 15)
         {
             var ours = ArtistVariants(song.Artist);
             var names = new[] { song.Title, song.AltTitle, CleanTitle(song.Title), CleanTitle(song.AltTitle), song.Album }
@@ -612,7 +620,7 @@ namespace PearNowPlaying
                 if (ratio > 0.9) candidates.Add(it);
             }
             if (song.Duration > 0)
-                candidates = candidates.Where(c => Math.Abs(Num(c, "duration") - song.Duration) <= 15)
+                candidates = candidates.Where(c => Math.Abs(Num(c, "duration") - song.Duration) <= tolerance)
                                        .OrderBy(c => Math.Abs(Num(c, "duration") - song.Duration)).ToList();
             // prefer entries that actually have timestamps
             var synced = candidates.FirstOrDefault(c => !string.IsNullOrEmpty(Str(c, "syncedLyrics")));

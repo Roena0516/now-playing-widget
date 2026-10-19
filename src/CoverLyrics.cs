@@ -73,10 +73,10 @@ namespace PearNowPlaying
             @"\s*[\(\[（]?\s*(?<![A-Za-z])(?:covered\s*by|cover\s*by|cover\s*ver\.?|cover|カバー|커버|歌ってみた|踊ってみた|弾いてみた)(?![A-Za-z])[^\)\]）]*[\)\]）]?",
             RegexOptions.IgnoreCase);
         static readonly Regex DescOriginal = new Regex(
-            @"^\s*[・\-*#■□◆◇▼▽>]*\s*(?:原曲|本家|元曲|original(?:\s*song)?|オリジナル|원곡)\s*(?:様|さま)?\s*[:：\-－/／]?\s*(.+)$",
+            @"^[^\p{L}\p{N}]*(?:原曲|ご?本家|元曲|original(?:\s*song)?|オリジナル|원곡)\s*(?:様|さま)?\s*[:：\-－/／]?\s*(.+)$",
             RegexOptions.IgnoreCase);
         static readonly Regex DescComposer = new Regex(
-            @"^\s*[・\-*#■□◆◇▼▽>]*\s*(?:music|作詞\s*[・/&]?\s*作曲|作曲|作編曲|composer|song\s*by)\s*[:：\-－/／]\s*(.+)$",
+            @"^[^\p{L}\p{N}]*(?:music|作詞\s*[・/&]?\s*作曲|作曲|作編曲|composer|song\s*by)\s*[:：\-－/／]\s*(.+)$",
             RegexOptions.IgnoreCase);
         static readonly Regex Quoted = new Regex(@"「([^」]+)」|『([^』]+)』|([♕♔♪♬♫★☆♡♥◆◇●○✿❀✨]+)\s*([^♕♔♪♬♫★☆♡♥◆◇●○✿❀✨]+?)\s*\3");
         static readonly Regex Subtitles = new Regex(
@@ -139,9 +139,11 @@ namespace PearNowPlaying
                     if (!m.Success) continue;
                     var v = Honorific.Replace(m.Groups[1].Value.Trim(), "");
                     var segs = Regex.Split(v, @"\s*[/／]\s*").Where(x => x.Trim().Length > 0).ToList();
-                    // "原曲：ワールドイズマイン / ryo様" or "原曲：ryo様"
-                    if (segs.Count >= 2) { artist = Honorific.Replace(segs[1].Trim(), ""); break; }
-                    if (segs.Count == 1 && Norm(segs[0]) != Norm(title)) { artist = segs[0].Trim(); break; }
+                    // "原曲：ワールドイズマイン / ryo様", "Original: 상록수 feat. 나래 - 호랑풍류가" or "原曲：ryo様"
+                    if (segs.Count >= 2) artist = Honorific.Replace(segs[1].Trim(), "");
+                    else if (segs.Count == 1) artist = ArtistBesideTitle(segs[0].Trim(), title);
+                    if (Norm(artist).Length > 0) break;   // "ご本家様 → (link)" names nobody
+                    artist = "";
                 }
                 if (artist.Length == 0)
                     foreach (var line in description.Replace("\r", "").Split('\n'))
@@ -152,6 +154,18 @@ namespace PearNowPlaying
                 if (IsSinger(artist, song)) artist = "";
             }
             return Tuple.Create(title, artist);
+        }
+
+        /// <summary>
+        /// The artist in "artist - title" or "title - artist" (the side that isn't the song), the whole text when it
+        /// isn't the song itself, or "".
+        /// </summary>
+        static string ArtistBesideTitle(string text, string title)
+        {
+            var dash = Regex.Split(text, @"\s+[-－–—]\s+").Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+            if (dash.Count == 2 && SameTitle(dash[1], title)) return dash[0];
+            if (dash.Count == 2 && SameTitle(dash[0], title)) return dash[1];
+            return Norm(text) != Norm(title) ? text : "";
         }
 
         /// <summary>"ビノミ - Binomi" / "夜に駆ける (Racing into the Night)" -> "ビノミ" / "夜に駆ける" (unchanged when nothing is left).</summary>

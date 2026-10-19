@@ -196,10 +196,11 @@ struct LrclibFailed: LocalizedError {
 
             // The original is known but its length doesn't fit: guessing from the title would only find that
             // original again (out of sync) or another song with the same name. No lyrics beats wrong lyrics.
-            if originalTooLong {
-                log("INFO cover: the original differs in length, no lyrics rather than a title guess: \(song.title)")
-                return nil
-            }
+            // The original's video is known but its length doesn't fit (it often has an intro or outro the recording
+            // doesn't). A title guess alone would find that video's song out of sync or another song of the same name,
+            // so only an artist the description names may look it up: same artist, and a length within the cover's
+            // tolerance. No lyrics beats wrong lyrics. Same as src/Lyrics.cs.
+            if originalTooLong { return try await fromSearch(song, desc, byArtist: true) }
             // no usable link: work out the song from the title / description and look it up on LRCLIB
             return try await fromSearch(song, desc)
         } catch {
@@ -213,19 +214,27 @@ struct LrclibFailed: LocalizedError {
     /// No usable link: read the song title (and original artist, if given) from the cover's title or description
     /// and look the original up on LRCLIB. (YouTube Music's own search doesn't list songs without signing in,
     /// so it can't be used for this.) The original must be within a few seconds of the cover's length.
-    private func fromSearch(_ song: Song, _ desc: VideoDescription?) async throws -> LyricsLookup? {
+    /// `byArtist`: only an original artist named by the title or description, and only results by that artist within
+    /// the cover's length tolerance (the linked original didn't fit).
+    private func fromSearch(_ song: Song, _ desc: VideoDescription?, byArtist: Bool = false) async throws -> LyricsLookup? {
         let (title, artist) = CoverLyrics.guessOriginal(song, description: desc?.text)
         if title.isEmpty { log("INFO cover: couldn't tell the song title from \"\(song.title)\""); return nil }
-        log("INFO cover: looking up the original on LRCLIB: \"\(title)\"" + (artist.isEmpty ? " (artist unknown)" : " by \"\(artist)\""))
+        if byArtist && artist.isEmpty {
+            log("INFO cover: the original differs in length and no artist is named, no lyrics rather than a title guess: \(song.title)")
+            return nil
+        }
+        log("INFO cover: looking up the original on LRCLIB: \"\(title)\"" + (artist.isEmpty ? " (artist unknown)" : " by \"\(artist)\"")
+            + (byArtist ? ", that artist only" : ""))
         let l = try await lrclibFind(Song(title: title, artist: artist, videoId: song.videoId + "#original", duration: song.duration),
-                                     titleTolerance: CoverLyrics.maxLengthDiff)
+                                     titleTolerance: CoverLyrics.maxLengthDiff, titleOnly: !byArtist,
+                                     artistTolerance: byArtist ? CoverLyrics.maxLengthDiff : 15)
         guard case .synced(let lines, _) = l else { return nil }
         log("INFO lyrics found via original \"\(title)\" on LRCLIB: \(song.artist) - \(song.title)")
         return .synced(lines, source: "LRCLIB · 원곡 검색")
     }
 
-    private func lrclibFind(_ song: Song, titleTolerance: Double = 3) async throws -> LyricsLookup {
-        do { return try await lrclib.find(song, titleTolerance: titleTolerance) }
+    private func lrclibFind(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15) async throws -> LyricsLookup {
+        do { return try await lrclib.find(song, titleTolerance: titleTolerance, titleOnly: titleOnly, artistTolerance: artistTolerance) }
         catch {
             if Task.isCancelled { throw CancellationError() }
             throw LrclibFailed(underlying: error)
