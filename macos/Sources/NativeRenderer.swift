@@ -60,7 +60,7 @@ enum NativeTheme {
 enum NativeCardKind {
     case nowPlaying, paused, resumed, info
     var label: String {
-        switch self { case .nowPlaying: return "지금 재생 중"; case .paused: return "일시정지됨"; case .resumed: return "다시 재생"; case .info: return "Pear Now Playing" }
+        switch self { case .nowPlaying, .resumed: return "재생중"; case .paused: return "일시정지됨"; case .info: return "Pear Now Playing" }
     }
 }
 struct NativeCardLayout {

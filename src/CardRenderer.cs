@@ -271,9 +271,8 @@ namespace PearNowPlaying
             switch (kind)
             {
                 case CardKind.Paused: return "일시정지됨";
-                case CardKind.Resumed: return "다시 재생";
                 case CardKind.Info: return "Pear Now Playing";
-                default: return "지금 재생 중";
+                default: return "재생중";   // also when playback resumes
             }
         }
 
