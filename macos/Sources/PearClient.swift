@@ -296,11 +296,12 @@ import Combine
     }
 
     /// After the lyrics lookup: its YouTube Music answer carries the queue title, so show it. If the lyrics came
-    /// from a cache without asking YouTube Music, ask for the title alone (once per video and session).
+    /// from a cache without asking YouTube Music, or the relay was paused, ask for the title alone (once per video
+    /// and session). The title comes from music.youtube.com itself, not the relay, so the pause doesn't apply.
     private func updateDisplayTitle(_ track: Song) {
         guard track.mediaType == "AUDIO", !track.videoId.isEmpty else { return }
         if lyrics.ytm.known(track.videoId) != nil { titleRevision += 1; return }
-        guard settings.ytmLyrics, !lyrics.ytm.paused else { return }
+        guard settings.ytmLyrics else { return }
         Task {
             do { _ = try await lyrics.ytm.lookup(track.videoId, withLyrics: false) }
             catch { if !Task.isCancelled { Log.write("INFO title lookup failed for \(track.videoId): \(error.localizedDescription)") }; return }

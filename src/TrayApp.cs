@@ -411,7 +411,7 @@ namespace PearNowPlaying
                         {
                             // the queue doesn't say whether it's an album track; YouTube Music does (this is the
                             // lookup's first request anyway, remembered for when the song starts)
-                            if (!cfg.YtmLyrics || lyricsProvider.Ytm.Paused) return;
+                            if (!cfg.YtmLyrics) return;
                             var track = await lyricsProvider.Ytm.Lookup(next.VideoId, ct);
                             if (track.VideoType != "MUSIC_VIDEO_TYPE_ATV") return;
                             next.MediaType = "AUDIO";
@@ -587,13 +587,14 @@ namespace PearNowPlaying
 
         /// <summary>
         /// After the lyrics lookup: its YouTube Music answer carries the queue title, so show it. If the lyrics came
-        /// from a cache without asking YouTube Music, ask for the title alone (once per video and session).
+        /// from a cache without asking YouTube Music, or the relay was paused, ask for the title alone (once per video
+        /// and session). The title comes from music.youtube.com itself, not the relay, so the pause doesn't apply.
         /// </summary>
         void UpdateDisplayTitle(SongInfo song)
         {
             if (song.MediaType != "AUDIO" || string.IsNullOrEmpty(song.VideoId)) return;
             if (lyricsProvider.Ytm.Known(song.VideoId) != null) { if (cardWin.IsShowing) Rerender(); return; }
-            if (!cfg.YtmLyrics || lyricsProvider.Ytm.Paused) return;
+            if (!cfg.YtmLyrics) return;
             var ct = lyricsCts != null ? lyricsCts.Token : CancellationToken.None;
             Task.Run(async () =>
             {
