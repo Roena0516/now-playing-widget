@@ -254,12 +254,16 @@ namespace PearNowPlaying
             var key = song.VideoId + "|" + song.Title;
             if (key == lyricsKey) return;
             lyricsKey = key;
-            lyrics = null;
             lyricsLayoutKey = null;
-            lyricsInfoItem.Text = "가사: 찾는 중";
-            lyricsWin.Dismiss();
             if (lyricsCts != null) lyricsCts.Cancel();
             if (prefetchCts != null) prefetchCts.Cancel();
+            // already known (fetched ahead, cached): swap the lyrics in place, so the lyrics card doesn't close and
+            // reopen (which made the song card drop down and come back up)
+            var known = WantsLyrics(song) ? lyricsProvider.Known(song) : null;
+            if (known != null) { ApplyLyrics(key, song, known); return; }
+            lyrics = null;
+            lyricsInfoItem.Text = "가사: 찾는 중";
+            lyricsWin.Dismiss();
             if (!WantsLyrics(song))
             {
                 // "앨범 곡만 가사 표시": not an album track, so no lookup at all
@@ -295,24 +299,31 @@ namespace PearNowPlaying
                 ui.Post(_ =>
                 {
                     if (ct.IsCancellationRequested || key != lyricsKey) return;
-                    lyrics = result;
-                    lyricsLayoutKey = null;
-                    lyricsInfoItem.Text = result.HasSynced ? ("가사: 싱크 가사 있음 (" + result.Source + ")")
-                                        : result.Instrumental ? "가사: 연주곡"
-                                        : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
-                    if (!result.Failed) PrefetchNext(key);
-                    UpdateDisplayTitle(snapshot);
-                    if (announceKey == key)
-                    {
-                        announceKey = null;
-                        if (result.Failed) ShowInfo("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요");
-                        else if (result.Instrumental) ShowInfo("연주곡이에요");
-                        else if (!result.HasSynced) ShowInfo("이 곡은 싱크 가사를 찾지 못했어요");
-                        else ShowNow(CurrentKind());   // lyrics card appears under the song card
-                    }
-                    TickLyrics(true);
+                    ApplyLyrics(key, snapshot, result);
                 }, null);
             });
+        }
+
+        /// <summary>A lookup's result for the current song: status line, look-ahead, title, and the lyrics card.</summary>
+        void ApplyLyrics(string key, SongInfo song, LyricsResult result)
+        {
+            lyrics = result;
+            lyricsLayoutKey = null;
+            lyricsInfoItem.Text = result.HasSynced ? ("가사: 싱크 가사 있음 (" + result.Source + ")")
+                                : result.Instrumental ? "가사: 연주곡"
+                                : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
+            if (!result.Failed) PrefetchNext(key);
+            UpdateDisplayTitle(song);
+            if (announceKey == key)
+            {
+                announceKey = null;
+                if (result.Failed) ShowInfo("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요");
+                else if (result.Instrumental) ShowInfo("연주곡이에요");
+                else if (!result.HasSynced) ShowInfo("이 곡은 싱크 가사를 찾지 못했어요");
+                else ShowNow(CurrentKind());   // lyrics card appears under the song card
+            }
+            TickLyrics(true);
+            Reposition();   // the new lyrics may be taller or shorter than the last song's
         }
 
         void TickLyrics(bool force = false)

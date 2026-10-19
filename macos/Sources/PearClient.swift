@@ -184,8 +184,12 @@ import Combine
         }
     }
     func findLyrics(force: Bool = false) {
-        lyricTask?.cancel(); prefetchTask?.cancel(); lines = []; lyricsStatus = "가사: 찾는 중"; lyricsOutcome = nil; lyricsFailed = false
+        lyricTask?.cancel(); prefetchTask?.cancel()
         let track = song
+        // already known (fetched ahead, cached): swap the lyrics in place, so the lyrics card doesn't close and
+        // reopen (which made the song card drop down and come back up)
+        if !force, !track.title.isEmpty, wantsLyrics(track), let known = lyrics.known(track) { apply(known, for: track, force: false); return }
+        lines = []; lyricsStatus = "가사: 찾는 중"; lyricsOutcome = nil; lyricsFailed = false
         guard !track.title.isEmpty else { lyricsStatus = "가사: -"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
         if !wantsLyrics(track) {
             // "앨범 곡만 가사 표시": not an album track, so no lookup at all
@@ -207,15 +211,7 @@ import Combine
                     let result = try await lyrics.find(track)
                     try Task.checkCancellation()
                     guard song.identity == track.identity else { return }
-                    lyricsOutcome = result
-                    switch result {
-                    case .synced(let found, let source): lines = found; lyricsStatus = "가사: 싱크 가사 있음 (\(source))"
-                    case .instrumental: lyricsStatus = "가사: 연주곡"
-                    case .plainOnly, .notFound: lyricsStatus = "가사: 찾지 못함"
-                    }
-                    if force { onLyricsNotice?(LyricsNotice.message(for: result)) }
-                    prefetchNext(after: track)
-                    updateDisplayTitle(track)
+                    apply(result, for: track, force: force)
                     return
                 } catch {
                     if Task.isCancelled { return }
@@ -226,6 +222,19 @@ import Combine
             lyricsStatus = "가사: 가사 서버에 연결하지 못함"; lyricsFailed = true
             if force { onLyricsNotice?("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
         }
+    }
+
+    /// A lookup's result for the current song: lines, status line, look-ahead and title.
+    private func apply(_ result: LyricsLookup, for track: Song, force: Bool) {
+        lyricsOutcome = result; lyricsFailed = false
+        switch result {
+        case .synced(let found, let source): lines = found; lyricsStatus = "가사: 싱크 가사 있음 (\(source))"
+        case .instrumental: lines = []; lyricsStatus = "가사: 연주곡"
+        case .plainOnly, .notFound: lines = []; lyricsStatus = "가사: 찾지 못함"
+        }
+        if force { onLyricsNotice?(LyricsNotice.message(for: result)) }
+        prefetchNext(after: track)
+        updateDisplayTitle(track)
     }
 
     /// Whether this song's lyrics are wanted ("앨범 곡만 가사 표시" skips everything but album tracks).

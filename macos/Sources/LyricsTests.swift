@@ -237,6 +237,8 @@ import Foundation
         do { try await retried.prefetch(queued); preconditionFailure("busy look-ahead must fail") } catch { precondition(!(error is CancellationError)) }
         try await retried.prefetch(queued)
         let callsBeforeStart = lrclibCalls
+        precondition(retried.known(Song(title: "Other", artist: "Band", videoId: "otherVideo1", mediaType: "AUDIO", duration: 200)) == nil, "unknown songs need a lookup")
+        guard case .synced = retried.known(song) else { preconditionFailure("fetched-ahead lyrics are known at once, so the card can swap them in place") }
         guard case .synced = try await retried.find(song) else { preconditionFailure("fetched-ahead lyrics must be used") }
         precondition(lrclibCalls == callsBeforeStart, "A song fetched ahead must not ask LRCLIB again when it starts")
         // lyrics found on LRCLIB are kept on disk and used by the next run without asking anyone

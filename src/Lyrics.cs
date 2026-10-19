@@ -123,7 +123,11 @@ namespace PearNowPlaying
 
         /// <param name="cacheMisses">false for a look-ahead: a "not found" from the queue's sparser song info
         /// shouldn't stop the song from being looked up again with Pear's full info when it starts</param>
-        async Task<LyricsResult> Find(SongInfo song, CancellationToken ct, bool cacheMisses)
+        /// <summary>
+        /// A result known without asking anyone: this run's cache, the one fetched ahead, or the disk cache. Null when
+        /// a lookup is needed. Lets a song change swap the lyrics in place instead of closing the card first.
+        /// </summary>
+        public LyricsResult Known(SongInfo song)
         {
             var key = song.VideoId + "|" + song.Title;
             lock (gate)
@@ -145,8 +149,15 @@ namespace PearNowPlaying
             {
                 lock (gate) cache[key] = stored;
                 Log.Info("lyrics from the disk cache (" + stored.Source + "): " + song.Artist + " - " + song.Title);
-                return stored;
             }
+            return stored;
+        }
+
+        async Task<LyricsResult> Find(SongInfo song, CancellationToken ct, bool cacheMisses)
+        {
+            var key = song.VideoId + "|" + song.Title;
+            var known = Known(song);
+            if (known != null) return known;
 
             Log.Info("looking up lyrics: " + song.Artist + " - " + song.Title + " [" + (string.IsNullOrEmpty(song.MediaType) ? "type?" : song.MediaType)
                      + ", " + song.VideoId + ", " + (int)song.Duration + "s]");

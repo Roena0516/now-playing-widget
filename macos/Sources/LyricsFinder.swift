@@ -29,7 +29,9 @@ struct LrclibFailed: LocalizedError {
 
     /// `cacheMisses`: false for a look-ahead, where a "not found" from the queue's sparser song info
     /// shouldn't stop the song from being looked up again with Pear's full info when it starts.
-    func find(_ song: Song, cacheMisses: Bool = true) async throws -> LyricsLookup {
+    /// A result known without asking anyone: this run's cache, the one fetched ahead, or the disk cache. Nil when
+    /// a lookup is needed. Lets a song change swap the lyrics in place instead of closing the card first.
+    func known(_ song: Song) -> LyricsLookup? {
         let key = Self.key(song)
         if let hit = cache[key] { return hit }
         // fetched ahead while the previous song played (the queue's title can differ slightly, so by video ID)
@@ -44,6 +46,12 @@ struct LrclibFailed: LocalizedError {
             log("INFO lyrics from the disk cache: \(song.artist) - \(song.title)")
             return stored
         }
+        return nil
+    }
+
+    func find(_ song: Song, cacheMisses: Bool = true) async throws -> LyricsLookup {
+        let key = Self.key(song)
+        if let hit = known(song) { return hit }
         log("INFO looking up lyrics: \(song.artist) - \(song.title) [\(song.mediaType.isEmpty ? "type?" : song.mediaType), \(song.videoId), \(Int(song.duration))s]")
 
         // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
