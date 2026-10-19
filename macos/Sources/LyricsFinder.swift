@@ -225,9 +225,12 @@ struct LrclibFailed: LocalizedError {
         }
         log("INFO cover: looking up the original on LRCLIB: \"\(title)\"" + (artist.isEmpty ? " (artist unknown)" : " by \"\(artist)\"")
             + (byArtist ? ", that artist only" : ""))
+        // With the original artist named, another singer's lyrics only count when they are the well-known version (the
+        // same timing uploaded at least 3 times): one cover of the song is no proof (Bad Apple!!: the PV's lyrics, not
+        // FalKKonE's or an English cover's).
         let l = try await lrclibFind(Song(title: title, artist: artist, videoId: song.videoId + "#original", duration: song.duration),
                                      titleTolerance: CoverLyrics.maxLengthDiff, titleOnly: !byArtist,
-                                     artistTolerance: byArtist ? CoverLyrics.maxLengthDiff : 15)
+                                     artistTolerance: byArtist ? CoverLyrics.maxLengthDiff : 15, titleCopies: artist.isEmpty ? 1 : 3)
         guard case .synced(let lines, _) = l else { return nil }
         log("INFO lyrics found via original \"\(title)\" on LRCLIB: \(song.artist) - \(song.title)")
         return .synced(lines, source: "LRCLIB · 원곡 검색")
@@ -243,8 +246,8 @@ struct LrclibFailed: LocalizedError {
         return copy
     }
 
-    private func lrclibFind(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15) async throws -> LyricsLookup {
-        do { return try await lrclib.find(song, titleTolerance: titleTolerance, titleOnly: titleOnly, artistTolerance: artistTolerance) }
+    private func lrclibFind(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15, titleCopies: Int = 1) async throws -> LyricsLookup {
+        do { return try await lrclib.find(song, titleTolerance: titleTolerance, titleOnly: titleOnly, artistTolerance: artistTolerance, titleCopies: titleCopies) }
         catch {
             if Task.isCancelled { throw CancellationError() }
             throw LrclibFailed(underlying: error)

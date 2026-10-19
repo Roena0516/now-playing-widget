@@ -73,10 +73,10 @@ namespace PearNowPlaying
             @"\s*[\(\[（]?\s*(?<![A-Za-z])(?:covered\s*by|cover\s*by|cover\s*ver\.?|cover|カバー|커버|歌ってみた|踊ってみた|弾いてみた)(?![A-Za-z])[^\)\]）]*[\)\]）]?",
             RegexOptions.IgnoreCase);
         static readonly Regex DescOriginal = new Regex(
-            @"^[^\p{L}\p{N}]*(?:原曲|ご?本家|元曲|original(?:\s*song)?|オリジナル|원곡)\s*(?:様|さま)?\s*[:：\-－/／]?\s*(.+)$",
+            @"^[^\p{L}\p{N}]*(?:原曲|ご?本家|元曲|original(?:\s*song)?|オリジナル|원곡)\s*(?:様|さま)?\s*[\]】〗」』）)]?\s*[:：\-－/／]?\s*(.+)$",
             RegexOptions.IgnoreCase);
         static readonly Regex DescComposer = new Regex(
-            @"^[^\p{L}\p{N}]*(?:music|作詞\s*[・/&]?\s*作曲|作曲|作編曲|composer|song\s*by)\s*[:：\-－/／]\s*(.+)$",
+            @"^[^\p{L}\p{N}]*(?:music|作詞\s*[・/&]?\s*作曲|作曲|作編曲|composer|song\s*by)\s*[\]】〗」』）)]?\s*[:：\-－/／]\s*(.+)$",
             RegexOptions.IgnoreCase);
         static readonly Regex Quoted = new Regex(@"「([^」]+)」|『([^』]+)』|([♕♔♪♬♫★☆♡♥◆◇●○✿❀✨]+)\s*([^♕♔♪♬♫★☆♡♥◆◇●○✿❀✨]+?)\s*\3");
         static readonly Regex Subtitles = new Regex(

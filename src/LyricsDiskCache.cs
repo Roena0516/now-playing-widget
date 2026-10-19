@@ -26,8 +26,9 @@ namespace PearNowPlaying
         /// whose original didn't fit (see LyricsProvider.FromOriginal), so their entries are looked up again once.
         /// 3 (1.7.3): another version's "instrumental" mark could be saved for a remix (see LyricsProvider.Pick).
         /// 4 (1.7.5): a cover could get the singer's own song as its original (see CoverLyrics.OriginalCandidates).
+        /// 5 (1.8.5): lyrics longer than their entry said could be saved (see LyricsProvider.LyricsFit).
         /// </summary>
-        const int FormatVersion = 4;
+        const int FormatVersion = 5;
         const string DateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
         static readonly Regex VideoId = new Regex(@"^[A-Za-z0-9_-]{11}$");
 

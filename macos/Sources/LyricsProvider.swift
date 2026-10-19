@@ -16,7 +16,22 @@ struct LyricRecord: Decodable {
     var instrumental: Bool?
     var syncedLyrics: String?
     var plainLyrics: String?
+    var id: Int?
     var hasSynced: Bool { !(syncedLyrics ?? "").isEmpty }
+    /// Lyrics uploaded again with the same timing look alike: number of lines, first and last line (seconds).
+    var timing: String {
+        let lines = parseLRC(syncedLyrics ?? "")
+        guard let first = lines.first, let last = lines.last else { return "" }
+        return "\(lines.count)|\(Int(first.time.rounded()))|\(Int(last.time.rounded()))"
+    }
+    /// Synced lyrics that run on past the end of their own recording, or of this song, are another version's: a
+    /// "Bad Apple!!" entry listed as 232s carried the 5:19 original's lyrics (last line at 305s) and was taken for a
+    /// 222s cover. Such lyrics would scroll out of step, so the entry isn't used. Same as src/Lyrics.cs.
+    func fits(_ songDuration: Double) -> Bool {
+        guard let last = parseLRC(syncedLyrics ?? "").map(\.time).max() else { return true }
+        let own = duration ?? 0
+        return (own <= 0 || last <= own + 5) && (songDuration <= 0 || last <= songDuration + 5)
+    }
 }
 /// LRCLIB (https://lrclib.net), the open lyrics database Pear Desktop's synced-lyrics plugin also uses.
 /// Search order, normalization, Jaro-Winkler matching follow src/Lyrics.cs (FindLrclib). No cache here:
@@ -80,7 +95,8 @@ struct LyricRecord: Decodable {
     /// `titleTolerance`: allowed length difference when only the title matches (covers looked up by title use 10s).
     /// `titleOnly`: also accept a result whose artist differs if the title and length match.
     /// `artistTolerance`: how far (seconds) a result by the same artist may be from the song's length.
-    func find(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15) async throws -> LyricsLookup {
+    /// `titleCopies`: a title-only match needs this many identical uploads of its lyrics.
+    func find(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true, artistTolerance: Double = 15, titleCopies: Int = 1) async throws -> LyricsLookup {
         try Task.checkCancellation()
         var best: LyricRecord?
         var how = "not found"
@@ -110,7 +126,7 @@ struct LyricRecord: Decodable {
                 }
                 if let record {
                     sawPlain = sawPlain || !(record.plainLyrics ?? "").isEmpty
-                    if record.hasSynced || record.instrumental == true { best = record; how = title == song.title ? "get" : "get \"\(title)\""; break }
+                    if (record.hasSynced && record.fits(song.duration)) || record.instrumental == true { best = record; how = title == song.title ? "get" : "get \"\(title)\""; break }
                 }
             }
         }
@@ -135,7 +151,7 @@ struct LyricRecord: Decodable {
         }
 
         // 3) artist written differently (e.g. "Kenshi Yonezu" vs "米津玄師"): same title and nearly the same length
-        if best == nil, titleOnly, let match = Self.pickByTitle(seen, song: song, tolerance: titleTolerance) { best = match; how = "title match (\(match.artistName ?? ""))" }
+        if best == nil, titleOnly, let match = Self.pickByTitle(seen, song: song, tolerance: titleTolerance, copies: titleCopies) { best = match; how = "title match (\(match.artistName ?? ""))" }
         if best == nil, let lastError { throw lastError }
         try Task.checkCancellation()
 
@@ -172,7 +188,7 @@ struct LyricRecord: Decodable {
                 .sorted { abs(($0.duration ?? 0) - song.duration) < abs(($1.duration ?? 0) - song.duration) }
         }
         // prefer entries that actually have timestamps
-        if let synced = candidates.first(where: \.hasSynced) { return synced }
+        if let synced = candidates.first(where: { $0.hasSynced && $0.fits(song.duration) }) { return synced }
         // "instrumental" hides the lyrics, so it has to be about this very version: other remixes of the song
         // fall within the length tolerance too (PUPA (Endorfin. Remix) took the uma remix's mark). And if an entry
         // of this version has words, the mark is someone's mistake. Same as src/Lyrics.cs.
@@ -194,21 +210,36 @@ struct LyricRecord: Decodable {
     static func titleFits(_ trackName: String, _ song: Song) -> Bool {
         [song.title, song.alternativeTitle, cleanTitle(song.title)].filter { !$0.trimmed.isEmpty }.contains { CoverLyrics.sameTitle(trackName, $0) }
     }
-    /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces
-    /// and punctuation) and the length within `tolerance` seconds, which together are very unlikely to collide.
-    static func pickByTitle(_ records: [LyricRecord], song: Song, tolerance: Double = 3) -> LyricRecord? {
+    /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces, punctuation and
+    /// tags like 【PV】) and the length within `tolerance`. Among several such results, the lyrics uploaded most often
+    /// with the same timing win (a song's well-known version is listed many times, one singer's cover once or twice).
+    /// `copies`: when the matches disagree (several different lyrics), how many identical uploads the winner needs; a
+    /// single kind of match ("ryo" credited as "supercell") is taken as is. Same as src/Lyrics.cs.
+    static func pickByTitle(_ records: [LyricRecord], song: Song, tolerance: Double = 3, copies: Int = 1) -> LyricRecord? {
         guard song.duration > 0 else { return nil }
         var titles = Set([norm(song.title), norm(cleanTitle(song.title))])
         if !song.alternativeTitle.isEmpty { titles.insert(norm(song.alternativeTitle)); titles.insert(norm(cleanTitle(song.alternativeTitle))) }
         titles.remove("")
-        return records.filter { $0.hasSynced && titles.contains(norm($0.trackName ?? "")) && abs(($0.duration ?? 0) - song.duration) <= tolerance }
-            .min { abs(($0.duration ?? 0) - song.duration) < abs(($1.duration ?? 0) - song.duration) }
+        let matches = records.filter {
+            $0.hasSynced && $0.fits(song.duration) && abs(($0.duration ?? 0) - song.duration) <= tolerance
+                && (titles.contains(norm($0.trackName ?? "")) || titles.contains(norm(cleanTitle($0.trackName ?? ""))))
+        }
+        func gap(_ r: LyricRecord) -> Double { abs((r.duration ?? 0) - song.duration) }
+        func key(_ r: LyricRecord) -> String { r.id.map(String.init) ?? "\(r.trackName ?? "")|\(r.artistName ?? "")|\(r.duration ?? 0)" }
+        struct Group { let items: [LyricRecord]; let copies: Int; let closest: Double }
+        let groups: [Group] = Dictionary(grouping: matches, by: \.timing).values.map { items in
+            Group(items: items, copies: Set(items.map(key)).count, closest: items.map(gap).min() ?? 0)
+        }.sorted { $0.copies != $1.copies ? $0.copies > $1.copies : $0.closest < $1.closest }
+        guard let best = groups.first else { return nil }
+        if groups.count > 1 && (best.copies < copies || best.copies == groups[1].copies) { return nil }   // no clear winner
+        return best.items.min { gap($0) < gap($1) }
     }
     static func norm(_ text: String) -> String { CoverLyrics.norm(text) }
     static func cleanTitle(_ text: String) -> String {
         text.replacingOccurrences(of: #"【[^】]*】"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"[\(\[][^\)\]]*(official|mv|m/v|video|audio|lyric|live|ver\.|version|feat|prod|cover|歌ってみた|踊ってみた|弾いてみた)[^\)\]]*[\)\]]"#, with: " ", options: [.regularExpression, .caseInsensitive])
             .replacingOccurrences(of: #"\s*/?\s*(covered by|cover by)\b.*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"(?<![\p{L}\p{N}])(?:PV|MV|ＰＶ|ＭＶ)(?![\p{L}\p{N}])"#, with: " ", options: [.regularExpression, .caseInsensitive])   // "Bad Apple!! ＰＶ"
             .replacingOccurrences(of: #"歌ってみた|踊ってみた|弾いてみた"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"[\s　]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/-| "))

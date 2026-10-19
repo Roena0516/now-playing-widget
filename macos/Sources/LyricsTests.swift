@@ -42,6 +42,24 @@ import Foundation
     let unit = LyricRecord(trackName: "カナデトモスソラ", artistName: "25時、ナイトコードで。", duration: 257, instrumental: false, syncedLyrics: "[00:01.00]a")
     let credited = LyricRecord(trackName: "カナデトモスソラ (feat. 宵崎奏&朝比奈まふゆ&東雲絵名&暁山瑞希&巡音ルカ)", artistName: "ササノマリイ/ねこぼーろ/25時、ナイトコードで。/巡音ルカ", duration: 257, instrumental: false, syncedLyrics: "[00:01.00]b")
     precondition(LyricsProvider.pick([unit, credited], song: kanade)?.syncedLyrics == "[00:01.00]b", "the original title lets a tag vouch for the artist")
+    // an entry whose lyrics run on past its own (wrong) length isn't used: "Bad Apple!!" listed as 232s, lines up to 305s
+    let apple = Song(title: "Bad Apple!!", artist: "Bad Apple!! feat. nomico", videoId: "badapple001", duration: 222)
+    let long = (0..<64).map { String(format: "[%02d:%05.2f]line %d", Int(Double($0) * 4.78) / 60, (Double($0) * 4.78).truncatingRemainder(dividingBy: 60), $0) }.joined(separator: "\n")
+    let mislabeled = LyricRecord(trackName: "Bad Apple!! feat.nomico", artistName: "nomico", duration: 232, instrumental: false, syncedLyrics: long)
+    precondition(!mislabeled.fits(222) && LyricsProvider.pick([mislabeled], song: apple) == nil, "lyrics longer than the entry aren't used")
+    precondition(LyricsProvider.pickByTitle([mislabeled], song: Song(title: "Bad Apple!! feat.nomico", artist: "x", duration: 232), tolerance: 3) == nil, "nor by title")
+    let fitting = LyricRecord(trackName: "Bad Apple!! feat.nomico", artistName: "nomico", duration: 319, instrumental: false, syncedLyrics: long)
+    precondition(fitting.fits(319) && !fitting.fits(222), "the same lyrics fit the full-length song, not a shorter one")
+    // title-only matches: the lyrics uploaded most often win, and a named original artist needs 3 identical uploads
+    let pvLyrics = "[00:29.10]流れてく\n[03:26.20]end"
+    let pv = (1...3).map { LyricRecord(trackName: "【東方】Bad Apple!! ＰＶ【影絵】", artistName: "kasidid2", duration: 220, instrumental: false, syncedLyrics: pvLyrics, id: $0) }
+    let oneCover = LyricRecord(trackName: "Bad Apple!!!", artistName: "FalKKonE and Rena", duration: 221, instrumental: false, syncedLyrics: "[00:27.32]流れてく\n[03:25.95]end", id: 9)
+    let short = Song(title: "Bad Apple!!", artist: "nomico", duration: 222)
+    precondition(LyricsProvider.pickByTitle([oneCover] + pv, song: short, tolerance: 10)?.artistName == "kasidid2", "the version uploaded 3 times beats one cover, 【PV】 tags ignored")
+    let english = LyricRecord(trackName: "Bad Apple", artistName: "Touhou/Cristina Vee", duration: 219, instrumental: false, syncedLyrics: "[00:29.20]Ever on and on\n[03:35.70]end", id: 8)
+    precondition(LyricsProvider.pickByTitle([oneCover, english], song: short, tolerance: 10, copies: 3) == nil, "two different covers and no clear winner: nothing")
+    precondition(LyricsProvider.pickByTitle([oneCover, english] + pv, song: short, tolerance: 10, copies: 3)?.artistName == "kasidid2", "three identical uploads win")
+    precondition(LyricsProvider.pickByTitle([oneCover], song: short, tolerance: 10, copies: 3)?.artistName == "FalKKonE and Rena", "a single kind of match is taken as is (ryo / supercell)")
     // a tag only vouches for the artist: "LAMIA" by BlackY (tagged with its own title) must not take Lamia's song
     let lamia = Song(["title": "LAMIA", "alternativeTitle": "LAMIA", "artist": "BlackY", "album": "ONGEKI Sound Collection 06",
                       "tags": ["BlackY", "ブラッキー", "ONGEKI Sound Collection 06", "LAMIA"], "songDuration": 150])
@@ -324,7 +342,7 @@ import Foundation
         try Data(#"{"version":1,"videoId":"oldVideo001","title":"","artist":"","source":"LRCLIB","instrumental":false,"savedAt":"2000-01-01T00:00:00Z","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
             .write(to: dir.appendingPathComponent("oldVideo001.json"))
         precondition(small.load("oldVideo001") == nil && !FileManager.default.fileExists(atPath: dir.appendingPathComponent("oldVideo001.json").path), "Expired entries are dropped")
-        try Data(#"{"version":3,"videoId":"oldFormat01","title":"","artist":"","source":"LRCLIB · 원곡 검색","instrumental":false,"savedAt":"\#(ISO8601DateFormatter().string(from: Date()))","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
+        try Data(#"{"version":4,"videoId":"oldFormat01","title":"","artist":"","source":"LRCLIB · 원곡 검색","instrumental":false,"savedAt":"\#(ISO8601DateFormatter().string(from: Date()))","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
             .write(to: dir.appendingPathComponent("oldFormat01.json"))
         precondition(small.load("oldFormat01") == nil, "entries of older formats are looked up again")
         small.save(Song(title: "x", artist: "y", videoId: "../../evil1"), .instrumental)

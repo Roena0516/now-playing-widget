@@ -342,8 +342,11 @@ namespace PearNowPlaying
             Log.Info("cover: looking up the original on LRCLIB: \"" + title + "\"" + (artist.Length > 0 ? " by \"" + artist + "\"" : " (artist unknown)")
                      + (byArtist ? ", that artist only" : ""));
 
+            // With the original artist named, another singer's lyrics only count when they are the well-known version
+            // (the same timing uploaded at least 3 times): one cover of the song is no proof (Bad Apple!!: the PV's
+            // lyrics, not FalKKonE's or an English cover's).
             var l = await FindLrclib(new SongInfo { Title = title, Artist = artist, Duration = song.Duration, VideoId = song.VideoId + "#original" }, ct,
-                                     CoverLyrics.MaxLengthDiff, !byArtist, byArtist ? CoverLyrics.MaxLengthDiff : 15);
+                                     CoverLyrics.MaxLengthDiff, !byArtist, byArtist ? CoverLyrics.MaxLengthDiff : 15, artist.Length > 0 ? 3 : 1);
             if (l.HasSynced)
             {
                 l.Source = "LRCLIB · 원곡 검색";
@@ -368,8 +371,9 @@ namespace PearNowPlaying
 
         /// <param name="titleOnly">also accept a result whose artist differs if the title and length match</param>
         /// <param name="artistTolerance">how far (seconds) a result by the same artist may be from the song's length</param>
+        /// <param name="titleMatchCopies">a title-only match needs this many identical uploads of its lyrics</param>
         async Task<LyricsResult> FindLrclib(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3, bool titleOnly = true,
-                                            double artistTolerance = 15)
+                                            double artistTolerance = 15, int titleMatchCopies = 1)
         {
             LyricsResult result = LyricsResult.None;
             string how = "not found";
@@ -437,7 +441,7 @@ namespace PearNowPlaying
                 // 3) artist written differently (e.g. "Kenshi Yonezu" vs "米津玄師"): same title and nearly the same length
                 if (best == null && titleOnly)
                 {
-                    best = PickByTitle(seen, song, titleMatchTolerance);
+                    best = PickByTitle(seen, song, titleMatchTolerance, titleMatchCopies);
                     if (best != null) how = "title match (" + Str(best, "artistName") + ")";
                 }
                 if (best == null && lastError != null) throw lastError;
@@ -587,6 +591,7 @@ namespace PearNowPlaying
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("LRCLIB get " + (int)resp.StatusCode);
                 var d = json.DeserializeObject(await resp.Content.ReadAsStringAsync()) as IDictionary<string, object>;
                 if (d == null) return null;
+                if (!string.IsNullOrEmpty(Str(d, "syncedLyrics")) && !LyricsFit(d, song.Duration)) return null;
                 return !string.IsNullOrEmpty(Str(d, "syncedLyrics")) || Bool(d, "instrumental") ? d : null;
             }
         }
@@ -639,7 +644,7 @@ namespace PearNowPlaying
                 candidates = candidates.Where(c => Math.Abs(Num(c, "duration") - song.Duration) <= tolerance)
                                        .OrderBy(c => Math.Abs(Num(c, "duration") - song.Duration)).ToList();
             // prefer entries that actually have timestamps
-            var synced = candidates.FirstOrDefault(c => !string.IsNullOrEmpty(Str(c, "syncedLyrics")));
+            var synced = candidates.FirstOrDefault(c => !string.IsNullOrEmpty(Str(c, "syncedLyrics")) && LyricsFit(c, song.Duration));
             if (synced != null) return synced;
             // "instrumental" hides the lyrics, so it has to be about this very version: other remixes of the song
             // fall within the length tolerance too (PUPA (Endorfin. Remix) took the uma remix's mark). And if an entry
@@ -677,18 +682,55 @@ namespace PearNowPlaying
         /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces
         /// and punctuation) and the length within 3 seconds, which together are very unlikely to collide.
         /// </summary>
-        static IDictionary<string, object> PickByTitle(List<IDictionary<string, object>> items, SongInfo song, double tolerance)
+        /// <summary>
+        /// Synced lyrics that run on past the end of their own recording, or of this song, are another version's: a
+        /// "Bad Apple!!" entry listed as 232s carried the 5:19 original's lyrics (last line at 305s) and was taken for
+        /// a 222s cover. Such lyrics would scroll out of step, so the entry isn't used.
+        /// </summary>
+        static bool LyricsFit(IDictionary<string, object> item, double songDuration)
+        {
+            var lines = Lrc.Parse(Str(item, "syncedLyrics"));
+            if (lines.Count == 0) return true;
+            double last = lines.Max(l => l.TimeMs) / 1000.0, own = Num(item, "duration");
+            return (own <= 0 || last <= own + 5) && (songDuration <= 0 || last <= songDuration + 5);
+        }
+
+        /// <summary>
+        /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces,
+        /// punctuation and tags like 【PV】) and the length within the tolerance. Among several such results, the
+        /// lyrics uploaded most often with the same timing win (a song's well-known version is listed many times,
+        /// one singer's cover once or twice). copies: when the matches disagree (several different lyrics), how many
+        /// identical uploads the winner needs; a single kind of match ("ryo" credited as "supercell") is taken as is.
+        /// </summary>
+        static IDictionary<string, object> PickByTitle(List<IDictionary<string, object>> items, SongInfo song, double tolerance, int copies = 1)
         {
             if (song.Duration <= 0) return null;
             var titles = new HashSet<string> { Norm(song.Title), Norm(CleanTitle(song.Title)) };
             if (!string.IsNullOrEmpty(song.AltTitle)) { titles.Add(Norm(song.AltTitle)); titles.Add(Norm(CleanTitle(song.AltTitle))); }
             titles.Remove("");
-            return items
-                .Where(it => !string.IsNullOrEmpty(Str(it, "syncedLyrics")))
-                .Where(it => titles.Contains(Norm(Str(it, "trackName"))))
+            var matches = items
+                .Where(it => !string.IsNullOrEmpty(Str(it, "syncedLyrics")) && LyricsFit(it, song.Duration))
+                .Where(it => titles.Contains(Norm(Str(it, "trackName"))) || titles.Contains(Norm(CleanTitle(Str(it, "trackName")))))
                 .Where(it => Math.Abs(Num(it, "duration") - song.Duration) <= tolerance)
-                .OrderBy(it => Math.Abs(Num(it, "duration") - song.Duration))
-                .FirstOrDefault();
+                .ToList();
+            var groups = matches
+                .GroupBy(LyricsTiming)
+                .Select(g => new { Items = g.ToList(), Copies = g.Select(it => Str(it, "id") + "|" + Num(it, "id")).Distinct().Count() })
+                .OrderByDescending(g => g.Copies)
+                .ThenBy(g => g.Items.Min(it => Math.Abs(Num(it, "duration") - song.Duration)))
+                .ToList();
+            if (groups.Count == 0) return null;
+            var best = groups[0];
+            if (groups.Count > 1 && (best.Copies < copies || best.Copies == groups[1].Copies)) return null;   // no clear winner
+            return best.Items.OrderBy(it => Math.Abs(Num(it, "duration") - song.Duration)).First();
+        }
+
+        /// <summary>Lyrics uploaded again with the same timing look alike: number of lines, first and last line (seconds).</summary>
+        static string LyricsTiming(IDictionary<string, object> item)
+        {
+            var lines = Lrc.Parse(Str(item, "syncedLyrics"));
+            if (lines.Count == 0) return "";
+            return lines.Count + "|" + Math.Round(lines[0].TimeMs / 1000.0) + "|" + Math.Round(lines[lines.Count - 1].TimeMs / 1000.0);
         }
 
         static string Norm(string s)
@@ -735,6 +777,7 @@ namespace PearNowPlaying
             var t = Regex.Replace(title, @"【[^】]*】", " ");
             t = Regex.Replace(t, @"[\(\[][^\)\]]*(official|mv|m/v|video|audio|lyric|live|ver\.|version|feat|prod|cover|歌ってみた|踊ってみた|弾いてみた)[^\)\]]*[\)\]]", " ", RegexOptions.IgnoreCase);
             t = Regex.Replace(t, @"\s*/?\s*(covered by|cover by)\b.*$", "", RegexOptions.IgnoreCase);
+            t = Regex.Replace(t, @"(?<![\p{L}\p{N}])(?:PV|MV|ＰＶ|ＭＶ)(?![\p{L}\p{N}])", " ", RegexOptions.IgnoreCase);   // "Bad Apple!! ＰＶ"
             t = Regex.Replace(t, @"歌ってみた|踊ってみた|弾いてみた", " ");
             t = Regex.Replace(t, @"[\s\u3000]+", " ").Trim();
             return t.Trim('/', '-', '|', ' ');

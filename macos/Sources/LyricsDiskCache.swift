@@ -12,7 +12,8 @@ import Foundation
     /// whose original didn't fit (see LyricsFinder.fromOriginal), so their entries are looked up again once.
     /// 3 (1.7.3): another version's "instrumental" mark could be saved for a remix (see LyricsProvider.pick).
     /// 4 (1.7.5): a cover could get the singer's own song as its original (see CoverLyrics.originalCandidates).
-    nonisolated static let formatVersion = 4
+    /// 5 (1.8.5): lyrics longer than their entry said could be saved (see LyricRecord.fits).
+    nonisolated static let formatVersion = 5
 
     private struct Entry: Codable {
         struct Line: Codable { var timeMs: Int; var text: String }
