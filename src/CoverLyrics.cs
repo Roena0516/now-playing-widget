@@ -286,7 +286,9 @@ namespace PearNowPlaying
         /// Music's own queue lists it as "original - translation" ("心を刺す言葉だけ - Only Words (feat. …)").
         /// When the queue title is exactly that pair and its second half is Pear's title, show both; otherwise
         /// (no translation, Pear already showing the original, titles that merely contain " - ") keep Pear's title.
-        /// "(feat. …)" follows Pear's title: kept if Pear has it, not added otherwise.
+        /// "(feat. …)" follows Pear's title: kept if Pear has it, not added otherwise. When the two halves differ
+        /// only in symbols ("Xaleid◆scopiX - Xaleid_scopiX"), the "translation" is the same name retyped, so only the
+        /// original is shown.
         /// </summary>
         public static string DisplayTitle(string pearTitle, string queueTitle)
         {
@@ -295,7 +297,8 @@ namespace PearNowPlaying
             var feat = pearTitle.Trim().Substring(core.Length);
             var parts = Regex.Split(FeatTail.Replace(queueTitle, "").Trim(), @"\s+[-－–—]\s+");
             if (parts.Length != 2 || parts[0].Trim().Length == 0) return pearTitle;
-            if (Norm(parts[1]) != Norm(core) || Norm(parts[0]) == Norm(core)) return pearTitle;
+            if (Norm(parts[1]) != Norm(core)) return pearTitle;
+            if (Norm(parts[0]) == Norm(core)) return parts[0].Trim() + feat;
             return parts[0].Trim() + " - " + parts[1].Trim() + feat;
         }
 

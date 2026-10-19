@@ -77,5 +77,7 @@ import Foundation
     precondition(CoverLyrics.displayTitle("only words", queueTitle: "心を刺す言葉だけ - Only Words") == "心を刺す言葉だけ - Only Words", "display title: only words")
     precondition(CoverLyrics.displayTitle("Lemon", queueTitle: "Lemon - レモン") == "Lemon", "display title: Lemon")
     precondition(CoverLyrics.displayTitle("Night Dancer feat. X", queueTitle: "夜のダンサー - Night Dancer feat. X") == "夜のダンサー - Night Dancer feat. X", "display title: Night Dancer feat. X")
+    precondition(CoverLyrics.displayTitle("Xaleid_scopiX", queueTitle: "Xaleid◆scopiX - Xaleid_scopiX") == "Xaleid◆scopiX", "display title: Xaleid◆scopiX")
+    precondition(CoverLyrics.displayTitle("Lemon", queueTitle: "Lemon - Lemon") == "Lemon", "display title: Lemon - Lemon")
     print("PASS: album track titles shown as original - translation, like the Windows version")
 }

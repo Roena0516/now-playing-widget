@@ -268,7 +268,9 @@ enum CoverLyrics {
         let core = featTail.replace(pearTitle, with: "").trimmed
         let feat = String(pearTitle.trimmed.dropFirst(core.count))
         let parts = dashes.split(featTail.replace(queueTitle, with: "").trimmed)
-        guard parts.count == 2, !parts[0].trimmed.isEmpty, norm(parts[1]) == norm(core), norm(parts[0]) != norm(core) else { return pearTitle }
+        guard parts.count == 2, !parts[0].trimmed.isEmpty, norm(parts[1]) == norm(core) else { return pearTitle }
+        // halves that differ only in symbols ("Xaleid◆scopiX - Xaleid_scopiX"): the same name retyped, so the original alone
+        if norm(parts[0]) == norm(core) { return parts[0].trimmed + feat }
         return parts[0].trimmed + " - " + parts[1].trimmed + feat
     }
 
