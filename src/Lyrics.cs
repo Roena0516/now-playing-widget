@@ -139,6 +139,14 @@ namespace PearNowPlaying
                     return hit;
                 }
             }
+            // found on LRCLIB in an earlier run
+            var stored = Disk != null ? Disk.Load(song.VideoId) : null;
+            if (stored != null)
+            {
+                lock (gate) cache[key] = stored;
+                Log.Info("lyrics from the disk cache (" + stored.Source + "): " + song.Artist + " - " + song.Title);
+                return stored;
+            }
 
             Log.Info("looking up lyrics: " + song.Artist + " - " + song.Title + " [" + (string.IsNullOrEmpty(song.MediaType) ? "type?" : song.MediaType)
                      + ", " + song.VideoId + ", " + (int)song.Duration + "s]");
@@ -195,7 +203,7 @@ namespace PearNowPlaying
                 if (original != null && original.Failed) return original;   // LRCLIB busy: retried later, not cached
                 if (original != null)
                 {
-                    lock (gate) cache[key] = original;
+                    Keep(key, song, original);
                     return original;
                 }
             }
@@ -204,7 +212,7 @@ namespace PearNowPlaying
             var result = await FindLrclib(song, ct);
             // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
             if (!result.Failed && (result.HasSynced || result.Instrumental || (cacheMisses && !ytmError)))
-                lock (gate) cache[key] = result;
+                Keep(key, song, result);
             return result;
         }
 
@@ -464,10 +472,20 @@ namespace PearNowPlaying
             }
         }
 
-        /// <summary>Drop the cached result for a song so the next Find asks LRCLIB again.</summary>
+        /// <summary>Drop the cached result for a song (in memory and on disk) so the next Find asks again.</summary>
         public void Forget(SongInfo song)
         {
             lock (gate) { cache.Remove(song.VideoId + "|" + song.Title); prefetched.Remove(song.VideoId ?? ""); }
+            if (Disk != null) Disk.Forget(song.VideoId);
+        }
+
+        /// <summary>Lyrics found on LRCLIB kept between runs; null = memory only.</summary>
+        public LyricsDiskCache Disk;
+
+        void Keep(string key, SongInfo song, LyricsResult r)
+        {
+            lock (gate) cache[key] = r;
+            if (Disk != null && LyricsDiskCache.Keeps(r)) Disk.Save(song, r);
         }
 
         /// <summary>

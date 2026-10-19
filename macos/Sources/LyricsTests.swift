@@ -238,6 +238,32 @@ import Foundation
         let callsBeforeStart = lrclibCalls
         guard case .synced = try await retried.find(song) else { preconditionFailure("fetched-ahead lyrics must be used") }
         precondition(lrclibCalls == callsBeforeStart, "A song fetched ahead must not ask LRCLIB again when it starts")
-        print("PASS: lookup order (YouTube Music, official audio, cover originals by link and by title, LRCLIB), caching rules, look-ahead misses and retries, busy LRCLIB, cover description in parallel")
+        // lyrics found on LRCLIB are kept on disk and used by the next run without asking anyone
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pear-lyrics-cache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let offline: LyricsProvider.Transport = { _ in preconditionFailure("must not ask LRCLIB") }
+        let offlineYtm: YTMusicProvider.Transport = { _ in preconditionFailure("must not ask YouTube") }
+        let firstRun = LyricsFinder(lrclib: lrclib { url in url.path.hasSuffix("/get") ? (404, "") : (200, synced) }, ytm: YTMusicProvider(transport: noTab),
+                                    disk: LyricsDiskCache(directory: dir))
+        _ = try await firstRun.find(song)
+        precondition(FileManager.default.fileExists(atPath: dir.appendingPathComponent("audioVideo1.json").path), "LRCLIB lyrics saved")
+        let nextRun = LyricsFinder(lrclib: LyricsProvider(transport: offline), ytm: YTMusicProvider(transport: offlineYtm), disk: LyricsDiskCache(directory: dir))
+        guard case .synced(let storedLines, "LRCLIB") = try await nextRun.find(song), storedLines.first?.text == "From LRCLIB", storedLines.first?.time == 1 else {
+            preconditionFailure("The next run must read the saved lyrics")
+        }
+        nextRun.forget(song)
+        precondition(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("audioVideo1.json").path), "Find-again removes saved lyrics")
+        precondition(!LyricsDiskCache.keeps(.synced([LyricLine(id: 0, time: 1, text: "x")], source: "YouTube Music · 공식 음원")))
+        precondition(LyricsDiskCache.keeps(.synced([LyricLine(id: 0, time: 1, text: "x")], source: "LRCLIB · 원곡 검색")) && !LyricsDiskCache.keeps(.notFound))
+        let small = LyricsDiskCache(directory: dir, maxEntries: 3)
+        try Data(#"{"version":1,"videoId":"oldVideo001","title":"","artist":"","source":"LRCLIB","instrumental":false,"savedAt":"2000-01-01T00:00:00Z","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
+            .write(to: dir.appendingPathComponent("oldVideo001.json"))
+        precondition(small.load("oldVideo001") == nil && !FileManager.default.fileExists(atPath: dir.appendingPathComponent("oldVideo001.json").path), "Expired entries are dropped")
+        small.save(Song(title: "x", artist: "y", videoId: "../../evil1"), .instrumental)
+        precondition(small.load("../../evil1") == nil, "Invalid video IDs are not used as file names")
+        for i in 0..<6 { small.save(Song(title: "t", artist: "a", videoId: "prune00000\(i)"), .synced([LyricLine(id: 0, time: 1, text: "x")], source: "LRCLIB")) }
+        let kept = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".json") }.count
+        precondition(kept <= 3, "Kept under the size limit (\(kept))")
+        print("PASS: lookup order (YouTube Music, official audio, cover originals by link and by title, LRCLIB), caching rules, look-ahead misses and retries, busy LRCLIB, cover description in parallel, LRCLIB lyrics on disk")
     } catch { fputs("Finder tests failed: \(error)\n", stderr); exit(1) }
 }

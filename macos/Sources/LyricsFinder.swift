@@ -15,12 +15,14 @@ struct LrclibFailed: LocalizedError {
     let lrclib: LyricsProvider
     let ytm: YTMusicProvider
     var useYtm = true
+    /// Lyrics found on LRCLIB kept between runs; nil = memory only.
+    let disk: LyricsDiskCache?
     private let log: (String) -> Void
     private var cache: [String: LyricsLookup] = [:]
     private var prefetched: [String: LyricsLookup] = [:]
 
-    init(lrclib: LyricsProvider, ytm: YTMusicProvider, log: @escaping (String) -> Void = { _ in }) {
-        self.lrclib = lrclib; self.ytm = ytm; self.log = log
+    init(lrclib: LyricsProvider, ytm: YTMusicProvider, disk: LyricsDiskCache? = nil, log: @escaping (String) -> Void = { _ in }) {
+        self.lrclib = lrclib; self.ytm = ytm; self.disk = disk; self.log = log
     }
 
     private static func key(_ song: Song) -> String { song.videoId + "|" + song.title }
@@ -35,6 +37,12 @@ struct LrclibFailed: LocalizedError {
             cache[key] = hit
             log("INFO lyrics ready (fetched ahead): \(song.artist) - \(song.title)")
             return hit
+        }
+        // found on LRCLIB in an earlier run
+        if let stored = disk?.load(song.videoId) {
+            cache[key] = stored
+            log("INFO lyrics from the disk cache: \(song.artist) - \(song.title)")
+            return stored
         }
         log("INFO looking up lyrics: \(song.artist) - \(song.title) [\(song.mediaType.isEmpty ? "type?" : song.mediaType), \(song.videoId), \(Int(song.duration))s]")
 
@@ -73,18 +81,25 @@ struct LrclibFailed: LocalizedError {
         // 2) covers: the original song linked in the description, if the music wasn't changed
         // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics off)
         if coverCandidate && !ytm.paused, let original = try await fromOriginal(song, description) {
-            return remember(key, original)
+            return keep(key, song, original)
         }
 
         // 3) LRCLIB
         var result = try await lrclib.find(song)
         if case .notFound = result, ytmPlain { result = .plainOnly }
         // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
-        if result.isFound || (cacheMisses && !ytmError) { cache[key] = result }
+        if result.isFound { _ = keep(key, song, result) }
+        else if cacheMisses && !ytmError { cache[key] = result }
         return result
     }
 
     private func remember(_ key: String, _ result: LyricsLookup) -> LyricsLookup { cache[key] = result; return result }
+
+    /// Remembered for this run, and on disk when it came from LRCLIB.
+    private func keep(_ key: String, _ song: Song, _ result: LyricsLookup) -> LyricsLookup {
+        if LyricsDiskCache.keeps(result) { disk?.save(song, result) }
+        return remember(key, result)
+    }
 
     /// The video's description in the background; nil when it can't be read (logged).
     private func descriptionTask(_ videoId: String) -> Task<VideoDescription?, Never> {
@@ -113,6 +128,7 @@ struct LrclibFailed: LocalizedError {
     func forget(_ song: Song) {
         cache.removeValue(forKey: Self.key(song)); prefetched.removeValue(forKey: song.videoId)
         ytm.forget(song.videoId)
+        disk?.forget(song.videoId)
     }
 
     /// Synced lyrics of the original song for a cover: follow the YouTube links in the cover's description, take

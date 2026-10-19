@@ -16,7 +16,8 @@ import Combine
     private var socket: URLSessionWebSocketTask?
     private var anchor = Date()
     private var token: String?
-    let lyrics = LyricsFinder(lrclib: LyricsProvider(log: LyricsLog.write), ytm: YTMusicProvider(log: LyricsLog.write), log: LyricsLog.write)
+    let lyrics = LyricsFinder(lrclib: LyricsProvider(log: LyricsLog.write), ytm: YTMusicProvider(log: LyricsLog.write),
+                              disk: LyricsDiskCache(log: LyricsLog.write), log: LyricsLog.write)
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.connectionProxyDictionary = [:]

@@ -127,7 +127,7 @@ namespace PearNowPlaying
             hotkeys = new Hotkeys();
             RegisterHotkeys();
 
-            lyricsProvider = new LyricsProvider(cfg.LyricsServer) { Ytm = new YtmLyrics() };
+            lyricsProvider = new LyricsProvider(cfg.LyricsServer) { Ytm = new YtmLyrics(), Disk = new LyricsDiskCache(LyricsDiskCache.DefaultDir) };
             ApplyLyricsSources();
             lyricsTimer.Tick += (s, e) => TickLyrics();
             lyricsTimer.Start();
