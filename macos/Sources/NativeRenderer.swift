@@ -40,17 +40,20 @@ enum NativeTheme {
         let value = Int(max(0, seconds.isFinite ? seconds : 0))
         return value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60) : String(format: "%d:%02d", value / 60, value % 60)
     }
+    /// The menu bar icon: a music note as a template image, so macOS tints it like the other menu bar icons
+    /// (light/dark menu bar, highlighted when the menu is open) instead of a colored square standing out.
     static func trayIcon() -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { bounds in
-            accent.setFill(); NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4.3, yRadius: 4.3).fill()
-            accentInk.setFill()
-            let u: CGFloat = 18 / 16
-            NSBezierPath(ovalIn: CGRect(x: 3.2 * u, y: 3 * u, width: 4.6 * u, height: 3.6 * u)).fill()
-            CGRect(x: 6.6 * u, y: 4.8 * u, width: 1.3 * u, height: 8 * u).fill()
-            let flag = NSBezierPath(); flag.move(to: CGPoint(x: 6.6 * u, y: 12.8 * u)); flag.line(to: CGPoint(x: 11.8 * u, y: 11.4 * u)); flag.line(to: CGPoint(x: 11.8 * u, y: 9.4 * u)); flag.line(to: CGPoint(x: 6.6 * u, y: 10.6 * u)); flag.close(); flag.fill()
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: CGRect(x: 2.6, y: 1.8, width: 6.6, height: 5.0)).fill()   // note head
+            CGRect(x: 7.6, y: 4.2, width: 1.7, height: 12.0).fill()                         // stem
+            let flag = NSBezierPath()
+            flag.move(to: CGPoint(x: 7.6, y: 16.2)); flag.line(to: CGPoint(x: 15.0, y: 14.2))
+            flag.line(to: CGPoint(x: 15.0, y: 11.3)); flag.line(to: CGPoint(x: 7.6, y: 13.0)); flag.close(); flag.fill()
             return true
         }
-        image.isTemplate = false
+        image.isTemplate = true
+        image.accessibilityDescription = "Pear Now Playing"
         return image
     }
 }
