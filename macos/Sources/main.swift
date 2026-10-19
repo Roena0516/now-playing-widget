@@ -65,6 +65,10 @@ import CoreText
         // widget (song card, where and how big) and lyrics settings live in separate submenus
         let widget = NSMenu()
         add(widget, "곡 정보 계속 표시    ⌃⌥P", #selector(togglePinned), state: client.settings.alwaysShow)
+        let titles = NSMenu()
+        add(titles, "곡 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle != "video", represented: "song")
+        add(titles, "영상 제목 (Discord 상태와 같음)", #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
+        submenu(widget, "영상 곡 제목", titles)
         let position = NSMenu()
         for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래")] {
             add(position, label, #selector(position(_:)), state: client.settings.position == value, represented: value)
@@ -114,6 +118,7 @@ import CoreText
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
     @objc func toggleLyrics() { client.settings.showLyrics.toggle(); save() }
     @objc func findLyrics() { client.findLyrics(force: true) }
+    @objc func videoTitle(_ sender: NSMenuItem) { client.settings.videoTitle = sender.representedObject as! String; save() }
     @objc func toggleMoveMode() { overlay.setMoveMode(!overlay.moveMode); updateMenu() }
     @objc func monitor(_ sender: NSMenuItem) { client.settings.monitor = sender.representedObject as! Int; save() }
     @objc func openLyricsLog() { LyricsLog.write("진단 기록 열기"); NSWorkspace.shared.open(LyricsLog.file) }

@@ -38,6 +38,9 @@ namespace PearNowPlaying
         public bool AlwaysShow = true;
         public bool ShowOnPause = true;
         public bool ShowAlbumArt = true;
+        /// <summary>Title shown for videos (not album tracks): false = the song title (Pear's title),
+        /// true = the video's own title (Pear's alternativeTitle, what Pear's Discord status shows).</summary>
+        public bool VideoTitle = false;
 
         // Lyrics
         public bool ShowLyrics = true;
@@ -90,6 +93,7 @@ namespace PearNowPlaying
                 c.AlwaysShow = GetBool(map, "alwaysShow", c.AlwaysShow);
                 c.ShowOnPause = GetBool(map, "showOnPause", c.ShowOnPause);
                 c.ShowAlbumArt = GetBool(map, "showAlbumArt", c.ShowAlbumArt);
+                c.VideoTitle = GetBool(map, "videoTitle", c.VideoTitle);
                 c.ShowLyrics = GetBool(map, "showLyrics", c.ShowLyrics);
                 c.LyricsShowNext = GetBool(map, "lyricsShowNext", c.LyricsShowNext);
                 c.LyricsOffsetMs = Math.Max(-10000, Math.Min(10000, GetInt(map, "lyricsOffsetMs", c.LyricsOffsetMs)));
@@ -147,6 +151,8 @@ namespace PearNowPlaying
                 sb.AppendLine("# 일시정지/재생 시에도 잠깐 표시");
                 sb.AppendLine("showOnPause=" + B(ShowOnPause));
                 sb.AppendLine("showAlbumArt=" + B(ShowAlbumArt));
+                sb.AppendLine("# 영상(MV·커버 등, 앨범 곡 제외)에 영상 제목을 표시 (false면 곡 제목, true면 Pear의 Discord 상태와 같은 영상 제목)");
+                sb.AppendLine("videoTitle=" + B(VideoTitle));
                 sb.AppendLine();
                 sb.AppendLine("# 가사 (LRCLIB 싱크 가사가 있는 곡만 표시)");
                 sb.AppendLine("showLyrics=" + B(ShowLyrics));

@@ -30,6 +30,19 @@ import CoreGraphics
     let old = try! JSONDecoder().decode(Settings.self, from: Data(#"{"host":"127.0.0.1","port":26538,"scale":1.25,"position":"TopRight","showLyrics":false}"#.utf8))
     precondition(old.scale == 1.25 && old.position == "TopRight" && !old.showLyrics && old.ytmLyrics && old.ytmLyricsProxy == YTMusicProvider.defaultProxy && old.lyricsServer == "https://lrclib.net")
     precondition(Song(["mediaType": "USER_GENERATED_CONTENT", "title": "x"]).mediaType == "USER_GENERATED_CONTENT")
+    // the card's title for videos: the song title by default, the video's own title (as Pear's Discord status) if chosen
+    let titled = PearClient(loadRemoteAssets: false)
+    precondition(titled.settings.videoTitle == "song" || Settings().videoTitle == "song")
+    titled.settings.videoTitle = "song"
+    titled.handle(["type": "PLAYER_INFO", "song": ["title": "デビルじゃないもん", "alternativeTitle": "HIMEHINA『데빌이 아닌걸』Cover【일인이역】", "mediaType": "USER_GENERATED_CONTENT", "videoId": "cover"]])
+    precondition(titled.cardTitle == "デビルじゃないもん")
+    titled.settings.videoTitle = "video"
+    precondition(titled.cardTitle == "HIMEHINA『데빌이 아닌걸』Cover【일인이역】")
+    titled.handle(["type": "PLAYER_INFO", "song": ["title": "Only Words", "alternativeTitle": "心を刺す言葉だけ (feat. 初音ミク & 可不)", "mediaType": "AUDIO", "videoId": "album"]])
+    precondition(titled.cardTitle == "Only Words", "album tracks don't follow the video title setting")
+    titled.handle(["type": "PLAYER_INFO", "song": ["title": "Lemon", "mediaType": "ORIGINAL_MUSIC_VIDEO", "videoId": "mv"]])
+    precondition(titled.cardTitle == "Lemon", "no video title: the song title")
+    titled.stop()
     print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, Pear song/state/seek messages")
 }
 

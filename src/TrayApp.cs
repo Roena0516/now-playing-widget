@@ -19,7 +19,7 @@ namespace PearNowPlaying
         readonly Hotkeys hotkeys;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, retryLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu, monitorMenu, moveItem;
+        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, retryLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu, monitorMenu, moveItem, titleMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly SynchronizationContext ui;
         readonly double dpiScale;
@@ -100,10 +100,13 @@ namespace PearNowPlaying
                 sizeMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item1, null, (s, e) => SetScale(v)) { Tag = v });
             }
             moveItem = new ToolStripMenuItem("위젯 끌어서 옮기기", null, (s, e) => SetMoveMode(!moveMode));
+            titleMenu = new ToolStripMenuItem("영상 곡 제목");
+            titleMenu.DropDownItems.Add(new ToolStripMenuItem("곡 제목", null, (s, e) => SetVideoTitle(false)) { Tag = false });
+            titleMenu.DropDownItems.Add(new ToolStripMenuItem("영상 제목 (Discord 상태와 같음)", null, (s, e) => SetVideoTitle(true)) { Tag = true });
 
             // widget (song card, where and how big) and lyrics settings live in separate submenus
             var widgetMenu = new ToolStripMenuItem("위젯");
-            widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, posMenu, monitorMenu, sizeMenu, new ToolStripSeparator(), moveItem });
+            widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, titleMenu, posMenu, monitorMenu, sizeMenu, new ToolStripSeparator(), moveItem });
             var lyricsMenu = new ToolStripMenuItem("가사");
             lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, retryLyricsItem, offsetMenu });
 
@@ -413,7 +416,9 @@ namespace PearNowPlaying
         /// </summary>
         SongInfo ForCard(SongInfo song)
         {
-            if (song.MediaType != "AUDIO") return song;
+            // videos (MVs, covers, uploads): the song title, or the video's own title if the user prefers it
+            if (song.MediaType != "AUDIO")
+                return cfg.VideoTitle && !string.IsNullOrWhiteSpace(song.AltTitle) && song.AltTitle != song.Title ? song.WithTitle(song.AltTitle) : song;
             var track = lyricsProvider.Ytm.Known(song.VideoId);
             if (track == null) return song;
             var title = CoverLyrics.DisplayTitle(song.Title, track.Title);
@@ -669,6 +674,13 @@ namespace PearNowPlaying
             ShowNow(CurrentKind());
         }
 
+        void SetVideoTitle(bool videoTitle)
+        {
+            cfg.VideoTitle = videoTitle;
+            cfg.Save();
+            if (cardWin.IsShowing) ShowNow(CurrentKind());
+        }
+
         void BuildMonitorMenu()
         {
             monitorMenu.DropDownItems.Clear();
@@ -795,6 +807,7 @@ namespace PearNowPlaying
             pinItem.Checked = cfg.AlwaysShow;
             lyricsItem.Checked = cfg.ShowLyrics;
             moveItem.Checked = moveMode;
+            foreach (ToolStripMenuItem it in titleMenu.DropDownItems) it.Checked = (bool)it.Tag == cfg.VideoTitle;
             BuildMonitorMenu();
             foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
             foreach (ToolStripMenuItem it in posMenu.DropDownItems) it.Checked = (OverlayPosition)it.Tag == cfg.Position;

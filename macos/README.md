@@ -39,6 +39,7 @@ open 'macos/build/Pear Now Playing.app' --args --preview
 - 가사는 Windows 1.5.0과 같은 순서로 찾습니다: YouTube Music 가사, MV라면 공식 음원의 가사, 커버곡이라면 원곡의 가사, 마지막으로 LRCLIB 순서입니다.
 - LRCLIB 검색 순서도 Windows 버전과 같습니다. 대체 제목과 정리한 제목으로 검색하고, 아티스트·태그의 유사도와 재생 길이로 결과를 확인하며, 결과를 캐시하고, 네트워크 오류가 나면 다시 시도합니다.
 - Pear 재생목록에 있는 다음 곡의 가사를 미리 찾아 둡니다.
+- **위젯 → 영상 곡 제목**에서 앨범 곡이 아닌 영상(MV, 커버, 일반 업로드)에 곡 제목(기본값)과 영상 제목(Pear의 Discord 상태와 같은 제목) 중 무엇을 표시할지 고를 수 있습니다.
 - 번역 제목만 표시되는 앨범 곡(예: `Only Words`)은 YouTube Music의 재생목록 정보를 확인해서 **원제 - 번역** 형식(`心を刺す言葉だけ - Only Words`)으로 보여줍니다. Windows 버전과 같은 규칙입니다.
 - 현재 가사 줄을 강조하면서 스크롤하고, 가사 타이밍을 보정할 수 있으며, 한국어와 일본어를 Pretendard JP 폰트로 표시합니다.
 - 메뉴 막대에서 재생을 제어할 수 있습니다. 설정은 **위젯** 메뉴(곡 정보 계속 표시, 위치, 모니터, 크기, 위젯 끌어서 옮기기)와 **가사** 메뉴(가사 표시, 가사 다시 찾기, 가사 타이밍, 가사 진단 기록 열기)로 나뉘어 있습니다.
@@ -105,6 +106,7 @@ Windows 버전의 `src/Theme.cs`, `src/CardRenderer.cs`, `src/LyricsView.cs`에 
 | `monitor` | `0` | 화면 목록에서 사용할 화면의 번호이며, 0부터 셉니다. |
 | `showSeconds`, `opacity` | `6`, `0.92` | 곡 카드를 잠시 표시하는 시간과 배경의 불투명도입니다. |
 | `alwaysShow`, `showLyrics` | `true`, `true` | 곡 카드를 계속 표시할지, 싱크 가사를 표시할지 정합니다. |
+| `videoTitle` | `song` | 앨범 곡이 아닌 영상에 표시할 제목입니다. `song`은 곡 제목, `video`는 영상 제목(Pear의 Discord 상태와 같은 제목)입니다. |
 | `lyricsOffsetMs` | `300` | 가사 타이밍 보정값(ms)입니다. 양수이면 가사가 더 빨리 표시됩니다. |
 | `ytmLyrics` | `true` | YouTube Music 가사를 먼저 찾을지 정합니다. `false`이면 LRCLIB에서만 찾습니다. 메뉴에는 없는 설정입니다. |
 | `ytmLyricsProxy` | `https://ytmbrowseproxy.zvz.be/` | YouTube Music 가사 중계 서버의 주소입니다. |

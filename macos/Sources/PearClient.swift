@@ -196,7 +196,11 @@ import Combine
     /// The title the card shows: an album track whose title Pear gives only as a translation is shown as
     /// "original - translation" (see CoverLyrics.displayTitle), once YouTube Music's queue entry is known.
     var cardTitle: String {
-        guard song.mediaType == "AUDIO", let track = lyrics.ytm.known(song.videoId) else { return song.title }
+        // videos (MVs, covers, uploads): the song title, or the video's own title if the user prefers it
+        if song.mediaType != "AUDIO" {
+            return settings.videoTitle == "video" && !song.alternativeTitle.trimmed.isEmpty ? song.alternativeTitle : song.title
+        }
+        guard let track = lyrics.ytm.known(song.videoId) else { return song.title }
         return CoverLyrics.displayTitle(song.title, queueTitle: track.title)
     }
 

@@ -19,6 +19,9 @@ struct Settings: Codable {
     var showSeconds: Double = 6
     var opacity: Double = 0.92
     var alwaysShow = true
+    /// title shown for videos (not album tracks): "song" = Pear's title, "video" = the video's own title
+    /// (Pear's alternativeTitle, what Pear's Discord status shows)
+    var videoTitle = "song"
     var showLyrics = true
     var lyricsOffsetMs: Double = 300
     var ytmLyrics = true
@@ -36,6 +39,7 @@ struct Settings: Codable {
         customX = try value(.customX, customX); customY = try value(.customY, customY); customFromBottom = try value(.customFromBottom, customFromBottom)
         showSeconds = try value(.showSeconds, showSeconds); opacity = try value(.opacity, opacity)
         alwaysShow = try value(.alwaysShow, alwaysShow); showLyrics = try value(.showLyrics, showLyrics)
+        videoTitle = try value(.videoTitle, videoTitle)
         lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
         ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
         lyricsServer = try value(.lyricsServer, lyricsServer)
