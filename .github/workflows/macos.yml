@@ -24,4 +24,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: PearNowPlaying-macOS
-          path: macos/build/PearNowPlaying-macOS.dmg
+          path: macos/build/PearNowPlaying-macOS-*.dmg

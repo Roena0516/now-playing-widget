@@ -167,20 +167,27 @@ import Combine
     }
 
     /// While this song plays, look up the next one in Pear's queue so its lyrics are ready when it starts.
-    /// Waits a little first so quickly skipped songs don't trigger lookups.
+    /// Waits a little first so quickly skipped songs don't trigger lookups. LRCLIB's "busy" answers usually clear
+    /// within seconds, so a failed look-ahead is tried again later in the song instead of when the next one starts.
     private func prefetchNext(after current: Song) {
         guard settings.showLyrics, loadRemoteAssets else { return }
         prefetchTask?.cancel()
         prefetchTask = Task {
-            do {
-                try await Task.sleep(for: .seconds(10))
-                guard let next = try await nextSong(), next.videoId + "|" + next.title != current.videoId + "|" + current.title else { return }
-                try await lyrics.prefetch(next)
-            } catch {
-                if !Task.isCancelled { LyricsLog.write("INFO fetching ahead failed: \(error.localizedDescription)") }
+            for wait in Self.prefetchWaits {
+                do {
+                    try await Task.sleep(for: .seconds(wait))
+                    // asked each time: the queue may have changed
+                    guard let next = try await nextSong(), next.videoId + "|" + next.title != current.videoId + "|" + current.title else { return }
+                    try await lyrics.prefetch(next)
+                    return
+                } catch {
+                    if Task.isCancelled { return }
+                    LyricsLog.write("INFO fetching ahead failed (\(error.localizedDescription)), will try again while this song plays")
+                }
             }
         }
     }
+    static var prefetchWaits: [Double] = [10, 30, 90]
 
     /// The next song in Pear's queue (GET /api/v1/queue/next): title, artist, video ID and length only.
     /// Nil when there is no next song or Pear can't be asked.

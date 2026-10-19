@@ -211,6 +211,33 @@ import Foundation
         let firstBusy = busyCalls
         do { _ = try await busy.find(unlinked); preconditionFailure("Busy LRCLIB must fail again") } catch { }
         precondition(busyCalls == firstBusy * 2, "Failures are not cached")
-        print("PASS: lookup order (YouTube Music, official audio, cover originals by link and by title, LRCLIB), caching rules, look-ahead misses, busy LRCLIB")
+        // a cover's description is asked for while YouTube Music is still being asked about the video itself
+        var events: [String] = []
+        let parallel = LyricsFinder(lrclib: lrclib { url in url.path.hasSuffix("/get") ? (404, "") : (200, "[]") }, ytm: YTMusicProvider(transport: { request in
+            let path = request.url!.path, id = FakeYouTube.body(request)["videoId"] as? String ?? ""
+            events.append("start \(path) \(id)")
+            if path.hasSuffix("/next") && id == "coverVideo3" { try await Task.sleep(for: .milliseconds(300)) }
+            defer { events.append("end \(path) \(id)") }
+            if path.hasSuffix("/player") { return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "-"]]) }
+            return try FakeYouTube.ok(request, FakeYouTube.next(id))
+        }))
+        _ = try await parallel.find(Song(title: "【歌ってみた】Song covered by X", artist: "X", videoId: "coverVideo3", mediaType: "USER_GENERATED_CONTENT", duration: 200))
+        let playerStart = events.firstIndex(of: "start /youtubei/v1/player coverVideo3"), nextEnd = events.firstIndex(of: "end /youtubei/v1/next coverVideo3")
+        precondition(playerStart != nil && nextEnd != nil && playerStart! < nextEnd!, "The description is fetched alongside the first lookup: \(events)")
+
+        // a look-ahead that failed (busy) succeeds on a later try, and the song then starts without asking LRCLIB
+        var lrclibCalls = 0
+        let retried = LyricsFinder(lrclib: lrclib { url in
+            lrclibCalls += 1
+            if lrclibCalls <= 2 { return (503, "") }
+            return url.path.hasSuffix("/get") ? (404, "") : (200, synced)
+        }, ytm: YTMusicProvider(transport: noTab))
+        let queued = Song(title: "Song", artist: "Band", videoId: "audioVideo1", mediaType: "UNKNOWN", duration: 200)
+        do { try await retried.prefetch(queued); preconditionFailure("busy look-ahead must fail") } catch { precondition(!(error is CancellationError)) }
+        try await retried.prefetch(queued)
+        let callsBeforeStart = lrclibCalls
+        guard case .synced = try await retried.find(song) else { preconditionFailure("fetched-ahead lyrics must be used") }
+        precondition(lrclibCalls == callsBeforeStart, "A song fetched ahead must not ask LRCLIB again when it starts")
+        print("PASS: lookup order (YouTube Music, official audio, cover originals by link and by title, LRCLIB), caching rules, look-ahead misses and retries, busy LRCLIB, cover description in parallel")
     } catch { fputs("Finder tests failed: \(error)\n", stderr); exit(1) }
 }

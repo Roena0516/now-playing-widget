@@ -11,7 +11,7 @@
 open 'macos/build/Pear Now Playing.app'
 ```
 
-기본 빌드는 현재 Mac의 아키텍처(Apple Silicon 또는 Intel)에 맞춰 만들어집니다. `./macos/build.sh --universal`로 빌드하면 두 아키텍처를 모두 담은 앱이 만들어집니다. `--dmg`를 함께 붙이면 설치용 디스크 이미지(`macos/build/PearNowPlaying-macOS.dmg`)도 만들어집니다. 이 DMG를 열면 앱 아이콘과 `Applications` 폴더 바로 가기가 화살표 배경 위에 나란히 표시됩니다. DMG 창의 모양은 [`dmgbuild`](https://github.com/dmgbuild/dmgbuild)로 만들며, 처음 `--dmg`로 빌드할 때 `macos/build/dmg-venv`에 설치되므로 그때는 인터넷 연결이 필요합니다. 릴리스에는 `./macos/build.sh --universal --dmg`로 만든 DMG 파일을 올립니다.
+기본 빌드는 현재 Mac의 아키텍처(Apple Silicon 또는 Intel)에 맞춰 만들어집니다. `./macos/build.sh --universal`로 빌드하면 두 아키텍처를 모두 담은 앱이 만들어집니다. `--dmg`를 함께 붙이면 설치용 디스크 이미지(`macos/build/PearNowPlaying-macOS-<버전>.dmg`)도 만들어집니다. 이 DMG를 열면 앱 아이콘과 `Applications` 폴더 바로 가기가 화살표 배경 위에 나란히 표시됩니다. DMG 창의 모양은 [`dmgbuild`](https://github.com/dmgbuild/dmgbuild)로 만들며, 처음 `--dmg`로 빌드할 때 `macos/build/dmg-venv`에 설치되므로 그때는 인터넷 연결이 필요합니다. 릴리스에는 `./macos/build.sh --universal --dmg`로 만든 DMG 파일을 올립니다.
 
 앱 아이콘(`macos/Resources/AppIcon.icns`)과 DMG 배경(`macos/Resources/dmg-background.tiff`)은 `xcrun swift macos/Tools/make-art.swift`로 그립니다. 그린 결과 파일은 저장소에 들어 있으므로, 디자인을 바꿀 때만 이 스크립트를 실행하면 됩니다. 빌드 결과는 `macos/build/Pear Now Playing.app`에 생성되고, 원하는 Applications 폴더로 복사해서 사용할 수 있습니다. 앱에는 개발용 ad-hoc 서명만 되어 있으며, Apple의 공증은 받지 않았습니다.
 
@@ -66,7 +66,7 @@ macOS의 창 관리 정책 때문에, 일부 독점 전체 화면 앱 위에서�
 4. **LRCLIB**: 정확 조회(제목, 대체 제목, 정리한 제목으로 최대 3번), 검색, 자유 검색을 차례로 시도하고, 마지막으로 제목과 길이가 같은 결과를 고릅니다.
 
 - 메뉴의 가사 상태에는 가사의 출처가 표시됩니다(예: `YouTube Music · 공식 음원`, `YouTube Music · 원곡`, `LRCLIB · 원곡 검색`).
-- 곡이 시작되고 10초가 지나면 Pear 재생목록에 있는 다음 곡의 가사를 미리 찾습니다. 미리 찾을 때 가사를 찾지 못한 곡은 그 곡이 실제로 시작될 때 다시 찾습니다.
+- 곡이 시작되고 10초가 지나면 Pear 재생목록에 있는 다음 곡의 가사를 미리 찾습니다. 미리 찾을 때 가사를 찾지 못한 곡은 그 곡이 실제로 시작될 때 다시 찾습니다. 가사 서버가 바빠서 미리 찾기에 실패했다면, 지금 곡이 재생되는 동안 30초 뒤와 90초 뒤에 다시 시도합니다.
 - YouTube Music 중계 서버에 보낸 요청이 3번 연달아 실패하면, 그 뒤 10분 동안은 LRCLIB만 사용합니다. **가사 다시 찾기**를 누르면 바로 다시 시도합니다.
 - 메뉴의 **YouTube Music 가사 먼저 찾기**를 끄면 LRCLIB에서만 가사를 찾습니다.
 - 서버 오류가 발생한 결과는 "가사 없음"으로 저장하지 않습니다. YouTube Music 요청이 실패한 상태에서 가사를 찾지 못한 경우에도, 다음에 그 곡을 재생할 때 다시 찾습니다.

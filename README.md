@@ -33,7 +33,7 @@ Pear Now Playing은 [Pear Desktop](https://github.com/pear-devs/pear-desktop)(Yo
 
 ## macOS 버전
 
-macOS 13 이상에서는 Swift/AppKit으로 만든 macOS 버전을 사용할 수 있습니다. [Releases](../../releases)에서 `PearNowPlaying-macOS.dmg`를 내려받아 열고, 창에 보이는 `Pear Now Playing.app`을 `Applications` 폴더로 끌어다 놓은 뒤 실행합니다.
+macOS 13 이상에서는 Swift/AppKit으로 만든 macOS 버전을 사용할 수 있습니다. [Releases](../../releases)에서 macOS용 DMG 파일(`PearNowPlaying-macOS`로 시작하는 `.dmg` 파일)을 내려받아 열고, 창에 보이는 `Pear Now Playing.app`을 `Applications` 폴더로 끌어다 놓은 뒤 실행합니다.
 macOS 버전도 곡 카드, 싱크 가사, 메뉴 막대 제어, 전역 단축키를 지원하며, 가사를 찾는 순서는 Windows 버전과 같습니다.
 이 앱은 Apple의 공증을 받지 않았기 때문에 처음 실행할 때 열리지 않을 수 있습니다. 그러면 **시스템 설정 → 개인정보 보호 및 보안**에서 **그래도 열기**를 누릅니다. 빌드 방법과 설정은 [macOS 안내](macos/README.md)에 정리되어 있습니다.
 
@@ -49,7 +49,7 @@ macOS 버전도 곡 카드, 싱크 가사, 메뉴 막대 제어, 전역 단축�
 
 ### 2. 실행
 
-1. [Releases](../../releases)에서 `PearNowPlaying-Windows.zip`을 내려받아 압축을 풀고 `PearNowPlaying.exe`를 실행합니다.
+1. [Releases](../../releases)에서 Windows용 zip 파일(`PearNowPlaying-Windows`로 시작하는 `.zip` 파일)을 내려받아 압축을 풀고 `PearNowPlaying.exe`를 실행합니다.
    실행하면 작업 표시줄 오른쪽 트레이에 음표 아이콘이 나타납니다.
 2. Pear Desktop에 **"pear-now-playing ... API에 액세스하도록 허용하시겠습니까?"** 창이 나타나면 **허용**을 누릅니다. 이 확인 창은 처음 한 번만 나타납니다.
 3. 노래를 재생하면 화면 왼쪽 아래에 곡 정보가 나타납니다.
@@ -87,7 +87,7 @@ Windows를 시작할 때 자동으로 실행하려면 `Win + R`로 `shell:startu
   - 원곡에 YouTube Music 가사가 없으면 원곡의 제목과 아티스트로 LRCLIB에서 찾습니다.
     이렇게 찾은 가사는 트레이의 가사 상태에 "(YouTube Music · 원곡)", "(LRCLIB · 원곡 검색)"처럼 출처가 표시됩니다.
 - 곡이 재생되는 동안 Pear 재생목록에 있는 **다음 곡의 가사를 미리 찾아 둡니다**(곡이 시작되고 10초 뒤에 찾습니다). 따라서 다음 곡이 시작되면 가사가 바로 나타납니다.
-  미리 찾을 때 가사를 찾지 못한 곡은 그 곡이 실제로 시작될 때 다시 찾습니다.
+  미리 찾을 때 가사를 찾지 못한 곡은 그 곡이 실제로 시작될 때 다시 찾습니다. 가사 서버가 바빠서 미리 찾기에 실패했다면, 지금 곡이 재생되는 동안 30초 뒤와 90초 뒤에 다시 시도합니다.
 - YouTube Music 가사 중계 서버에 보낸 요청이 3번 연달아 실패하면, 그 뒤 10분 동안은 LRCLIB에서만 가사를 찾습니다. **가사 다시 찾기**를 누르면 이 대기 시간과 관계없이 바로 다시 시도합니다.
 - 아티스트 표기가 다르더라도(`Mikito-P`와 `みきとP`처럼) 제목이 같고 곡 길이 차이가 3초 이내이면 같은 곡으로 판단합니다.
 - LRCLIB는 무료로 운영되는 서버이므로 사용자가 몰리면 일시적으로 "바쁨"(503) 응답을 보냅니다. 이 응답을 받으면 2초 뒤에 같은 요청을 한 번 더 보냅니다.

@@ -38,6 +38,13 @@ struct LrclibFailed: LocalizedError {
         }
         log("INFO looking up lyrics: \(song.artist) - \(song.title) [\(song.mediaType.isEmpty ? "type?" : song.mediaType), \(song.videoId), \(Int(song.duration))s]")
 
+        // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
+        // the usual case for covers: ask for it alongside the first lookups instead of after them.
+        let coverCandidate = !ytm.paused && !song.videoId.isEmpty && song.duration > 0 && CoverLyrics.mayBeCover(song)
+        let description = coverCandidate && !CoverLyrics.looksArranged(song.title) && !CoverLyrics.looksArranged(song.alternativeTitle)
+            ? descriptionTask(song.videoId) : nil
+        defer { description?.cancel() }
+
         // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
         var ytmError = false, ytmPlain = false
         if useYtm && !song.videoId.isEmpty {
@@ -65,8 +72,7 @@ struct LrclibFailed: LocalizedError {
 
         // 2) covers: the original song linked in the description, if the music wasn't changed
         // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics off)
-        if !ytm.paused && !song.videoId.isEmpty && song.duration > 0 && CoverLyrics.mayBeCover(song),
-           let original = try await fromOriginal(song) {
+        if coverCandidate && !ytm.paused, let original = try await fromOriginal(song, description) {
             return remember(key, original)
         }
 
@@ -79,6 +85,17 @@ struct LrclibFailed: LocalizedError {
     }
 
     private func remember(_ key: String, _ result: LyricsLookup) -> LyricsLookup { cache[key] = result; return result }
+
+    /// The video's description in the background; nil when it can't be read (logged).
+    private func descriptionTask(_ videoId: String) -> Task<VideoDescription?, Never> {
+        Task {
+            do { return try await ytm.description(videoId) }
+            catch {
+                if !Task.isCancelled { log("INFO cover: description unavailable (\(error.localizedDescription)), using the title only") }
+                return nil
+            }
+        }
+    }
 
     /// Look the next song up ahead of time. Only a found result is kept for it; if nothing turns up, the song
     /// is looked up again normally when it starts (with Pear's fuller song info).
@@ -102,18 +119,14 @@ struct LrclibFailed: LocalizedError {
     /// the first linked video whose length is within a few seconds of the cover, and use its YouTube Music
     /// lyrics (or LRCLIB with the original's title/artist). Covers that say they are remixes/arrangements and
     /// candidates whose length differs are skipped, since the timing would drift. Nil = not usable.
-    private func fromOriginal(_ song: Song) async throws -> LyricsLookup? {
+    private func fromOriginal(_ song: Song, _ description: Task<VideoDescription?, Never>?) async throws -> LyricsLookup? {
         if CoverLyrics.looksArranged(song.title) || CoverLyrics.looksArranged(song.alternativeTitle) {
             log("INFO cover: title says arranged/remixed, original's lyrics not used: \(song.title)")
             return nil
         }
         do {
-            var desc: VideoDescription?
-            do { desc = try await ytm.description(song.videoId) }
-            catch {
-                if Task.isCancelled { throw CancellationError() }
-                log("INFO cover: description unavailable (\(error.localizedDescription)), using the title only")
-            }
+            let desc = await description?.value
+            try Task.checkCancellation()
             let (ids, hinted) = CoverLyrics.originalCandidates(desc, ownId: song.videoId)
             if ids.isEmpty { log("INFO cover: no YouTube links in the description of \(song.videoId)") }
             for id in ids {

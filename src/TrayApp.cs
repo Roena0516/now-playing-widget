@@ -335,7 +335,8 @@ namespace PearNowPlaying
 
         /// <summary>
         /// While this song plays, look up the next one in Pear's queue so its lyrics are ready when it starts.
-        /// Waits a little first so quickly skipped songs don't trigger lookups.
+        /// Waits a little first so quickly skipped songs don't trigger lookups. LRCLIB's "busy" answers usually clear
+        /// within seconds, so a failed look-ahead is tried again later in the song instead of when the next one starts.
         /// </summary>
         void PrefetchNext(string forKey)
         {
@@ -347,11 +348,15 @@ namespace PearNowPlaying
             {
                 try
                 {
-                    await Task.Delay(10000, ct);
-                    var next = await pear.GetNextSong(ct);
-                    if (next == null || ct.IsCancellationRequested) return;
-                    if (next.VideoId + "|" + next.Title == forKey) return;
-                    await lyricsProvider.Prefetch(next, ct);
+                    foreach (var wait in new[] { 10000, 30000, 90000 })
+                    {
+                        await Task.Delay(wait, ct);
+                        var next = await pear.GetNextSong(ct);   // asked each time: the queue may have changed
+                        if (next == null || ct.IsCancellationRequested) return;
+                        if (next.VideoId + "|" + next.Title == forKey) return;
+                        if (await lyricsProvider.Prefetch(next, ct)) return;
+                        Log.Info("fetching ahead failed (lyrics server busy or unreachable), will try again while this song plays");
+                    }
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { Log.Write("INFO fetching ahead failed: " + ex.Message); }

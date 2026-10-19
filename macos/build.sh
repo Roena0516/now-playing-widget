@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 APP="$PWD/build/Pear Now Playing.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/module-cache
 # --universal: Apple Silicon + Intel in one binary (for releases); otherwise this Mac's architecture only
-# --dmg: also make build/PearNowPlaying-macOS.dmg (styled window: the app next to an Applications link, see dmg-settings.py).
+# --dmg: also make build/PearNowPlaying-macOS-<version>.dmg (styled window: the app next to an Applications link, see dmg-settings.py).
 #        Uses dmgbuild, installed once into build/dmg-venv.
 ARCHS=$(uname -m)
 DMG=0
@@ -21,7 +21,10 @@ for ARCH in $ARCHS; do
   SLICES+=("build/PearNowPlaying-$ARCH")
 done
 xcrun lipo -create "${SLICES[@]}" -output "$APP/Contents/MacOS/PearNowPlaying"
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+# the version lives in one place: appVersion in Sources/Models.swift
+VERSION=$(sed -n 's/^let appVersion = "\(.*\)"$/\1/p' Sources/Models.swift)
+[ -n "$VERSION" ] || { echo "appVersion not found in Sources/Models.swift" >&2; exit 1; }
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -31,8 +34,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>PearNowPlaying</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleVersion</key><string>1.5.2</string>
-<key>CFBundleShortVersionString</key><string>1.5.2</string>
+<key>CFBundleVersion</key><string>$VERSION</string>
+<key>CFBundleShortVersionString</key><string>$VERSION</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
@@ -47,7 +50,9 @@ if [ "$DMG" = 1 ]; then
     python3 -m venv build/dmg-venv
     build/dmg-venv/bin/pip install --quiet --disable-pip-version-check "dmgbuild==1.6.7" "ds-store==1.3.3" "mac-alias==2.2.3"
   fi
-  rm -f build/PearNowPlaying-macOS.dmg
-  build/dmg-venv/bin/dmgbuild -s dmg-settings.py -D app="$APP" -D resources="$PWD/Resources" "Pear Now Playing" build/PearNowPlaying-macOS.dmg > /dev/null
-  printf 'Built: %s\n' "$PWD/build/PearNowPlaying-macOS.dmg"
+  # the version is in the file name so releases don't hand out same-named files
+  DMG_FILE="build/PearNowPlaying-macOS-$VERSION.dmg"
+  rm -f build/PearNowPlaying-macOS*.dmg
+  build/dmg-venv/bin/dmgbuild -s dmg-settings.py -D app="$APP" -D resources="$PWD/Resources" "Pear Now Playing" "$DMG_FILE" > /dev/null
+  printf 'Built: %s\n' "$PWD/$DMG_FILE"
 fi

@@ -4,14 +4,15 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 합니다체)
-- 버전: Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.5.2.0)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`과 `macos/build.sh`의 Info.plist에 적혀 있습니다.
+- 버전: Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.5.2.0)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
 - macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`).
 
 ## 작업 방식
 
 - 사용자(로에나)는 대화할 때 반말 한국어(임/함체)로 짧고 직접적인 답을 받기를 선호합니다.
 - 커밋, 푸시, 릴리스 업로드는 사용자가 직접 합니다. Windows 릴리스 zip에는 `PearNowPlaying.exe`, `README.md`, `PretendardJP-OFL.txt`를 `PearNowPlaying/` 폴더째 넣습니다.
-- macOS 릴리스는 `./macos/build.sh --universal --dmg`로 만든 `macos/build/PearNowPlaying-macOS.dmg`를 올립니다(arm64+x86_64). zip은 올리지 않습니다. 앱은 ad-hoc 서명만 하고 공증은 받지 않습니다.
+- 릴리스 파일 이름에는 버전을 넣습니다: `PearNowPlaying-Windows-<버전>.zip`, `PearNowPlaying-macOS-<버전>.dmg`(예: `PearNowPlaying-Windows-1.5.3.zip`). 1.5.2까지의 릴리스는 버전 없는 이름으로 올라가 있으며, 그 파일들은 바꾸지 않습니다.
+- macOS 릴리스는 `./macos/build.sh --universal --dmg`로 만든 `macos/build/PearNowPlaying-macOS-<버전>.dmg`를 올립니다(arm64+x86_64). zip은 올리지 않습니다. 앱은 ad-hoc 서명만 하고 공증은 받지 않습니다.
 - DMG 창의 모양(창 크기, 아이콘 위치, 배경)은 `macos/dmg-settings.py`에 있고, `dmgbuild`(1.6.7로 고정, 처음 `--dmg`로 빌드할 때 `macos/build/dmg-venv`에 설치됨)가 Finder 없이 만듭니다. 앱 아이콘(`macos/Resources/AppIcon.icns`)과 DMG 배경(`macos/Resources/dmg-background.tiff`)은 `xcrun swift macos/Tools/make-art.swift`로 다시 그릴 수 있으며, 결과 파일은 커밋되어 있습니다. 배경의 아이콘 위치를 바꾸면 `dmg-settings.py`의 `icon_locations`도 함께 바꿉니다.
 - 커밋 메시지는 한국어로 짧게 씁니다(예: "트레이 가사 다시 찾기에 결과 표시").
 - 릴리스 본문은 합니다체로 씁니다.
@@ -70,6 +71,8 @@ Windows:
 - LRCLIB가 바쁨 응답(429/502/503/504, `LrclibBusyException`)을 보내면 요청마다 2초 뒤에 한 번 더 시도합니다. 그래도 실패하면 곡 단위로 15초 뒤와 45초 뒤에 다시 찾습니다.
 - 트레이의 "가사 다시 찾기"는 캐시를 지우고(`Forget`) 서킷 브레이커를 해제한(`ResetPause`) 뒤 다시 찾습니다. 이 기능의 단축키는 사용자의 요청에 따라 일부러 만들지 않았습니다.
 - 현재 곡의 가사 검색이 끝나고 10초가 지나면 `queue/next`로 다음 곡 정보를 받아 `Prefetch`를 실행합니다. 미리 받은 결과는 가사를 찾은 경우에만 보관합니다.
+- 미리 받기가 서버 오류(LRCLIB 바쁨 등)로 실패하면, 현재 곡이 재생되는 동안 30초 뒤와 90초 뒤에 다시 시도합니다(대기는 10초 → 30초 → 90초). 곡이 시작된 뒤에 찾으면 늦기 때문입니다. 곡을 넘기면 취소됩니다.
+- 커버곡일 수 있는 영상은 설명란 요청을 1단계(YouTube Music 조회)와 동시에 시작합니다. 커버 영상 자체에는 YouTube Music 가사가 거의 없어서, 설명란은 대부분 필요하기 때문입니다.
 
 ## YouTube Music 관련 세부 사항 (로그인하지 않은 익명 요청)
 
@@ -116,6 +119,7 @@ Windows:
 - YouTube 오디오를 다운로드하거나 재전송하는 기능, 자막을 수집하는 기능 같은 것은 만들지 않습니다.
 - 새로운 외부 서버와 통신하게 되면 README의 "통신하는 곳" 항목에 추가합니다.
 - 외부 요청은 줄이는 방향으로 작업합니다. LRCLIB는 자주 503 응답을 보내므로, 요청 수를 늘리는 변경은 신중하게 결정합니다.
+- LRCLIB의 503은 사용자별 요청 제한이 아니라 서버 전체의 과부하 신호입니다(서버 소스 `server/src/state.rs`: DB 작업을 동시에 32개까지만 받고, 250ms 안에 자리가 나지 않으면 503). `/api/get`과 `/api/search` 응답은 서버가 24시간 캐시하며, 캐시에 있는 요청은 이 제한을 거치지 않습니다. 따라서 503은 클라이언트에서 없앨 수 없고, 덜 묻는 것이 유일한 대책입니다. `/api/get`은 아티스트 이름이 반드시 있어야 하므로, 원곡자를 모르면 검색만 사용합니다.
 - 실패한 결과를 "가사 없음"으로 캐시하지 않습니다. 일시적인 오류가 영구적인 "없음"으로 남으면 안 됩니다.
 - WebSocket(`/api/v1/ws`) 토큰은 `?token=` 쿼리 파라미터와 `Authorization: Bearer` 헤더로 **함께** 보냅니다. Pear 3.11은 연결 요청의 헤더만 확인해서 401로 거절하고, 3.12(#3854 이후)는 쿼리만 확인해서 1008로 연결을 닫습니다. 어느 한쪽만 보내면 다른 버전에서 연결되지 않습니다(1.5.1 맥 버전이 헤더만 보내서 3.12에서 "Pear 연결 실패 (57)"이 반복되었습니다). 모의 서버 테스트(`macos/Tests/mock_pear.py`)는 두 방식을 모두 확인합니다.
 - HttpClient의 타임아웃도 TaskCanceledException을 던집니다. 실제로 취소된 것인지는 `catch … when (ct.IsCancellationRequested)`로 구분합니다. 예전에 이 구분을 하지 않아서 가사 상태가 "찾는 중"에서 멈춘 적이 있습니다.

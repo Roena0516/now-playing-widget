@@ -143,6 +143,13 @@ namespace PearNowPlaying
             Log.Info("looking up lyrics: " + song.Artist + " - " + song.Title + " [" + (string.IsNullOrEmpty(song.MediaType) ? "type?" : song.MediaType)
                      + ", " + song.VideoId + ", " + (int)song.Duration + "s]");
 
+            // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
+            // the usual case for covers: ask for it alongside the first lookups instead of after them.
+            bool coverCandidate = Ytm != null && !Ytm.Paused && !string.IsNullOrEmpty(song.VideoId) && song.Duration > 0
+                                  && CoverLyrics.MayBeCover(song);
+            Task<VideoDescription> description = coverCandidate && !CoverLyrics.LooksArranged(song.Title) && !CoverLyrics.LooksArranged(song.AltTitle)
+                ? DescriptionOrNull(song.VideoId, ct) : null;
+
             // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
             bool ytmError = false;
             if (UseYtm && Ytm != null && !string.IsNullOrEmpty(song.VideoId))
@@ -182,10 +189,9 @@ namespace PearNowPlaying
 
             // 2) covers: the original song linked in the description, if the music wasn't changed
             // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics=false)
-            if (Ytm != null && !Ytm.Paused && !string.IsNullOrEmpty(song.VideoId) && song.Duration > 0
-                && CoverLyrics.MayBeCover(song))
+            if (coverCandidate && !Ytm.Paused)
             {
-                var original = await FromOriginal(song, ct);
+                var original = await FromOriginal(song, description, ct);
                 if (original != null && original.Failed) return original;   // LRCLIB busy: retried later, not cached
                 if (original != null)
                 {
@@ -208,7 +214,7 @@ namespace PearNowPlaying
         /// lyrics (or LRCLIB with the original's title/artist). Covers that say they are remixes/arrangements and
         /// candidates whose length differs are skipped, since the timing would drift. Null = not usable.
         /// </summary>
-        async Task<LyricsResult> FromOriginal(SongInfo song, CancellationToken ct)
+        async Task<LyricsResult> FromOriginal(SongInfo song, Task<VideoDescription> description, CancellationToken ct)
         {
             if (CoverLyrics.LooksArranged(song.Title) || CoverLyrics.LooksArranged(song.AltTitle))
             {
@@ -217,10 +223,7 @@ namespace PearNowPlaying
             }
             try
             {
-                VideoDescription desc = null;
-                try { desc = await Ytm.Description(song.VideoId, ct); }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                catch (Exception ex) { Log.Write("INFO cover: description unavailable (" + ex.Message + "), using the title only"); }
+                var desc = description != null ? await description : null;
                 HashSet<string> hinted;
                 var ids = CoverLyrics.OriginalCandidates(desc, song.VideoId, out hinted);
                 if (ids.Count == 0) Log.Info("cover: no YouTube links in the description of " + song.VideoId);
@@ -409,11 +412,12 @@ namespace PearNowPlaying
         /// Look the next song up ahead of time. Only a found result is kept for it; if nothing turns up, the song
         /// is looked up again normally when it starts (with Pear's fuller song info).
         /// </summary>
-        public async Task Prefetch(SongInfo next, CancellationToken ct)
+        /// <returns>false when the lookup failed (lyrics server busy or unreachable) and is worth trying again</returns>
+        public async Task<bool> Prefetch(SongInfo next, CancellationToken ct)
         {
             lock (gate)
             {
-                if (cache.ContainsKey(next.VideoId + "|" + next.Title) || prefetched.ContainsKey(next.VideoId)) return;
+                if (cache.ContainsKey(next.VideoId + "|" + next.Title) || prefetched.ContainsKey(next.VideoId)) return true;
             }
             Log.Info("fetching lyrics ahead for the next song: " + next.Artist + " - " + next.Title);
             var r = await Find(next, ct, false);
@@ -423,6 +427,19 @@ namespace PearNowPlaying
                     if (prefetched.Count > 20) prefetched.Clear();
                     prefetched[next.VideoId] = r;
                 }
+            return !r.Failed;
+        }
+
+        /// <summary>The video's description, or null when it can't be read (logged). Only cancellation is thrown.</summary>
+        async Task<VideoDescription> DescriptionOrNull(string videoId, CancellationToken ct)
+        {
+            try { return await Ytm.Description(videoId, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Write("INFO cover: description unavailable (" + (ex is OperationCanceledException ? "timeout" : ex.Message) + "), using the title only");
+                return null;
+            }
         }
 
         /// <summary>
