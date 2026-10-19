@@ -34,7 +34,7 @@ import CoreText
             switch id { case 0: self.show(); case 1: self.client.control("toggle-play"); case 2: self.client.control("next"); case 3: self.client.control("previous"); case 4: self.togglePinned(); case 5: self.toggleLyrics(); default: break }
         }
         if !hotkeys.register() { NSLog("일부 단축키 등록 실패: 다른 앱의 Ctrl+Option 단축키를 확인하세요.") }
-        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.overlay.layout() } }
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.overlay.layout(); self?.updateMenu() } }
         updateMenu()
         if preview {
             client.handle(["type": "PLAYER_INFO", "isPlaying": true, "song": ["title": "Pear Now Playing · macOS", "artist": "오버레이 미리보기", "album": "한국어 · 日本語 · English", "songDuration": 240, "elapsedSeconds": 42, "isPaused": false]])
@@ -55,45 +55,66 @@ import CoreText
         add(menu, client.lyricsStatus, nil)
         menu.addItem(.separator())
         add(menu, "지금 곡 다시 보기    ⌃⌥↑", #selector(show))
-        add(menu, "곡 정보 계속 표시    ⌃⌥P", #selector(togglePinned), state: client.settings.alwaysShow)
-        add(menu, "가사 표시    ⌃⌥L", #selector(toggleLyrics), state: client.settings.showLyrics)
-        add(menu, "가사 다시 찾기", #selector(findLyrics))
-        add(menu, "YouTube Music 가사 먼저 찾기", #selector(toggleYtmLyrics), state: client.settings.ytmLyrics)
-        add(menu, "가사 진단 기록 열기", #selector(openLyricsLog))
-        let timing = NSMenu(); for delta in [-1000, -500, -100, 0, 100, 500, 1000] {
-            let title = delta == 0 ? "보정 초기화" : (delta > 0 ? "\(delta)ms 빠르게" : "\(-delta)ms 늦게")
-            add(timing, title, #selector(offset(_:)), represented: delta)
-        }
-        let timingItem = NSMenuItem(title: "가사 타이밍 (\(Int(client.settings.lyricsOffsetMs))ms)", action: nil, keyEquivalent: ""); timingItem.submenu = timing; menu.addItem(timingItem)
-        let position = NSMenu()
-        for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래")] {
-            add(position, label, #selector(position(_:)), state: client.settings.position == value, represented: value)
-        }
-        let positions = NSMenuItem(title: "위치", action: nil, keyEquivalent: ""); positions.submenu = position; menu.addItem(positions)
-        let sizes = NSMenu(); for (scale, label) in [(0.8, "작게"), (1.0, "보통"), (1.25, "크게"), (1.5, "아주 크게")] { add(sizes, label, #selector(size(_:)), state: client.settings.scale == scale, represented: scale) }
-        let sizesItem = NSMenuItem(title: "크기", action: nil, keyEquivalent: ""); sizesItem.submenu = sizes; menu.addItem(sizesItem)
         menu.addItem(.separator())
         add(menu, "이전 곡    ⌃⌥←", #selector(previous))
         add(menu, "재생 / 일시정지    ⌃⌥↓", #selector(togglePlay))
         add(menu, "다음 곡    ⌃⌥→", #selector(next))
         menu.addItem(.separator())
+
+        // widget (song card, where and how big) and lyrics settings live in separate submenus
+        let widget = NSMenu()
+        add(widget, "곡 정보 계속 표시    ⌃⌥P", #selector(togglePinned), state: client.settings.alwaysShow)
+        let position = NSMenu()
+        for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래")] {
+            add(position, label, #selector(position(_:)), state: client.settings.position == value, represented: value)
+        }
+        position.addItem(.separator())
+        add(position, "직접 옮긴 위치", #selector(position(_:)), state: client.settings.position == "Custom", represented: "Custom")
+        submenu(widget, "위치", position)
+        let monitors = NSMenu()
+        let current = min(max(0, client.settings.monitor), max(0, NSScreen.screens.count - 1))
+        for (index, screen) in NSScreen.screens.enumerated() {
+            let size = screen.frame.size
+            add(monitors, "모니터 \(index + 1) · \(screen.localizedName)\(index == 0 ? " (주 모니터)" : "") \(Int(size.width))×\(Int(size.height))",
+                #selector(monitor(_:)), state: index == current, represented: index)
+        }
+        submenu(widget, "모니터", monitors)
+        let sizes = NSMenu(); for (scale, label) in [(0.8, "작게"), (1.0, "보통"), (1.25, "크게"), (1.5, "아주 크게")] { add(sizes, label, #selector(size(_:)), state: client.settings.scale == scale, represented: scale) }
+        submenu(widget, "크기", sizes)
+        widget.addItem(.separator())
+        add(widget, "위젯 끌어서 옮기기", #selector(toggleMoveMode), state: overlay?.moveMode ?? false)
+        submenu(menu, "위젯", widget)
+
+        let lyrics = NSMenu()
+        add(lyrics, "가사 표시    ⌃⌥L", #selector(toggleLyrics), state: client.settings.showLyrics)
+        add(lyrics, "가사 다시 찾기", #selector(findLyrics))
+        let timing = NSMenu(); for delta in [-1000, -500, -100, 0, 100, 500, 1000] {
+            let title = delta == 0 ? "보정 초기화" : (delta > 0 ? "\(delta)ms 빠르게" : "\(-delta)ms 늦게")
+            add(timing, title, #selector(offset(_:)), represented: delta)
+        }
+        submenu(lyrics, "가사 타이밍 (\(Int(client.settings.lyricsOffsetMs))ms)", timing)
+        add(lyrics, "가사 진단 기록 열기", #selector(openLyricsLog))
+        submenu(menu, "가사", lyrics)
+        menu.addItem(.separator())
         add(menu, "Pear 연결 권한 다시 요청", #selector(retry))
         add(menu, "YouTube Music 열기", #selector(openPlayer))
         add(menu, "설정 파일 열기", #selector(openConfig))
         add(menu, "설정 다시 불러오기", #selector(reload))
+        menu.addItem(.separator())
         add(menu, "종료", #selector(quit))
         item.menu = menu
         item.button?.toolTip = client.status
+    }
+    func submenu(_ menu: NSMenu, _ title: String, _ sub: NSMenu) {
+        let entry = NSMenuItem(title: title, action: nil, keyEquivalent: ""); entry.submenu = sub; menu.addItem(entry)
     }
     func save() { client.settings.save(); client.applyLyricsSources(); overlay.show(); updateMenu() }
     @objc func show() { overlay.show() }
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
     @objc func toggleLyrics() { client.settings.showLyrics.toggle(); save() }
     @objc func findLyrics() { client.findLyrics(force: true) }
-    @objc func toggleYtmLyrics() {
-        client.settings.ytmLyrics.toggle(); client.settings.save(); client.applyLyricsSources(); client.lyrics.ytm.resetPause()
-        overlay.showInfo(client.settings.ytmLyrics ? "YouTube Music 가사를 먼저 찾아요" : "LRCLIB에서만 가사를 찾아요"); updateMenu()
-    }
+    @objc func toggleMoveMode() { overlay.setMoveMode(!overlay.moveMode); updateMenu() }
+    @objc func monitor(_ sender: NSMenuItem) { client.settings.monitor = sender.representedObject as! Int; save() }
     @objc func openLyricsLog() { LyricsLog.write("진단 기록 열기"); NSWorkspace.shared.open(LyricsLog.file) }
     @objc func position(_ sender: NSMenuItem) { client.settings.position = sender.representedObject as! String; save() }
     @objc func size(_ sender: NSMenuItem) { client.settings.scale = sender.representedObject as! Double; save() }

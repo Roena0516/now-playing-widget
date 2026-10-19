@@ -21,6 +21,8 @@ namespace PearNowPlaying
         public const uint SWP_NOACTIVATE = 0x0010;
         public const uint SWP_SHOWWINDOW = 0x0040;
 
+        public const int GWL_EXSTYLE = -20;
+
         public const int WM_HOTKEY = 0x0312;
         public const uint MOD_ALT = 0x0001;
         public const uint MOD_CONTROL = 0x0002;
@@ -79,5 +81,12 @@ namespace PearNowPlaying
 
         [DllImport("user32.dll")]
         public static extern bool SetProcessDPIAware();
+
+        // window styles are 32-bit values, so the 32-bit entry points are enough on both bitnesses
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     }
 }

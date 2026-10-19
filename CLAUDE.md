@@ -45,13 +45,14 @@ Windows:
 |---|---|
 | `src/Program.cs` | 진입점, 단일 인스턴스 확인, 버전 정보 |
 | `src/PearClient.cs` | Pear API 서버 플러그인과 통신합니다: `POST /auth/{id}`로 토큰 발급(처음 한 번은 Pear가 허용 창을 띄웁니다), WebSocket `/api/v1/ws`, `POST /api/v1/next`·`previous`·`toggle-play`, `GET /api/v1/queue/next`(다음 곡). `SongInfo.MediaType`은 AUDIO / ORIGINAL_MUSIC_VIDEO / USER_GENERATED_CONTENT / PODCAST_EPISODE / OTHER_VIDEO 중 하나이며, 재생목록(큐)에서 가져온 곡은 UNKNOWN입니다. |
-| `src/OverlayWindow.cs` | 클릭이 통과하는 항상 위 레이어드 창(`UpdateLayeredWindow`), 페이드·이동 애니메이션 |
+| `src/OverlayWindow.cs` | 클릭이 통과하는 항상 위 레이어드 창(`UpdateLayeredWindow`), 페이드·이동 애니메이션. `Interactive`를 켜면 클릭 통과(`WS_EX_TRANSPARENT`)를 끄고 끌기 이벤트를 보냅니다 |
+| `src/Placement.cs` | 끌어서 놓은 위젯의 모니터와 위치(`Custom`) 계산(순수 함수). 맥은 `NativePlacement.fromDrop` |
 | `src/CardRenderer.cs` | 곡 카드 그리기, 긴 제목 마퀴 |
 | `src/LyricsView.cs` | 가사 목록 스크롤, 줄 전환 애니메이션 |
 | `src/Lyrics.cs` | `LyricsProvider`: 가사를 찾는 전체 순서, 캐시, 미리 받기, LRCLIB 검색, LRC 파서 |
 | `src/YtmLyrics.cs` | YouTube Music: 곡 정보, 가사(프록시 경유), 공식 음원 찾기, 영상 설명란 |
 | `src/CoverLyrics.cs` | 커버곡 판별, 설명란에서 원곡 링크 고르기, 제목에서 곡명·원곡자 추출, 편곡·리믹스 거르기(대부분 순수 함수) |
-| `src/TrayApp.cs` | 트레이 메뉴, 곡 카드·정보 카드의 표시 시점, 가사 재시도 루프, 다음 곡 미리 받기 |
+| `src/TrayApp.cs` | 트레이 메뉴(위젯·가사 하위 메뉴, 모니터 목록), 곡 카드·정보 카드의 표시 시점, 위젯 끌어서 옮기기 모드, 가사 재시도 루프, 다음 곡 미리 받기 |
 | `src/Config.cs` | config.ini 읽기/쓰기, 예전 ETS2NowPlaying 설정 이전(`MigrateOldConfig`), 토큰 저장 |
 | `src/Hotkeys.cs`, `src/Native.cs`, `src/Theme.cs` | 전역 단축키, Win32 P/Invoke, 색 토큰과 폰트 로딩 |
 
@@ -125,4 +126,6 @@ Windows:
 - 실패한 결과를 "가사 없음"으로 캐시하지 않습니다. 일시적인 오류가 영구적인 "없음"으로 남으면 안 됩니다.
 - WebSocket(`/api/v1/ws`) 토큰은 `?token=` 쿼리 파라미터와 `Authorization: Bearer` 헤더로 **함께** 보냅니다. Pear 3.11은 연결 요청의 헤더만 확인해서 401로 거절하고, 3.12(#3854 이후)는 쿼리만 확인해서 1008로 연결을 닫습니다. 어느 한쪽만 보내면 다른 버전에서 연결되지 않습니다(1.5.1 맥 버전이 헤더만 보내서 3.12에서 "Pear 연결 실패 (57)"이 반복되었습니다). 모의 서버 테스트(`macos/Tests/mock_pear.py`)는 두 방식을 모두 확인합니다.
 - HttpClient의 타임아웃도 TaskCanceledException을 던집니다. 실제로 취소된 것인지는 `catch … when (ct.IsCancellationRequested)`로 구분합니다. 예전에 이 구분을 하지 않아서 가사 상태가 "찾는 중"에서 멈춘 적이 있습니다.
+- 메뉴는 위젯 설정(곡 정보 계속 표시, 위치, 모니터, 크기, 끌어서 옮기기)과 가사 설정(가사 표시, 다시 찾기, 타이밍)을 하위 메뉴로 나눕니다. "YouTube Music 가사 먼저 찾기"는 사용자 요청으로 메뉴에서 뺐고, 설정 파일의 `ytmLyrics`로만 바꿉니다. `alwaysShow`의 기본값은 `true`입니다(기존 설정 파일의 값은 그대로 둡니다).
+- 위젯은 평소 클릭을 통과시켜야 합니다(게임 위에 뜨기 때문입니다). 마우스를 받는 것은 "위젯 끌어서 옮기기" 모드가 켜져 있는 동안뿐이며, 이 모드에서는 곡 카드가 사라지지 않습니다. 놓으면 중심이 있는 모니터와 위·아래 절반을 기준으로 `Custom` 위치를 저장합니다.
 - 정보 카드("가사 다시 찾기" 결과 등)가 표시되는 동안에는 곡 카드를 다시 그리지 않습니다. 계속 표시 모드에서는 정보 카드가 3.5초 뒤에 곡 카드로 돌아갑니다. 예전에는 이 두 동작이 서로 꼬여서 곡 카드가 사라지는 버그가 있었습니다. macOS 버전도 같은 방식으로 동작합니다.

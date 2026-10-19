@@ -25,6 +25,7 @@ import CoreGraphics
     precondition(makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: nil).url?.query == nil)
     testPlayerSetup()
     testOverlayPlacement()
+    testCustomPlacement()
     // a config.json written before the lyric source settings existed keeps the user's values
     let old = try! JSONDecoder().decode(Settings.self, from: Data(#"{"host":"127.0.0.1","port":26538,"scale":1.25,"position":"TopRight","showLyrics":false}"#.utf8))
     precondition(old.scale == 1.25 && old.position == "TopRight" && !old.showLyrics && old.ytmLyrics && old.ytmLyricsProxy == YTMusicProvider.defaultProxy && old.lyricsServer == "https://lrclib.net")
@@ -125,4 +126,33 @@ func testOverlayPlacement() {
     let scaled = NativePlacement.frames(screen: screen, config: config, cardHeight: 150, lyricHeight: 195, cardVisible: true, lyricsVisible: true)
     precondition(scaled.card.midX == screen.midX && scaled.card.minY == scaled.lyrics.maxY + 15)
     print("PASS: macOS margin migration, custom placement preservation, bottom/top/center anchoring, independent card dismissal and scaled gap")
+}
+
+/// The dragged ("Custom") position: which screen and anchor a drop picks, and where the panels then go.
+/// Same cases as the Windows version's Placement.FromDrop, in AppKit coordinates (origin at the bottom left).
+func testCustomPlacement() {
+    let one = [CGRect(x: 0, y: 0, width: 1920, height: 1080)]
+    let two = [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: -160, width: 2560, height: 1440)]
+    func check(_ column: CGRect, _ screens: [CGRect], _ expected: (Int, Double, Double, Bool), _ what: String) {
+        let d = NativePlacement.fromDrop(column: column, screens: screens)
+        precondition(d.monitor == expected.0 && d.x == expected.1 && d.y == expected.2 && d.fromBottom == expected.3, "\(what): \(d)")
+    }
+    check(CGRect(x: 100, y: 730, width: 420, height: 300), one, (0, 100, 50, false), "upper left")
+    check(CGRect(x: 300, y: 80, width: 420, height: 300), one, (0, 300, 80, true), "lower half anchors to the bottom")
+    check(CGRect(x: 2500, y: 980, width: 420, height: 300), two, (1, 580, 0, false), "dragged onto the second monitor (top edge clamped)")
+    check(CGRect(x: 1800, y: 680, width: 420, height: 300), one, (0, 1500, 100, false), "pulled off the right edge stays on screen")
+    check(CGRect(x: -500, y: 380, width: 420, height: 300), two, (0, 0, 380, true), "off every screen picks the nearest")
+
+    var custom = Settings()
+    precondition(custom.alwaysShow && custom.showLyrics && custom.ytmLyrics, "new defaults: always show, lyrics on, YouTube Music first")
+    custom.position = "Custom"; custom.customX = 300; custom.customY = 80; custom.customFromBottom = true
+    let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+    let low = NativePlacement.frames(screen: screen, config: custom, cardHeight: 100, lyricHeight: 200, cardVisible: true, lyricsVisible: true)
+    precondition(low.lyrics.minX == 300 && low.lyrics.minY == 80 && low.card.minY == 80 + 200 + 10, "bottom-anchored custom: lyrics on the spot, card above")
+    custom.customFromBottom = false; custom.customY = 50
+    let high = NativePlacement.frames(screen: screen, config: custom, cardHeight: 100, lyricHeight: 200, cardVisible: false, lyricsVisible: true)
+    precondition(high.lyrics.maxY == 1080 - 50, "top-anchored custom: lyrics move up when the card is gone")
+    let decoded = try! JSONDecoder().decode(Settings.self, from: Data(#"{"position":"Custom","customX":12,"customY":34,"customFromBottom":false}"#.utf8))
+    precondition(decoded.position == "Custom" && decoded.customX == 12 && decoded.customY == 34 && !decoded.customFromBottom)
+    print("PASS: dragged position (screen choice, top/bottom anchor, clamping), custom placement, new defaults")
 }

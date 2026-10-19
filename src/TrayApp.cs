@@ -19,7 +19,7 @@ namespace PearNowPlaying
         readonly Hotkeys hotkeys;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, retryLyricsItem, ytmLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu;
+        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, retryLyricsItem, lyricsInfoItem, offsetMenu, posMenu, sizeMenu, monitorMenu, moveItem;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly SynchronizationContext ui;
         readonly double dpiScale;
@@ -63,6 +63,12 @@ namespace PearNowPlaying
             var h1 = cardWin.Handle; var h2 = lyricsWin.Handle;
             lyricsWin.FadedOut += (s, e) => Reposition();
             cardWin.FadedOut += (s, e) => Reposition();
+            foreach (var w in new[] { cardWin, lyricsWin })
+            {
+                w.DragBegan += BeginDrag;
+                w.Dragged += DragTo;
+                w.DragEnded += EndDrag;
+            }
 
             // tray menu
             menu = new ContextMenuStrip();
@@ -71,7 +77,6 @@ namespace PearNowPlaying
             pinItem = new ToolStripMenuItem("곡 정보 계속 표시", null, (s, e) => TogglePin());
             lyricsItem = new ToolStripMenuItem("가사 표시", null, (s, e) => ToggleLyrics());
             retryLyricsItem = new ToolStripMenuItem("가사 다시 찾기", null, (s, e) => RetryLyrics());
-            ytmLyricsItem = new ToolStripMenuItem("YouTube Music 가사 먼저 찾기", null, (s, e) => ToggleYtmLyrics());
             offsetMenu = new ToolStripMenuItem("가사 타이밍");
             foreach (var pair in new[] { Tuple.Create("1초 빠르게", 1300), Tuple.Create("0.5초 빠르게", 800), Tuple.Create("기본", 300),
                                          Tuple.Create("0.5초 늦게", -200), Tuple.Create("1초 늦게", -700) })
@@ -83,29 +88,36 @@ namespace PearNowPlaying
             foreach (OverlayPosition p in Enum.GetValues(typeof(OverlayPosition)))
             {
                 var pos = p;
+                if (pos == OverlayPosition.Custom) posMenu.DropDownItems.Add(new ToolStripSeparator());
                 posMenu.DropDownItems.Add(new ToolStripMenuItem(PositionName(pos), null, (s, e) => SetPosition(pos)) { Tag = pos });
             }
+            monitorMenu = new ToolStripMenuItem("모니터");
+            monitorMenu.DropDownItems.Add(new ToolStripMenuItem("-"));   // filled when the menu opens (screens can change)
             sizeMenu = new ToolStripMenuItem("크기");
             foreach (var pair in new[] { Tuple.Create("작게", 0.8), Tuple.Create("보통", 1.0), Tuple.Create("크게", 1.25), Tuple.Create("아주 크게", 1.5) })
             {
                 var v = pair.Item2;
                 sizeMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item1, null, (s, e) => SetScale(v)) { Tag = v });
             }
+            moveItem = new ToolStripMenuItem("위젯 끌어서 옮기기", null, (s, e) => SetMoveMode(!moveMode));
+
+            // widget (song card, where and how big) and lyrics settings live in separate submenus
+            var widgetMenu = new ToolStripMenuItem("위젯");
+            widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, posMenu, monitorMenu, sizeMenu, new ToolStripSeparator(), moveItem });
+            var lyricsMenu = new ToolStripMenuItem("가사");
+            lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, retryLyricsItem, offsetMenu });
+
             menu.Items.Add(statusItem);
             menu.Items.Add(lyricsInfoItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("지금 곡 보기", null, (s, e) => ShowNow(CurrentKind())));
-            menu.Items.Add(pinItem);
-            menu.Items.Add(lyricsItem);
-            menu.Items.Add(retryLyricsItem);
-            menu.Items.Add(ytmLyricsItem);
-            menu.Items.Add(offsetMenu);
-            menu.Items.Add(posMenu);
-            menu.Items.Add(sizeMenu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("이전 곡", null, (s, e) => pear.Previous()));
             menu.Items.Add(new ToolStripMenuItem("재생 / 일시정지", null, (s, e) => pear.TogglePlay()));
             menu.Items.Add(new ToolStripMenuItem("다음 곡", null, (s, e) => pear.Next()));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(widgetMenu);
+            menu.Items.Add(lyricsMenu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Pear 연결 권한 다시 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); }));
             menu.Items.Add(new ToolStripMenuItem("설정 파일 열기", null, (s, e) => OpenFile(Config.FilePath)));
@@ -414,7 +426,7 @@ namespace PearNowPlaying
             if (!cardWin.IsPresent || kind == CardKind.NowPlaying) marquee.Restart();
             SetCardFrame(CardRenderer.BuildCard(song, kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
             var bmp = cardFrame.Compose(MarqueeOffset());
-            cardWin.ShowCard(bmp, PlaceCard(bmp.Size), cfg.AlwaysShow ? (double?)null : cfg.ShowSeconds);
+            cardWin.ShowCard(bmp, PlaceCard(bmp.Size), KeepCard ? (double?)null : cfg.ShowSeconds);
             Reposition();
             StartMarquee();
         }
@@ -426,9 +438,10 @@ namespace PearNowPlaying
             var bmp = cardFrame.Compose(MarqueeOffset());
             // While "always show" keeps the song card up, the message only borrows its place for a few seconds
             // and the song card comes back; otherwise the message fades out like a normal card.
-            bool restore = cfg.AlwaysShow && pear.Current.HasData;
+            bool restore = KeepCard && pear.Current.HasData;
             double secs = restore ? 3.5 : Math.Max(3, cfg.ShowSeconds);
-            cardWin.ShowCard(bmp, PlaceCard(bmp.Size), restore ? (double?)null : secs);
+            // while dragging the widget around, a message with no song behind it stays until the mode ends
+            cardWin.ShowCard(bmp, PlaceCard(bmp.Size), restore || moveMode ? (double?)null : secs);
             infoUntil = DateTime.Now.AddSeconds(secs);
             infoTimer.Stop();
             if (restore) { infoTimer.Interval = (int)(secs * 1000); infoTimer.Start(); }
@@ -440,8 +453,11 @@ namespace PearNowPlaying
         {
             infoTimer.Stop();
             infoUntil = DateTime.MinValue;
-            if (cfg.AlwaysShow && pear.Current.HasData) ShowNow(CurrentKind());
+            if (KeepCard && pear.Current.HasData) ShowNow(CurrentKind());
         }
+
+        /// <summary>The song card stays up: "always show", or the widget is being moved.</summary>
+        bool KeepCard { get { return cfg.AlwaysShow || moveMode; } }
 
         void Rerender()
         {
@@ -513,6 +529,7 @@ namespace PearNowPlaying
         // Top corners: the card sits on the margin and the lyrics hang below it (and move up when it leaves).
         Point PlaceCard(Size size)
         {
+            if (dragging && cardWin.IsShowing) return cardWin.ContentLocation;   // the mouse decides for now
             var b = ScreenBounds();
             int y;
             if (IsTop) y = b.Top + MarginY;
@@ -526,6 +543,7 @@ namespace PearNowPlaying
 
         Point PlaceLyrics(Size size)
         {
+            if (dragging && lyricsWin.IsShowing) return lyricsWin.ContentLocation;
             var b = ScreenBounds();
             int y;
             if (IsTop)
@@ -539,10 +557,15 @@ namespace PearNowPlaying
 
         bool IsTop
         {
-            get { return cfg.Position == OverlayPosition.TopLeft || cfg.Position == OverlayPosition.TopCenter || cfg.Position == OverlayPosition.TopRight; }
+            get
+            {
+                if (cfg.Position == OverlayPosition.Custom) return !cfg.CustomFromBottom;
+                return cfg.Position == OverlayPosition.TopLeft || cfg.Position == OverlayPosition.TopCenter || cfg.Position == OverlayPosition.TopRight;
+            }
         }
 
-        int MarginY { get { return (int)Math.Round(cfg.MarginY * dpiScale); } }
+        // a dragged position is kept in screen pixels, the preset margins in 96-dpi pixels
+        int MarginY { get { return cfg.Position == OverlayPosition.Custom ? cfg.CustomY : (int)Math.Round(cfg.MarginY * dpiScale); } }
 
         int AlignX(Rectangle b, int width)
         {
@@ -551,6 +574,7 @@ namespace PearNowPlaying
             {
                 case OverlayPosition.TopLeft: case OverlayPosition.BottomLeft: return b.Left + mx;
                 case OverlayPosition.TopRight: case OverlayPosition.BottomRight: return b.Right - width - mx;
+                case OverlayPosition.Custom: return Math.Max(b.Left, Math.Min(b.Left + cfg.CustomX, b.Right - width));
                 default: return b.Left + (b.Width - width) / 2;
             }
         }
@@ -610,19 +634,98 @@ namespace PearNowPlaying
             ShowNow(CurrentKind());
         }
 
+        void BuildMonitorMenu()
+        {
+            monitorMenu.DropDownItems.Clear();
+            var screens = Screen.AllScreens;
+            int current = cfg.Monitor < screens.Length ? cfg.Monitor : Array.IndexOf(screens, Screen.PrimaryScreen);
+            for (int i = 0; i < screens.Length; i++)
+            {
+                int index = i;
+                var b = screens[i].Bounds;
+                var label = "모니터 " + (i + 1) + " (" + (screens[i].Primary ? "주 모니터, " : "") + b.Width + "×" + b.Height + ")";
+                monitorMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (s, e) => SetMonitor(index)) { Checked = i == current });
+            }
+        }
+
+        void SetMonitor(int index)
+        {
+            cfg.Monitor = index;
+            cfg.Save();
+            TickLyrics(true);
+            ShowNow(CurrentKind());
+        }
+
+        // ---- dragging the widget -------------------------------------------------------
+        // The overlay normally lets every click through (it sits over games). "위젯 끌어서 옮기기" turns that off
+        // for both windows until it is chosen again; a drop saves a Custom position on the monitor it landed on.
+
+        bool moveMode, dragging;
+        Point dragStart, cardStart, lyricsStart;
+
+        void SetMoveMode(bool on)
+        {
+            if (on == moveMode) return;
+            moveMode = on;
+            cardWin.Interactive = on;
+            lyricsWin.Interactive = on;
+            if (on)
+            {
+                Balloon("위젯을 끌어서 원하는 곳에 놓으세요. 다 옮겼으면 트레이 메뉴의 '위젯 끌어서 옮기기'를 다시 누르세요.");
+                ShowNow(CurrentKind());
+                TickLyrics(true);
+            }
+            else
+            {
+                if (dragging) EndDrag();
+                if (pear.Current.HasData) ShowNow(CurrentKind());   // back to the normal show time
+                else cardWin.Dismiss();
+            }
+        }
+
+        void BeginDrag(Point cursor)
+        {
+            dragging = true;
+            dragStart = cursor;
+            cardStart = cardWin.ContentLocation;
+            lyricsStart = lyricsWin.ContentLocation;
+        }
+
+        void DragTo(Point cursor)
+        {
+            if (!dragging) return;
+            int dx = cursor.X - dragStart.X, dy = cursor.Y - dragStart.Y;
+            if (cardWin.IsShowing) cardWin.JumpTo(new Point(cardStart.X + dx, cardStart.Y + dy));
+            if (lyricsWin.IsShowing) lyricsWin.JumpTo(new Point(lyricsStart.X + dx, lyricsStart.Y + dy));
+        }
+
+        void EndDrag()
+        {
+            if (!dragging) return;
+            dragging = false;
+            var column = Rectangle.Empty;
+            if (cardWin.IsPresent) column = new Rectangle(cardWin.ContentLocation, cardWin.ContentSize);
+            if (lyricsWin.IsPresent)
+            {
+                var l = new Rectangle(lyricsWin.ContentLocation, lyricsWin.ContentSize);
+                column = column.IsEmpty ? l : Rectangle.Union(column, l);
+            }
+            if (column.IsEmpty) return;
+            int monitor, x, y; bool fromBottom;
+            Placement.FromDrop(column, Screen.AllScreens.Select(sc => sc.Bounds).ToArray(), out monitor, out x, out y, out fromBottom);
+            cfg.Position = OverlayPosition.Custom;
+            cfg.Monitor = monitor;
+            cfg.CustomX = x;
+            cfg.CustomY = y;
+            cfg.CustomFromBottom = fromBottom;
+            cfg.Save();
+            Reposition();   // settles onto the saved spot (kept on screen)
+        }
+
         void ApplyLyricsSources()
         {
             lyricsProvider.UseYtm = cfg.YtmLyrics;
             lyricsProvider.Ytm.ProxyBase = string.IsNullOrWhiteSpace(cfg.YtmLyricsProxy) ? YtmLyrics.DefaultProxy : cfg.YtmLyricsProxy.Trim();
-        }
-
-        void ToggleYtmLyrics()
-        {
-            cfg.YtmLyrics = !cfg.YtmLyrics;
-            cfg.Save();
-            ApplyLyricsSources();
-            lyricsProvider.Ytm.ResetPause();
-            ShowInfo(cfg.YtmLyrics ? "YouTube Music 가사를 먼저 찾아요" : "LRCLIB에서만 가사를 찾아요");
         }
 
         void ReloadConfig()
@@ -656,7 +759,8 @@ namespace PearNowPlaying
         {
             pinItem.Checked = cfg.AlwaysShow;
             lyricsItem.Checked = cfg.ShowLyrics;
-            ytmLyricsItem.Checked = cfg.YtmLyrics;
+            moveItem.Checked = moveMode;
+            BuildMonitorMenu();
             foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
             foreach (ToolStripMenuItem it in posMenu.DropDownItems) it.Checked = (OverlayPosition)it.Tag == cfg.Position;
             foreach (ToolStripMenuItem it in sizeMenu.DropDownItems) it.Checked = Math.Abs((double)it.Tag - cfg.Scale) < 0.01;
@@ -698,6 +802,7 @@ namespace PearNowPlaying
                 case OverlayPosition.TopRight: return "오른쪽 위";
                 case OverlayPosition.BottomLeft: return "왼쪽 아래";
                 case OverlayPosition.BottomCenter: return "가운데 아래";
+                case OverlayPosition.Custom: return "직접 옮긴 위치";
                 default: return "오른쪽 아래";
             }
         }

@@ -235,15 +235,36 @@ struct NativePlacement {
     static func frames(screen: CGRect, config: Settings, cardHeight: CGFloat, lyricHeight: CGFloat, cardVisible: Bool, lyricsVisible: Bool) -> (card: CGRect, lyrics: CGRect) {
         let width = config.panelWidth * config.scale
         let gap = 10 * config.scale
+        let custom = config.position == "Custom"
         let x: CGFloat
-        if config.position.hasSuffix("Right") { x = screen.maxX - width - config.marginX }
+        if custom { x = screen.minX + config.customX }
+        else if config.position.hasSuffix("Right") { x = screen.maxX - width - config.marginX }
         else if config.position.hasSuffix("Center") { x = screen.midX - width / 2 }
         else { x = screen.minX + config.marginX }
-        let isTop = config.position.hasPrefix("Top")
-        let cardY = isTop ? screen.maxY - config.marginY - cardHeight : screen.minY + config.marginY + (lyricsVisible ? lyricHeight + gap : 0)
-        let lyricY = isTop ? screen.maxY - config.marginY - lyricHeight - (cardVisible ? cardHeight + gap : 0) : screen.minY + config.marginY
+        let isTop = custom ? !config.customFromBottom : config.position.hasPrefix("Top")
+        let marginY = custom ? config.customY : config.marginY
+        let cardY = isTop ? screen.maxY - marginY - cardHeight : screen.minY + marginY + (lyricsVisible ? lyricHeight + gap : 0)
+        let lyricY = isTop ? screen.maxY - marginY - lyricHeight - (cardVisible ? cardHeight + gap : 0) : screen.minY + marginY
         let safeX = max(screen.minX, min(x, screen.maxX - width))
         return (CGRect(x: safeX, y: max(screen.minY, min(cardY, screen.maxY - cardHeight)), width: width, height: cardHeight),
                 CGRect(x: safeX, y: max(screen.minY, min(lyricY, screen.maxY - lyricHeight)), width: width, height: lyricHeight))
+    }
+
+    /// Where a widget dragged by the user belongs: the screen holding the dropped column's center (the nearest one
+    /// if it is off every screen), and the column's offset from that screen's left edge and from its top or bottom
+    /// edge, whichever half the center is in. Clamped so the column stays on that screen. `screens` are visible
+    /// frames in AppKit coordinates (origin at the bottom left).
+    static func fromDrop(column: CGRect, screens: [CGRect]) -> (monitor: Int, x: Double, y: Double, fromBottom: Bool) {
+        let center = CGPoint(x: column.midX, y: column.midY)
+        func distance(_ s: CGRect) -> CGFloat {
+            let dx = max(0, s.minX - center.x, center.x - s.maxX), dy = max(0, s.minY - center.y, center.y - s.maxY)
+            return dx * dx + dy * dy
+        }
+        let monitor = screens.firstIndex { $0.contains(center) } ?? screens.indices.min { distance(screens[$0]) < distance(screens[$1]) } ?? 0
+        let s = screens.isEmpty ? .zero : screens[monitor]
+        let fromBottom = center.y < s.midY
+        func clamp(_ v: CGFloat, _ hi: CGFloat) -> Double { Double(min(max(v, 0), max(0, hi))) }
+        return (monitor, clamp(column.minX - s.minX, s.width - column.width),
+                clamp(fromBottom ? column.minY - s.minY : s.maxY - column.maxY, s.height - column.height), fromBottom)
     }
 }

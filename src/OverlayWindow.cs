@@ -8,7 +8,8 @@ namespace PearNowPlaying
     /// <summary>
     /// Borderless, click-through, always-on-top window that shows a pre-rendered bitmap with per-pixel alpha
     /// (UpdateLayeredWindow). It never takes focus, so the app underneath keeps keyboard/wheel input.
-    /// Supports fade in/out and eased moves between positions.
+    /// Supports fade in/out and eased moves between positions. While <see cref="Interactive"/> is on (the tray's
+    /// "drag to move" mode) it takes mouse input instead and reports drags; it still never takes the focus.
     /// </summary>
     internal sealed class OverlayWindow : Form
     {
@@ -31,6 +32,60 @@ namespace PearNowPlaying
         const double FadeInMs = 180, FadeOutMs = 450, MoveMs = 320;
 
         public event EventHandler FadedOut;
+        /// <summary>Mouse pressed / moved / released while <see cref="Interactive"/>, in screen coordinates.</summary>
+        public event Action<Point> DragBegan, Dragged;
+        public event Action DragEnded;
+
+        bool interactive, dragging;
+
+        /// <summary>Take mouse input (for dragging) instead of letting clicks through.</summary>
+        public bool Interactive
+        {
+            get { return interactive; }
+            set
+            {
+                if (interactive == value) return;
+                interactive = value;
+                Cursor = value ? Cursors.SizeAll : Cursors.Default;
+                if (!IsHandleCreated) return;
+                int style = Native.GetWindowLong(Handle, Native.GWL_EXSTYLE);
+                style = value ? style & ~Native.WS_EX_TRANSPARENT : style | Native.WS_EX_TRANSPARENT;
+                Native.SetWindowLong(Handle, Native.GWL_EXSTYLE, style);
+            }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!interactive || e.Button != MouseButtons.Left) return;
+            dragging = true;
+            Capture = true;
+            var h = DragBegan; if (h != null) h(Control.MousePosition);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (!dragging) return;
+            var h = Dragged; if (h != null) h(Control.MousePosition);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (!dragging) return;
+            dragging = false;
+            Capture = false;
+            var h = DragEnded; if (h != null) h();
+        }
+
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (!dragging || Capture) return;
+            dragging = false;   // capture lost mid-drag (another window took it): end the drag where it is
+            var h = DragEnded; if (h != null) h();
+        }
 
         public OverlayWindow()
         {
@@ -50,8 +105,8 @@ namespace PearNowPlaying
             get
             {
                 var cp = base.CreateParams;
-                cp.ExStyle |= Native.WS_EX_LAYERED | Native.WS_EX_TRANSPARENT | Native.WS_EX_TOOLWINDOW
-                            | Native.WS_EX_NOACTIVATE | Native.WS_EX_TOPMOST;
+                cp.ExStyle |= Native.WS_EX_LAYERED | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE | Native.WS_EX_TOPMOST
+                            | (interactive ? 0 : Native.WS_EX_TRANSPARENT);
                 return cp;
             }
         }
@@ -62,6 +117,9 @@ namespace PearNowPlaying
 
         /// <summary>Visible and not on its way out.</summary>
         public bool IsPresent { get { return phase != Phase.Hidden && phase != Phase.FadingOut; } }
+
+        /// <summary>Top-left corner of the picture on screen (where it is now, mid-move included).</summary>
+        public Point ContentLocation { get { return location; } }
 
         /// <summary>Size of the picture currently on screen (empty when hidden).</summary>
         public Size ContentSize { get { return phase == Phase.Hidden || current == null ? Size.Empty : current.Size; } }
@@ -116,6 +174,14 @@ namespace PearNowPlaying
             moving = true;
             moveClock.Restart();
             anim.Start();
+        }
+
+        /// <summary>Move at once, without easing (following the mouse while dragging).</summary>
+        public void JumpTo(Point at)
+        {
+            moving = false;
+            location = at;
+            if (phase != Phase.Hidden) Push();
         }
 
         public void Dismiss()

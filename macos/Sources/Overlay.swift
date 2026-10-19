@@ -8,6 +8,14 @@ final class OverlayPanel: NSPanel {
 @MainActor final class OverlayCanvas: NSView {
     var render: (() -> Void)?
     var scale: CGFloat = 1
+    /// Drag callbacks (screen coordinates) while the panels take mouse input ("위젯 끌어서 옮기기").
+    var onDragBegan: ((CGPoint) -> Void)?, onDragged: ((CGPoint) -> Void)?, onDragEnded: (() -> Void)?
+    var movable = false { didSet { window?.invalidateCursorRects(for: self) } }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }   // the panels never become key
+    override func mouseDown(with event: NSEvent) { if movable { NSCursor.closedHand.set(); onDragBegan?(NSEvent.mouseLocation) } }
+    override func mouseDragged(with event: NSEvent) { if movable { onDragged?(NSEvent.mouseLocation) } }
+    override func mouseUp(with event: NSEvent) { if movable { NSCursor.openHand.set(); onDragEnded?() } }
+    override func resetCursorRects() { if movable { addCursorRect(bounds, cursor: .openHand) } }
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
     override func draw(_ dirtyRect: NSRect) {
@@ -38,6 +46,10 @@ final class OverlayPanel: NSPanel {
     private var lyricStart = Date.distantPast
     private var lyricDuration: Double = 0.46
     private let preview: Bool
+    // dragging the widget: the panels normally let every click through (they sit over other apps)
+    private(set) var moveMode = false
+    private var dragging = false
+    private var dragStart = CGPoint.zero, cardStart = CGPoint.zero, lyricsStart = CGPoint.zero
     init(client: PearClient, preview: Bool) {
         self.client = client; self.preview = preview
         panel = Self.makePanel(); lyricsPanel = Self.makePanel()
@@ -55,6 +67,53 @@ final class OverlayPanel: NSPanel {
             MainActor.assumeIsolated { self?.tick() }
         }
         RunLoop.main.add(timer!, forMode: .common)
+        for canvas in [cardCanvas, lyricsCanvas] {
+            canvas.onDragBegan = { [weak self] in self?.beginDrag($0) }
+            canvas.onDragged = { [weak self] in self?.drag(to: $0) }
+            canvas.onDragEnded = { [weak self] in self?.endDrag() }
+        }
+        layout()
+    }
+
+    /// "위젯 끌어서 옮기기": both panels take the mouse and stay up until the mode is turned off again.
+    func setMoveMode(_ on: Bool) {
+        guard on != moveMode else { return }
+        moveMode = on
+        for (panel, canvas) in [(self.panel, cardCanvas), (lyricsPanel, lyricsCanvas)] {
+            panel.ignoresMouseEvents = !on
+            canvas.movable = on
+        }
+        if on { showInfo("위젯을 끌어서 옮긴 뒤, 메뉴에서 '위젯 끌어서 옮기기'를 다시 눌러 끝내세요") }
+        else {
+            if dragging { endDrag() }
+            if client.song.title.isEmpty { hide() } else { show() }   // back to the normal show time
+        }
+    }
+
+    private func beginDrag(_ mouse: CGPoint) {
+        dragging = true; dragStart = mouse
+        cardStart = panel.frame.origin; lyricsStart = lyricsPanel.frame.origin
+    }
+
+    private func drag(to mouse: CGPoint) {
+        guard dragging else { return }
+        let dx = mouse.x - dragStart.x, dy = mouse.y - dragStart.y
+        if cardVisible { panel.setFrameOrigin(CGPoint(x: cardStart.x + dx, y: cardStart.y + dy)) }
+        if lyricsVisible { lyricsPanel.setFrameOrigin(CGPoint(x: lyricsStart.x + dx, y: lyricsStart.y + dy)) }
+    }
+
+    /// Save where the widget landed (screen, offsets, top or bottom anchor) as the "Custom" position.
+    private func endDrag() {
+        guard dragging else { return }
+        dragging = false
+        var column = CGRect.null
+        if cardVisible { column = column.union(panel.frame) }
+        if lyricsVisible { column = column.union(lyricsPanel.frame) }
+        guard !column.isNull else { return }
+        let drop = NativePlacement.fromDrop(column: column, screens: NSScreen.screens.map(\.visibleFrame))
+        client.settings.position = "Custom"; client.settings.monitor = drop.monitor
+        client.settings.customX = drop.x; client.settings.customY = drop.y; client.settings.customFromBottom = drop.fromBottom
+        client.settings.save()
         layout()
     }
     private static func makePanel() -> OverlayPanel {
@@ -115,6 +174,7 @@ final class OverlayPanel: NSPanel {
         layout(); tick()
     }
     func layout() {
+        if dragging { return }   // the mouse decides for now
         let screens = NSScreen.screens
         guard !screens.isEmpty else { return }
         let config = client.settings
@@ -151,7 +211,7 @@ final class OverlayPanel: NSPanel {
         refresh()
         if !wasVisible { panel.alphaValue = 0; panel.orderFrontRegardless() }
         NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; panel.animator().alphaValue = 1 }
-        if temporary && !client.settings.alwaysShow {
+        if temporary && !client.settings.alwaysShow && !moveMode {
             hideTask = Task { try? await Task.sleep(for: .seconds(client.settings.showSeconds)); guard !Task.isCancelled else { return }; hide() }
         }
     }
@@ -163,11 +223,12 @@ final class OverlayPanel: NSPanel {
         NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; panel.animator().alphaValue = 1 }
         // While "always show" keeps the song card up, the message only borrows its place for a few seconds
         // and the song card comes back; otherwise the message fades out like a normal card.
-        let restore = client.settings.alwaysShow && !client.song.title.isEmpty
+        let keep = client.settings.alwaysShow || moveMode
+        let restore = keep && !client.song.title.isEmpty
         hideTask = Task {
             try? await Task.sleep(for: .seconds(restore ? 3.5 : max(3, client.settings.showSeconds)))
             guard !Task.isCancelled else { return }
-            if restore { show() } else { hide() }
+            if restore { show() } else if !moveMode { hide() }   // while moving, a message with no song stays up
         }
     }
     func hide() {

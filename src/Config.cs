@@ -6,7 +6,8 @@ using System.Text;
 
 namespace PearNowPlaying
 {
-    internal enum OverlayPosition { TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight }
+    /// <summary>Custom: where the user dragged the widget (CustomX / CustomY / CustomFromBottom).</summary>
+    internal enum OverlayPosition { TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight, Custom }
 
     internal sealed class Config
     {
@@ -28,9 +29,13 @@ namespace PearNowPlaying
         public double Scale = 1.0;
         public int PanelWidth = 420;
         public int Monitor = 0;
+        // Custom position (px on the monitor, no DPI scaling): from the left edge, and from the top or bottom edge
+        public int CustomX = 40;
+        public int CustomY = 140;
+        public bool CustomFromBottom = true;
         public double ShowSeconds = 6;
         public double Opacity = 0.92;
-        public bool AlwaysShow = false;
+        public bool AlwaysShow = true;
         public bool ShowOnPause = true;
         public bool ShowAlbumArt = true;
 
@@ -77,6 +82,9 @@ namespace PearNowPlaying
                 c.Scale = Clamp(GetDouble(map, "scale", c.Scale), 0.5, 3.0);
                 c.PanelWidth = Math.Max(260, Math.Min(1200, GetInt(map, "panelWidth", c.PanelWidth)));
                 c.Monitor = Math.Max(0, GetInt(map, "monitor", c.Monitor));
+                c.CustomX = Math.Max(0, GetInt(map, "customX", c.CustomX));
+                c.CustomY = Math.Max(0, GetInt(map, "customY", c.CustomY));
+                c.CustomFromBottom = GetBool(map, "customFromBottom", c.CustomFromBottom);
                 c.ShowSeconds = Clamp(GetDouble(map, "showSeconds", c.ShowSeconds), 1, 60);
                 c.Opacity = Clamp(GetDouble(map, "opacity", c.Opacity), 0.2, 1.0);
                 c.AlwaysShow = GetBool(map, "alwaysShow", c.AlwaysShow);
@@ -114,7 +122,8 @@ namespace PearNowPlaying
                 sb.AppendLine("port=" + Port.ToString(inv));
                 sb.AppendLine("https=" + B(Https));
                 sb.AppendLine();
-                sb.AppendLine("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight");
+                sb.AppendLine("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight, Custom");
+                sb.AppendLine("# Custom은 트레이 메뉴의 '위젯 끌어서 옮기기'로 놓은 위치입니다(customX, customY, customFromBottom).");
                 sb.AppendLine("position=" + Position);
                 sb.AppendLine("# 화면 가장자리로부터의 여백(px)");
                 sb.AppendLine("marginX=" + MarginX.ToString(inv));
@@ -125,6 +134,10 @@ namespace PearNowPlaying
                 sb.AppendLine("panelWidth=" + PanelWidth.ToString(inv));
                 sb.AppendLine("# 표시할 모니터 번호 (0 = 주 모니터)");
                 sb.AppendLine("monitor=" + Monitor.ToString(inv));
+                sb.AppendLine("# 끌어서 놓은 위치: 모니터 왼쪽에서 customX(px), 위(customFromBottom=false) 또는 아래에서 customY(px)");
+                sb.AppendLine("customX=" + CustomX.ToString(inv));
+                sb.AppendLine("customY=" + CustomY.ToString(inv));
+                sb.AppendLine("customFromBottom=" + B(CustomFromBottom));
                 sb.AppendLine("# 곡이 바뀌었을 때 표시하는 시간(초)");
                 sb.AppendLine("showSeconds=" + ShowSeconds.ToString("0.##", inv));
                 sb.AppendLine("# 불투명도 (0.2 ~ 1.0)");
@@ -142,7 +155,7 @@ namespace PearNowPlaying
                 sb.AppendLine("# 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다.");
                 sb.AppendLine("lyricsOffsetMs=" + LyricsOffsetMs.ToString(inv));
                 sb.AppendLine("lyricsServer=" + LyricsServer);
-                sb.AppendLine("# YouTube Music 가사를 먼저 찾고, 실패하면 LRCLIB로 찾기 (Pear Desktop의 YTMusic 가사 제공자와 같은 방식)");
+                sb.AppendLine("# YouTube Music 가사를 먼저 찾고, 실패하면 LRCLIB로 찾기 (Pear Desktop의 YTMusic 가사 제공자와 같은 방식). 메뉴에는 없는 설정입니다.");
                 sb.AppendLine("ytmLyrics=" + B(YtmLyrics));
                 sb.AppendLine("# YouTube Music 가사 중계 서버 (Pear Desktop이 쓰는 외부 서버)");
                 sb.AppendLine("ytmLyricsProxy=" + YtmLyricsProxy);

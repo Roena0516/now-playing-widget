@@ -11,9 +11,14 @@ struct Settings: Codable {
     var scale: Double = 1
     var panelWidth: Double = 420
     var monitor = 0
+    /// position "Custom": where the widget was dragged, in points from the visible frame's left edge and from its
+    /// top or bottom edge
+    var customX: Double = 24
+    var customY: Double = 24
+    var customFromBottom = true
     var showSeconds: Double = 6
     var opacity: Double = 0.92
-    var alwaysShow = false
+    var alwaysShow = true
     var showLyrics = true
     var lyricsOffsetMs: Double = 300
     var ytmLyrics = true
@@ -28,6 +33,7 @@ struct Settings: Codable {
         host = try value(.host, host); port = try value(.port, port); position = try value(.position, position)
         marginX = try value(.marginX, marginX); marginY = try value(.marginY, marginY)
         scale = try value(.scale, scale); panelWidth = try value(.panelWidth, panelWidth); monitor = try value(.monitor, monitor)
+        customX = try value(.customX, customX); customY = try value(.customY, customY); customFromBottom = try value(.customFromBottom, customFromBottom)
         showSeconds = try value(.showSeconds, showSeconds); opacity = try value(.opacity, opacity)
         alwaysShow = try value(.alwaysShow, alwaysShow); showLyrics = try value(.showLyrics, showLyrics)
         lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
@@ -41,7 +47,8 @@ struct Settings: Codable {
         guard let data = try? Data(contentsOf: file), var settings = try? JSONDecoder().decode(Settings.self, from: data),
               (1...65535).contains(settings.port), settings.host == "127.0.0.1" || settings.host == "localhost",
               (0.5...3).contains(settings.scale), (260...800).contains(settings.panelWidth),
-              (0.1...1).contains(settings.opacity), (1...3600).contains(settings.showSeconds), settings.marginX.isFinite, settings.marginY.isFinite else { return Settings() }
+              (0.1...1).contains(settings.opacity), (1...3600).contains(settings.showSeconds), settings.marginX.isFinite, settings.marginY.isFinite,
+              settings.customX.isFinite, settings.customY.isFinite else { return Settings() }
         // the lyric servers only make sense over HTTPS; a typo falls back to the default instead of breaking lookups
         if URL(string: settings.ytmLyricsProxy)?.scheme != "https" { settings.ytmLyricsProxy = YTMusicProvider.defaultProxy }
         if URL(string: settings.lyricsServer)?.scheme != "https" { settings.lyricsServer = "https://lrclib.net" }
