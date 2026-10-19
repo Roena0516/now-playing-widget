@@ -105,7 +105,7 @@ namespace PearNowPlaying
             moveItem = new ToolStripMenuItem("위젯 끌어서 옮기기", null, (s, e) => SetMoveMode(!moveMode));
             titleMenu = new ToolStripMenuItem("영상 곡 제목");
             titleMenu.DropDownItems.Add(new ToolStripMenuItem("곡 제목", null, (s, e) => SetVideoTitle(false)) { Tag = false });
-            titleMenu.DropDownItems.Add(new ToolStripMenuItem("영상 제목 (Discord 상태와 같음)", null, (s, e) => SetVideoTitle(true)) { Tag = true });
+            titleMenu.DropDownItems.Add(new ToolStripMenuItem("영상 제목", null, (s, e) => SetVideoTitle(true)) { Tag = true });
 
             // widget (song card, where and how big) and lyrics settings live in separate submenus
             var widgetMenu = new ToolStripMenuItem("위젯");

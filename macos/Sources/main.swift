@@ -152,7 +152,7 @@ import CoreText
         add(widget, "곡 정보 계속 표시", #selector(togglePinned), state: client.settings.alwaysShow)
         let titles = NSMenu()
         add(titles, "곡 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle != "video", represented: "song")
-        add(titles, "영상 제목 (Discord 상태와 같음)", #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
+        add(titles, "영상 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
         submenu(widget, "영상 곡 제목", titles)
         // one submenu per screen: whether it has a widget, and where on it (like the Windows version)
         let monitors = NSMenu()
