@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Pear Now Playing")]
 [assembly: AssemblyProduct("Pear Now Playing")]
 [assembly: AssemblyDescription("Pear Desktop(YouTube Music) 재생 곡을 화면 위에 표시")]
-[assembly: AssemblyVersion("1.8.4.0")]
-[assembly: AssemblyFileVersion("1.8.4.0")]
+[assembly: AssemblyVersion("1.8.5.0")]
+[assembly: AssemblyFileVersion("1.8.5.0")]
 
 namespace PearNowPlaying
 {
