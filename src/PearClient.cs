@@ -182,6 +182,9 @@ namespace PearNowPlaying
             {
                 ws.Options.Proxy = null;
                 ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+                // Pear 3.12+ reads the token from the query and closes with 1008 otherwise; 3.11 checks a bearer
+                // header on the upgrade request and ignores the query. Send both.
+                if (!string.IsNullOrEmpty(token)) ws.Options.SetRequestHeader("Authorization", "Bearer " + token);
                 socket = ws;
                 var uri = new Uri(cfg.BaseWs + "/api/v1/ws?token=" + Uri.EscapeDataString(token ?? ""));
                 try { await ws.ConnectAsync(uri, ct); }

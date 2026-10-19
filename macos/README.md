@@ -11,7 +11,9 @@
 open 'macos/build/Pear Now Playing.app'
 ```
 
-기본 빌드는 현재 Mac의 아키텍처(Apple Silicon 또는 Intel)에 맞춰 만들어집니다. `./macos/build.sh --universal`로 빌드하면 두 아키텍처를 모두 담은 앱이 만들어집니다. `--dmg`를 함께 붙이면 앱과 `Applications` 폴더 바로 가기가 들어 있는 설치용 디스크 이미지(`macos/build/PearNowPlaying-macOS.dmg`)도 만들어집니다. 릴리스에는 `./macos/build.sh --universal --dmg`로 만든 DMG 파일을 올립니다. 빌드 결과는 `macos/build/Pear Now Playing.app`에 생성되고, 원하는 Applications 폴더로 복사해서 사용할 수 있습니다. 앱에는 개발용 ad-hoc 서명만 되어 있으며, Apple의 공증은 받지 않았습니다.
+기본 빌드는 현재 Mac의 아키텍처(Apple Silicon 또는 Intel)에 맞춰 만들어집니다. `./macos/build.sh --universal`로 빌드하면 두 아키텍처를 모두 담은 앱이 만들어집니다. `--dmg`를 함께 붙이면 설치용 디스크 이미지(`macos/build/PearNowPlaying-macOS.dmg`)도 만들어집니다. 이 DMG를 열면 앱 아이콘과 `Applications` 폴더 바로 가기가 화살표 배경 위에 나란히 표시됩니다. DMG 창의 모양은 [`dmgbuild`](https://github.com/dmgbuild/dmgbuild)로 만들며, 처음 `--dmg`로 빌드할 때 `macos/build/dmg-venv`에 설치되므로 그때는 인터넷 연결이 필요합니다. 릴리스에는 `./macos/build.sh --universal --dmg`로 만든 DMG 파일을 올립니다.
+
+앱 아이콘(`macos/Resources/AppIcon.icns`)과 DMG 배경(`macos/Resources/dmg-background.tiff`)은 `xcrun swift macos/Tools/make-art.swift`로 그립니다. 그린 결과 파일은 저장소에 들어 있으므로, 디자인을 바꿀 때만 이 스크립트를 실행하면 됩니다. 빌드 결과는 `macos/build/Pear Now Playing.app`에 생성되고, 원하는 Applications 폴더로 복사해서 사용할 수 있습니다. 앱에는 개발용 ad-hoc 서명만 되어 있으며, Apple의 공증은 받지 않았습니다.
 
 1. Pear Desktop 또는 호환되는 YouTube Music 데스크톱 앱을 실행합니다.
 2. **플러그인 → API 서버 [베타]**를 켭니다. 호스트는 `127.0.0.1`, 포트는 `26538`으로 설정하는 것을 권장합니다.
@@ -126,7 +128,7 @@ Windows 버전의 `src/Theme.cs`, `src/CardRenderer.cs`, `src/LyricsView.cs`에 
 python3 macos/Tests/mock_pear.py
 ```
 
-`--lyrics-tests`는 커버곡의 제목과 설명란을 해석한 결과가 Windows 버전(C#)과 같은지 확인하고, YouTube Music, 공식 음원, 원곡, LRCLIB로 이어지는 검색 순서와 캐시 규칙을 모의 응답으로 검증합니다. `--self-test`는 LRC 파서의 다중 타임스탬프, 오프셋, 빈 줄, 현재 가사 위치를 계산하는 기능과 플레이어 상태 및 탐색 처리를 검증합니다. `mock_pear.py`는 Python 표준 라이브러리로 만든 모의 Pear 서버를 띄워서, 만료된 토큰으로 WebSocket 연결이 거절되는 상황, 재인증, 첫 곡·위치·재생 이벤트, Bearer 토큰을 사용하는 재생 제어, 다음 곡 조회, 토큰 파일 권한을 검증합니다. 이 테스트들은 외부 서비스나 로그인된 음악 계정을 사용하지 않습니다. 다만 모의 서버 테스트를 실행하려면 로컬 TCP 포트를 열 수 있는 권한이 필요합니다.
+`--lyrics-tests`는 커버곡의 제목과 설명란을 해석한 결과가 Windows 버전(C#)과 같은지 확인하고, YouTube Music, 공식 음원, 원곡, LRCLIB로 이어지는 검색 순서와 캐시 규칙을 모의 응답으로 검증합니다. `--self-test`는 LRC 파서의 다중 타임스탬프, 오프셋, 빈 줄, 현재 가사 위치를 계산하는 기능과 플레이어 상태 및 탐색 처리를 검증합니다. `mock_pear.py`는 Python 표준 라이브러리로 만든 모의 Pear 서버를 띄웁니다. 이 서버는 WebSocket 토큰을 연결 요청의 헤더로 확인하는 Pear 3.11 방식과, 쿼리 파라미터로 확인하는 Pear 3.12 방식을 차례로 흉내 내며, 만료된 토큰으로 WebSocket 연결이 거절되는 상황, 재인증, 첫 곡·위치·재생 이벤트, Bearer 토큰을 사용하는 재생 제어, 다음 곡 조회, 토큰 파일 권한을 검증합니다. 이 테스트들은 외부 서비스나 로그인된 음악 계정을 사용하지 않습니다. 다만 모의 서버 테스트를 실행하려면 로컬 TCP 포트를 열 수 있는 권한이 필요합니다.
 
 GitHub Actions의 `macOS` 워크플로는 universal 앱과 DMG 파일을 빌드하고 위의 테스트를 실행한 뒤, DMG 파일을 아티팩트로 올립니다. GUI 동작, 실제 Pear 권한 확인 창, 전체 화면 위의 배치는 Mac에서 직접 확인해야 합니다.
 

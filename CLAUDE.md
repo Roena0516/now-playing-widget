@@ -4,14 +4,15 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 합니다체)
-- 버전: Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.5.1.0)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`과 `macos/build.sh`의 Info.plist에 적혀 있습니다.
+- 버전: Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.5.2.0)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`과 `macos/build.sh`의 Info.plist에 적혀 있습니다.
 - macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`).
 
 ## 작업 방식
 
 - 사용자(로에나)는 대화할 때 반말 한국어(임/함체)로 짧고 직접적인 답을 받기를 선호합니다.
 - 커밋, 푸시, 릴리스 업로드는 사용자가 직접 합니다. Windows 릴리스 zip에는 `PearNowPlaying.exe`, `README.md`, `PretendardJP-OFL.txt`를 `PearNowPlaying/` 폴더째 넣습니다.
-- macOS 릴리스는 `./macos/build.sh --universal --dmg`로 만든 `macos/build/PearNowPlaying-macOS.dmg`를 올립니다(arm64+x86_64, 앱과 `Applications` 바로 가기가 들어 있습니다). zip은 올리지 않습니다. 앱은 ad-hoc 서명만 하고 공증은 받지 않습니다.
+- macOS 릴리스는 `./macos/build.sh --universal --dmg`로 만든 `macos/build/PearNowPlaying-macOS.dmg`를 올립니다(arm64+x86_64). zip은 올리지 않습니다. 앱은 ad-hoc 서명만 하고 공증은 받지 않습니다.
+- DMG 창의 모양(창 크기, 아이콘 위치, 배경)은 `macos/dmg-settings.py`에 있고, `dmgbuild`(1.6.7로 고정, 처음 `--dmg`로 빌드할 때 `macos/build/dmg-venv`에 설치됨)가 Finder 없이 만듭니다. 앱 아이콘(`macos/Resources/AppIcon.icns`)과 DMG 배경(`macos/Resources/dmg-background.tiff`)은 `xcrun swift macos/Tools/make-art.swift`로 다시 그릴 수 있으며, 결과 파일은 커밋되어 있습니다. 배경의 아이콘 위치를 바꾸면 `dmg-settings.py`의 `icon_locations`도 함께 바꿉니다.
 - 커밋 메시지는 한국어로 짧게 씁니다(예: "트레이 가사 다시 찾기에 결과 표시").
 - 릴리스 본문은 합니다체로 씁니다.
 - 루트에 있는 `PearNowPlaying.exe`, `_capture/`, `*.zip`은 커밋하지 않습니다(`.gitignore`).
@@ -116,5 +117,6 @@ Windows:
 - 새로운 외부 서버와 통신하게 되면 README의 "통신하는 곳" 항목에 추가합니다.
 - 외부 요청은 줄이는 방향으로 작업합니다. LRCLIB는 자주 503 응답을 보내므로, 요청 수를 늘리는 변경은 신중하게 결정합니다.
 - 실패한 결과를 "가사 없음"으로 캐시하지 않습니다. 일시적인 오류가 영구적인 "없음"으로 남으면 안 됩니다.
+- WebSocket(`/api/v1/ws`) 토큰은 `?token=` 쿼리 파라미터와 `Authorization: Bearer` 헤더로 **함께** 보냅니다. Pear 3.11은 연결 요청의 헤더만 확인해서 401로 거절하고, 3.12(#3854 이후)는 쿼리만 확인해서 1008로 연결을 닫습니다. 어느 한쪽만 보내면 다른 버전에서 연결되지 않습니다(1.5.1 맥 버전이 헤더만 보내서 3.12에서 "Pear 연결 실패 (57)"이 반복되었습니다). 모의 서버 테스트(`macos/Tests/mock_pear.py`)는 두 방식을 모두 확인합니다.
 - HttpClient의 타임아웃도 TaskCanceledException을 던집니다. 실제로 취소된 것인지는 `catch … when (ct.IsCancellationRequested)`로 구분합니다. 예전에 이 구분을 하지 않아서 가사 상태가 "찾는 중"에서 멈춘 적이 있습니다.
 - 정보 카드("가사 다시 찾기" 결과 등)가 표시되는 동안에는 곡 카드를 다시 그리지 않습니다. 계속 표시 모드에서는 정보 카드가 3.5초 뒤에 곡 카드로 돌아갑니다. 예전에는 이 두 동작이 서로 꼬여서 곡 카드가 사라지는 버그가 있었습니다. macOS 버전도 같은 방식으로 동작합니다.

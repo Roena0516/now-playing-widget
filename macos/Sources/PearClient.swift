@@ -207,11 +207,15 @@ import Combine
 
 }
 
-// Pear versions using Hono JWT middleware authenticate the WebSocket HTTP upgrade
-// with a bearer header. A token query parameter alone is not accepted.
+// Pear versions differ in where they look for the WebSocket token: some check a bearer header on the
+// HTTP upgrade (Hono JWT middleware), others (3.12) only the `token` query parameter and close the socket
+// with 1008 otherwise. Send both, as the Windows version sends the query parameter.
 func makeWebSocketRequest(url: URL, token: String?) -> URLRequest {
-    var request = URLRequest(url: url)
-    if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+    guard let token else { return URLRequest(url: url) }
+    var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+    components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "token", value: token)]
+    var request = URLRequest(url: components.url ?? url)
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     return request
 }
 

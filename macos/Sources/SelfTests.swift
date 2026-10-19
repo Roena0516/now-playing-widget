@@ -21,7 +21,8 @@ import CoreGraphics
     client.stop()
     let socketRequest = makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: "test-token")
     precondition(socketRequest.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
-    precondition(socketRequest.url?.query == nil)
+    precondition(socketRequest.url?.query == "token=test-token", "Pear 3.12 reads the WebSocket token from the query only")
+    precondition(makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: nil).url?.query == nil)
     testPlayerSetup()
     testOverlayPlacement()
     // a config.json written before the lyric source settings existed keeps the user's values

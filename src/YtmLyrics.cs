@@ -62,7 +62,7 @@ namespace PearNowPlaying
         {
             // redirects are followed by hand: a 301/302 would otherwise turn the POST into a GET
             http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(12) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.5.1");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/1.5.2");
             http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
         }
 
