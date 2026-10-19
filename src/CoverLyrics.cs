@@ -311,7 +311,7 @@ namespace PearNowPlaying
         }
 
         /// <summary>
-        /// Up to three video IDs from the description, the likeliest original first: links on lines that say
+        /// Up to six video IDs from the description (each costs a request only if the ones before it were no use), the likeliest original first: links on lines that say
         /// "原曲 / 本家 / original / 원곡 …", then other links in order. Links on off-vocal / mix / illust lines last.
         /// </summary>
         public static List<string> OriginalCandidates(VideoDescription desc, string ownId)
@@ -347,7 +347,7 @@ namespace PearNowPlaying
                 .GroupBy(t => t.Item1).Select(g => g.OrderByDescending(t => t.Item2).ThenBy(t => t.Item3).First())
                 .OrderByDescending(t => t.Item2).ThenBy(t => t.Item3)
                 .Where(t => t.Item2 > -3)
-                .Select(t => t.Item1).Take(3).ToList();
+                .Select(t => t.Item1).Take(6).ToList();
         }
     }
 }

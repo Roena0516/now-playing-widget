@@ -78,7 +78,8 @@ struct LyricRecord: Decodable {
     }
 
     /// `titleTolerance`: allowed length difference when only the title matches (covers looked up by title use 10s).
-    func find(_ song: Song, titleTolerance: Double = 3) async throws -> LyricsLookup {
+    /// `titleOnly`: also accept a result whose artist differs if the title and length match.
+    func find(_ song: Song, titleTolerance: Double = 3, titleOnly: Bool = true) async throws -> LyricsLookup {
         try Task.checkCancellation()
         var best: LyricRecord?
         var how = "not found"
@@ -131,7 +132,7 @@ struct LyricRecord: Decodable {
         }
 
         // 3) artist written differently (e.g. "Kenshi Yonezu" vs "米津玄師"): same title and nearly the same length
-        if best == nil, let match = Self.pickByTitle(seen, song: song, tolerance: titleTolerance) { best = match; how = "title match (\(match.artistName ?? ""))" }
+        if best == nil, titleOnly, let match = Self.pickByTitle(seen, song: song, tolerance: titleTolerance) { best = match; how = "title match (\(match.artistName ?? ""))" }
         if best == nil, let lastError { throw lastError }
         try Task.checkCancellation()
 
@@ -149,12 +150,19 @@ struct LyricRecord: Decodable {
         }
         return result
     }
+    /// The result by the same artist and of about the same length. Pear's tags count as artist names too (they
+    /// often hold the artist's other spellings), but a tag only vouches for the artist: tags that are the song or
+    /// album name are left out, and a result matched through a tag must also have the song's title. Otherwise
+    /// "LAMIA" by BlackY (tagged "LAMIA") took a song by the rapper Lamia. Same as src/Lyrics.cs.
     static func pick(_ records: [LyricRecord], song: Song) -> LyricRecord? {
         let ours = artistVariants(song.artist)
-        let tags = song.tags.map { $0.lowercased() }.filter { !ours.contains($0) }
+        let names = Set([song.title, song.alternativeTitle, cleanTitle(song.title), cleanTitle(song.alternativeTitle), song.album].map(norm).filter { !$0.isEmpty })
+        let tags = song.tags.map { $0.lowercased() }.filter { !ours.contains($0) && !names.contains(norm($0)) }
         var candidates = records.filter { record in
             let theirs = artistVariants(record.artistName ?? "")
-            return (ours + tags).contains { a in theirs.contains { b in jaroWinkler(a, b) > 0.9 } }
+            if ours.contains(where: { a in theirs.contains { b in jaroWinkler(a, b) > 0.9 } }) { return true }
+            guard !tags.isEmpty, titleFits(record.trackName ?? "", song) else { return false }
+            return tags.contains { a in theirs.contains { b in jaroWinkler(a, b) > 0.9 } }
         }
         if song.duration > 0 {
             candidates = candidates.filter { abs(($0.duration ?? 0) - song.duration) <= 15 }
@@ -162,6 +170,10 @@ struct LyricRecord: Decodable {
         }
         // prefer entries that actually have timestamps
         return candidates.first(where: \.hasSynced) ?? candidates.first { $0.instrumental == true }
+    }
+    /// A result's track name is this song (its title, alternative title or cleaned-up title).
+    static func titleFits(_ trackName: String, _ song: Song) -> Bool {
+        [song.title, song.alternativeTitle, cleanTitle(song.title)].filter { !$0.trimmed.isEmpty }.contains { CoverLyrics.sameTitle(trackName, $0) }
     }
     /// Fallback when the artist name doesn't match: the title must be the same (ignoring case, spaces
     /// and punctuation) and the length within `tolerance` seconds, which together are very unlikely to collide.

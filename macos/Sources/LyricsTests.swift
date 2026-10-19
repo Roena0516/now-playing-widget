@@ -25,6 +25,16 @@ import Foundation
     precondition(LyricsProvider.pickByTitle([tooFar], song: song) == nil, "Different edits must not match the three-second fallback")
     let wrongArtist = LyricRecord(trackName: "Other", artistName: "Unrelated", duration: 202, instrumental: false, syncedLyrics: "[00:01]test")
     precondition(LyricsProvider.pick([wrongArtist], song: song) == nil)
+    // a tag only vouches for the artist: "LAMIA" by BlackY (tagged with its own title) must not take Lamia's song
+    let lamia = Song(["title": "LAMIA", "alternativeTitle": "LAMIA", "artist": "BlackY", "album": "ONGEKI Sound Collection 06",
+                      "tags": ["BlackY", "ブラッキー", "ONGEKI Sound Collection 06", "LAMIA"], "songDuration": 150])
+    let rapper = LyricRecord(trackName: "MALLLOPPO (feat. SASV)", artistName: "Lamia", duration: 146, instrumental: false, syncedLyrics: "[00:10.85]Ah, ah, sembra GTA V")
+    precondition(LyricsProvider.pick([rapper], song: lamia) == nil, "a tag that is the title is not an artist name")
+    var tagged = lamia; tagged.tags = ["Lamia"]
+    precondition(LyricsProvider.pick([rapper], song: tagged) == nil, "a match through a tag needs the song's title")
+    let kana = Song(["title": "LAMIA", "artist": "ブラッキー", "tags": ["BlackY"], "songDuration": 150])
+    let byTag = LyricRecord(trackName: "LAMIA", artistName: "BlackY", duration: 150, instrumental: false, syncedLyrics: "[00:01.00]x")
+    precondition(LyricsProvider.pick([byTag], song: kana) != nil, "another spelling of the artist in the tags still matches")
     let exactDuration = LyricRecord(trackName: song.title, artistName: "SAWTOWNE", duration: 202, instrumental: false, syncedLyrics: "[00:01]closest")
     let closeDuration = LyricRecord(trackName: song.title, artistName: "SAWTOWNE", duration: 211, instrumental: false, syncedLyrics: "[00:01]farther")
     precondition(LyricsProvider.pick([closeDuration, exactDuration], song: song)?.syncedLyrics == exactDuration.syncedLyrics)
@@ -202,6 +212,25 @@ import Foundation
         guard case .synced(_, "LRCLIB · 원곡 검색") = try await byTitle.find(unlinked) else { preconditionFailure("Cover without a link must fall back to the title") }
         precondition(queries.contains { $0.contains("track_name=%E3%83%AF") || $0.contains("track_name=ワ") })
 
+        // the original is linked but 13s off, and LRCLIB has another song of the same name and the cover's exact
+        // length: no lyrics, rather than that song's (a VoiSona cover of JUNKY's メランコリック picked ナノ's)
+        var homonymAsked = 0
+        let homonym = LyricsFinder(lrclib: lrclib { url in
+            homonymAsked += 1
+            if url.path.hasSuffix("/get") { return (404, "") }
+            return (200, #"[{"trackName":"メランコリック","artistName":"ナノ","duration":233,"syncedLyrics":"[00:01.00]another song"}]"#)
+        }, ytm: YTMusicProvider(transport: { request in
+            let body = FakeYouTube.body(request)
+            if request.url!.path.hasSuffix("/player") { return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "Vocal : 雨衣\nご本家様 → https://youtu.be/junkyMelan1"]]) }
+            switch body["videoId"] as? String ?? "" {
+            case "junkyMelan1": return try FakeYouTube.ok(request, FakeYouTube.next("junkyMelan1", title: "メランコリック / Junky feat.鏡音リン", artist: "JUNKY", length: "3:40", type: "MUSIC_VIDEO_TYPE_OMV"))
+            case let id: return try FakeYouTube.ok(request, FakeYouTube.next(id))
+            }
+        }))
+        let voisona = Song(title: "「メランコリック」covered by 雨衣", artist: "VoiSona公式", videoId: "voisonaMel1", mediaType: "USER_GENERATED_CONTENT", duration: 233)
+        guard case .notFound = try await homonym.find(voisona) else { preconditionFailure("a same-name song must not stand in for a known original") }
+        precondition(homonymAsked > 0, "the cover's own LRCLIB search still runs, with artist matches only")
+
         // LRCLIB busy while looking for the original: the lookup fails (retried later), nothing cached
         var busyCalls = 0
         let busy = LyricsFinder(lrclib: lrclib { _ in busyCalls += 1; return (503, "") }, ytm: YTMusicProvider(transport: { request in
@@ -262,6 +291,9 @@ import Foundation
         try Data(#"{"version":1,"videoId":"oldVideo001","title":"","artist":"","source":"LRCLIB","instrumental":false,"savedAt":"2000-01-01T00:00:00Z","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
             .write(to: dir.appendingPathComponent("oldVideo001.json"))
         precondition(small.load("oldVideo001") == nil && !FileManager.default.fileExists(atPath: dir.appendingPathComponent("oldVideo001.json").path), "Expired entries are dropped")
+        try Data(#"{"version":1,"videoId":"oldFormat01","title":"","artist":"","source":"LRCLIB · 원곡 검색","instrumental":false,"savedAt":"\#(ISO8601DateFormatter().string(from: Date()))","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
+            .write(to: dir.appendingPathComponent("oldFormat01.json"))
+        precondition(small.load("oldFormat01") == nil, "entries saved by 1.6–1.7 (format 1) are looked up again")
         small.save(Song(title: "x", artist: "y", videoId: "../../evil1"), .instrumental)
         precondition(small.load("../../evil1") == nil, "Invalid video IDs are not used as file names")
         for i in 0..<6 { small.save(Song(title: "t", artist: "a", videoId: "prune00000\(i)"), .synced([LyricLine(id: 0, time: 1, text: "x")], source: "LRCLIB")) }

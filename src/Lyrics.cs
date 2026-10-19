@@ -220,7 +220,9 @@ namespace PearNowPlaying
             }
 
             // 3) LRCLIB
-            var result = await FindLrclib(song, ct);
+            // a cover's own title can only match LRCLIB by title (the uploader isn't the original artist), which picks
+            // songs that merely share the name: covers take artist matches only
+            var result = await FindLrclib(song, ct, 3, !CoverLyrics.MayBeCover(song));
             // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
             if (!result.Failed && (result.HasSynced || result.Instrumental || (cacheMisses && !ytmError)))
                 Keep(key, song, result);
@@ -243,6 +245,7 @@ namespace PearNowPlaying
             try
             {
                 var desc = description != null ? await description : null;
+                bool originalTooLong = false;
                 HashSet<string> hinted;
                 var ids = CoverLyrics.OriginalCandidates(desc, song.VideoId, out hinted);
                 if (ids.Count == 0) Log.Info("cover: no YouTube links in the description of " + song.VideoId);
@@ -262,6 +265,7 @@ namespace PearNowPlaying
                     if (diff > CoverLyrics.MaxLengthDiff)
                     {
                         Log.Info("cover: candidate " + label + " differs from the cover by " + (int)diff + "s, skipped");
+                        originalTooLong = true;
                         continue;
                     }
                     if (orig.Lyrics != null && orig.Lyrics.HasSynced)
@@ -301,6 +305,13 @@ namespace PearNowPlaying
                     break;   // the first usable link decides; don't wander through unrelated links
                 }
 
+                // The original is known but its length doesn't fit: guessing from the title would only find that
+                // original again (out of sync) or another song with the same name. No lyrics beats wrong lyrics.
+                if (originalTooLong)
+                {
+                    Log.Info("cover: the original differs in length, no lyrics rather than a title guess: " + song.Title);
+                    return null;
+                }
                 // no usable link: work out the song from the title / description and look it up on LRCLIB
                 return await FromSearch(song, desc, ct);
             }
@@ -336,7 +347,8 @@ namespace PearNowPlaying
             return l.Failed ? l : null;   // LRCLIB busy: let the caller retry later
         }
 
-        async Task<LyricsResult> FindLrclib(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3)
+        /// <param name="titleOnly">also accept a result whose artist differs if the title and length match</param>
+        async Task<LyricsResult> FindLrclib(SongInfo song, CancellationToken ct, double titleMatchTolerance = 3, bool titleOnly = true)
         {
             LyricsResult result = LyricsResult.None;
             string how = "not found";
@@ -399,7 +411,7 @@ namespace PearNowPlaying
                 }
 
                 // 3) artist written differently (e.g. "Kenshi Yonezu" vs "米津玄師"): same title and nearly the same length
-                if (best == null)
+                if (best == null && titleOnly)
                 {
                     best = PickByTitle(seen, song, titleMatchTolerance);
                     if (best != null) how = "title match (" + Str(best, "artistName") + ")";
@@ -564,18 +576,28 @@ namespace PearNowPlaying
             }
         }
 
+        /// <summary>
+        /// The result by the same artist and of about the same length. Pear's tags count as artist names too (they
+        /// often hold the artist's other spellings), but a tag only vouches for the artist: tags that are the song or
+        /// album name are left out, and a result matched through a tag must also have the song's title. Otherwise
+        /// "LAMIA" by BlackY (tagged "LAMIA") took a song by the rapper Lamia.
+        /// </summary>
         static IDictionary<string, object> Pick(List<IDictionary<string, object>> items, SongInfo song)
         {
             var ours = ArtistVariants(song.Artist);
-            var tags = (song.Tags ?? new List<string>()).Select(t => t.ToLowerInvariant()).Where(t => !ours.Contains(t)).ToList();
+            var names = new[] { song.Title, song.AltTitle, CleanTitle(song.Title), CleanTitle(song.AltTitle), song.Album }
+                .Select(Norm).Where(n => n.Length > 0).ToList();
+            var tags = (song.Tags ?? new List<string>()).Select(t => t.ToLowerInvariant())
+                .Where(t => !ours.Contains(t) && !names.Contains(Norm(t))).ToList();
             var candidates = new List<IDictionary<string, object>>();
             foreach (var it in items)
             {
                 var theirs = ArtistVariants(Str(it, "artistName"));
                 double ratio = 0;
                 foreach (var a in ours) foreach (var b in theirs) ratio = Math.Max(ratio, JaroWinkler(a, b));
-                if (ratio <= 0.9 && tags.Count > 0)
-                    foreach (var a in tags) foreach (var b in theirs) ratio = Math.Max(ratio, JaroWinkler(a, b));
+                if (ratio > 0.9) { candidates.Add(it); continue; }
+                if (tags.Count == 0 || !TitleFits(Str(it, "trackName"), song)) continue;
+                foreach (var a in tags) foreach (var b in theirs) ratio = Math.Max(ratio, JaroWinkler(a, b));
                 if (ratio > 0.9) candidates.Add(it);
             }
             if (song.Duration > 0)
@@ -584,6 +606,13 @@ namespace PearNowPlaying
             // prefer entries that actually have timestamps
             return candidates.FirstOrDefault(c => !string.IsNullOrEmpty(Str(c, "syncedLyrics")))
                 ?? candidates.FirstOrDefault(c => Bool(c, "instrumental"));
+        }
+
+        /// <summary>A result's track name is this song (its title, alternative title or cleaned-up title).</summary>
+        static bool TitleFits(string trackName, SongInfo song)
+        {
+            return new[] { song.Title, song.AltTitle, CleanTitle(song.Title) }.Where(t => !string.IsNullOrWhiteSpace(t))
+                .Any(t => CoverLyrics.SameTitle(trackName, t));
         }
 
         /// <summary>

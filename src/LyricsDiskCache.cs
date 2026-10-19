@@ -21,6 +21,11 @@ namespace PearNowPlaying
         public static readonly string DefaultDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PearNowPlaying", "lyrics-cache");
         public static readonly TimeSpan MaxAge = TimeSpan.FromDays(90);
+        /// <summary>
+        /// Entries of older formats are dropped. 2 (1.7.1): 1.6–1.7 could save a same-name song's lyrics for a cover
+        /// whose original didn't fit (see LyricsProvider.FromOriginal), so their entries are looked up again once.
+        /// </summary>
+        const int FormatVersion = 2;
         const string DateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
         static readonly Regex VideoId = new Regex(@"^[A-Za-z0-9_-]{11}$");
 
@@ -58,7 +63,9 @@ namespace PearNowPlaying
                     if (!File.Exists(path)) return null;
                     var d = json.DeserializeObject(File.ReadAllText(path, Encoding.UTF8)) as IDictionary<string, object>;
                     DateTime saved;
-                    if (d == null || !DateTime.TryParseExact(Str(d, "savedAt"), DateFormat, CultureInfo.InvariantCulture,
+                    object ver;
+                    int version = d != null && d.TryGetValue("version", out ver) && ver is int ? (int)ver : 0;
+                    if (d == null || version < FormatVersion || !DateTime.TryParseExact(Str(d, "savedAt"), DateFormat, CultureInfo.InvariantCulture,
                                                              DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out saved)
                         || DateTime.UtcNow - saved > MaxAge)
                     {
@@ -94,7 +101,7 @@ namespace PearNowPlaying
             if (path == null || !Keeps(r)) return;
             var entry = new Dictionary<string, object>
             {
-                { "version", 1 },
+                { "version", FormatVersion },
                 { "videoId", song.VideoId },
                 { "title", song.Title ?? "" },
                 { "artist", song.Artist ?? "" },

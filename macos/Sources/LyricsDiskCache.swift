@@ -8,10 +8,13 @@ import Foundation
     nonisolated static let defaultDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("PearNowPlaying-macOS/lyrics")
     static let maxAge: TimeInterval = 90 * 86400
+    /// Entries of older formats are dropped. 2 (1.7.1): 1.6–1.7 could save a same-name song's lyrics for a cover
+    /// whose original didn't fit (see LyricsFinder.fromOriginal), so their entries are looked up again once.
+    nonisolated static let formatVersion = 2
 
     private struct Entry: Codable {
         struct Line: Codable { var timeMs: Int; var text: String }
-        var version = 1
+        var version = LyricsDiskCache.formatVersion
         var videoId: String, title: String, artist: String, source: String
         var instrumental: Bool
         var savedAt: String
@@ -47,7 +50,7 @@ import Foundation
         guard let url = file(videoId), FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
             let entry = try JSONDecoder().decode(Entry.self, from: Data(contentsOf: url))
-            guard let saved = Self.dateFormat.date(from: entry.savedAt), Date().timeIntervalSince(saved) <= Self.maxAge,
+            guard entry.version >= Self.formatVersion, let saved = Self.dateFormat.date(from: entry.savedAt), Date().timeIntervalSince(saved) <= Self.maxAge,
                   entry.instrumental || !entry.lines.isEmpty else {
                 try? FileManager.default.removeItem(at: url); return nil
             }

@@ -92,8 +92,9 @@ struct LrclibFailed: LocalizedError {
             return keep(key, song, original)
         }
 
-        // 3) LRCLIB
-        var result = try await lrclib.find(song)
+        // 3) LRCLIB. A cover's own title can only match by title (the uploader isn't the original artist), which
+        // picks songs that merely share the name: covers take artist matches only.
+        var result = try await lrclib.find(song, titleOnly: !CoverLyrics.mayBeCover(song))
         if case .notFound = result, ytmPlain { result = .plainOnly }
         // a "not found" is only final when YouTube Music answered too; otherwise ask again next time
         if result.isFound { _ = keep(key, song, result) }
@@ -152,6 +153,7 @@ struct LrclibFailed: LocalizedError {
             let desc = await description?.value
             try Task.checkCancellation()
             let (ids, hinted) = CoverLyrics.originalCandidates(desc, ownId: song.videoId)
+            var originalTooLong = false
             if ids.isEmpty { log("INFO cover: no YouTube links in the description of \(song.videoId)") }
             for id in ids {
                 let orig = try await ytm.lookup(id, withLyrics: useYtm)
@@ -161,7 +163,7 @@ struct LrclibFailed: LocalizedError {
                 // links without an "原曲 / original" label are often the singer's other videos: the title must fit
                 if !hinted.contains(id) && !CoverLyrics.titleMatchesCover(song, orig) { log("INFO cover: candidate \(label) is a different song, skipped"); continue }
                 let diff = abs(orig.duration - song.duration)
-                if diff > CoverLyrics.maxLengthDiff { log("INFO cover: candidate \(label) differs from the cover by \(Int(diff))s, skipped"); continue }
+                if diff > CoverLyrics.maxLengthDiff { log("INFO cover: candidate \(label) differs from the cover by \(Int(diff))s, skipped"); originalTooLong = true; continue }
                 if !orig.lines.isEmpty {
                     log("INFO lyrics found via original \(label) on YouTube Music: \(song.artist) - \(song.title)")
                     return .synced(orig.lines, source: "YouTube Music · 원곡")
@@ -189,6 +191,12 @@ struct LrclibFailed: LocalizedError {
                 break   // the first usable link decides; don't wander through unrelated links
             }
 
+            // The original is known but its length doesn't fit: guessing from the title would only find that
+            // original again (out of sync) or another song with the same name. No lyrics beats wrong lyrics.
+            if originalTooLong {
+                log("INFO cover: the original differs in length, no lyrics rather than a title guess: \(song.title)")
+                return nil
+            }
             // no usable link: work out the song from the title / description and look it up on LRCLIB
             return try await fromSearch(song, desc)
         } catch {

@@ -281,7 +281,7 @@ enum CoverLyrics {
         return LyricsProvider.jaroWinkler(a, b) > 0.93
     }
 
-    /// Up to three video IDs from the description, the likeliest original first: links on lines that say
+    /// Up to six video IDs from the description (each costs a request only if the ones before it were no use), the likeliest original first: links on lines that say
     /// "原曲 / 本家 / original / 원곡 …", then other links in order. Links on off-vocal / mix / illust lines last.
     /// `hinted`: IDs whose line (or the line above) says 原曲 / 本家 / original / 원곡.
     static func originalCandidates(_ desc: VideoDescription?, ownId: String) -> (ids: [String], hinted: Set<String>) {
@@ -306,7 +306,7 @@ enum CoverLyrics {
             best[s.id] = s
         }
         let ids = best.values.sorted { $0.score != $1.score ? $0.score > $1.score : $0.order < $1.order }
-            .filter { $0.score > -3 }.prefix(3).map(\.id)
+            .filter { $0.score > -3 }.prefix(6).map(\.id)
         return (Array(ids), hinted)
     }
 }
