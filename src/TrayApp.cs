@@ -51,6 +51,7 @@ namespace PearNowPlaying
         // lyrics state
         LyricsResult lyrics;
         string lyricsKey;
+        string lyricsViewSong;      // the song whose lyrics the lyrics view last laid out
         CancellationTokenSource lyricsCts;
         CancellationTokenSource prefetchCts;
         bool lyricPaused;
@@ -335,7 +336,9 @@ namespace PearNowPlaying
             var layoutKey = lyricsKey + "|" + Scale.ToString("0.###") + "|" + PanelWidth;
             if (layoutKey != lyricsLayoutKey)
             {
-                lyricsView.SetLines(lyrics.Lines, Scale, PanelWidth);
+                // the next song's lyrics while the panel is open: scroll on from the last song's line
+                lyricsView.SetLines(lyrics.Lines, Scale, PanelWidth, lyricsWin.IsPresent && lyricsViewSong != null && lyricsViewSong != lyricsKey);
+                lyricsViewSong = lyricsKey;
                 lyricsLayoutKey = layoutKey;
                 force = true;
             }

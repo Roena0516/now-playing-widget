@@ -31,6 +31,7 @@ namespace PearNowPlaying
 
         readonly List<Entry> entries = new List<Entry>();
         int leadingPseudo;          // 1 when a "♪" line was added before the first lyric
+        int carried;                // lines kept from the previous song above this song's first line
         float s;
         int width, height, padX, padY, textX, textW;
         float gapY, viewportH, anchor;
@@ -42,14 +43,23 @@ namespace PearNowPlaying
 
         public int Width { get { return width; } }
         public int Height { get { return height; } }
-        public bool HasLines { get { return entries.Count > 0; } }
+        public bool HasLines { get { return entries.Count > carried; } }
         public bool Animating { get { return anim.IsRunning && anim.Elapsed.TotalMilliseconds < animMs; } }
 
-        /// <summary>Lay the song's lines out for the given panel width (in device pixels).</summary>
-        public void SetLines(List<LyricLine> lines, double scale, int panelWidth)
+        /// <summary>
+        /// Lay the song's lines out for the given panel width (in device pixels). With carryOver (the next song's
+        /// lyrics replacing the last song's while the panel stays open), the line that was current and the one before
+        /// it stay above the new first line, still highlighted, so the next SetCurrent scrolls on into the new song
+        /// instead of the list restarting at the top.
+        /// </summary>
+        public void SetLines(List<LyricLine> lines, double scale, int panelWidth, bool carryOver = false)
         {
+            var keep = new List<Entry>();
+            if (carryOver && current >= carried && (float)scale == s && panelWidth == width)
+                for (int i = Math.Max(carried, current - 1); i <= current; i++) keep.Add(entries[i]);
             entries.Clear();
             current = previous = -1;
+            carried = 0;
             anim.Reset();
             s = (float)scale;
             width = panelWidth;
@@ -85,17 +95,33 @@ namespace PearNowPlaying
                 }
             }
 
+            if (keep.Count > 0)
+            {
+                // the kept lines end one gap above the new first line
+                float y = -gapY;
+                for (int i = keep.Count - 1; i >= 0; i--) { y -= keep[i].H; keep[i].Y = y; y -= gapY; }
+                entries.InsertRange(0, keep);
+                carried = keep.Count;
+            }
+
             // viewport: a peek of the previous line, up to two lines for the current one, and what follows
             anchor = (float)Math.Round(lineHRef * 0.9f + gapY);
             viewportH = (float)Math.Round(anchor + lineHRef * 3 + gapY * 2);
             height = (int)Math.Ceiling(padY * 2 + viewportH);
+
+            if (carried > 0)
+            {
+                // still on the last song's line; the first SetCurrent glides from here
+                current = carried - 1;
+                scrollFrom = scrollTo = entries[current].Y - anchor;
+            }
         }
 
         /// <summary>Map an index from LyricsResult.IndexAt (-1 = before the first line) to a panel entry.</summary>
         public int EntryFor(int lyricIndex)
         {
-            if (entries.Count == 0) return -1;
-            int e = lyricIndex < 0 ? 0 : lyricIndex + leadingPseudo;
+            if (entries.Count == carried) return -1;
+            int e = carried + (lyricIndex < 0 ? 0 : lyricIndex + leadingPseudo);
             return Math.Max(0, Math.Min(entries.Count - 1, e));
         }
 
@@ -118,7 +144,7 @@ namespace PearNowPlaying
             scrollTo = target;
             previous = current;
             current = entry;
-            animMs = Math.Abs(entry - previous) > 2 ? JumpMs : ScrollMs;
+            animMs = Math.Abs(entry - previous) > 2 && previous >= carried ? JumpMs : ScrollMs;
             anim.Restart();
         }
 

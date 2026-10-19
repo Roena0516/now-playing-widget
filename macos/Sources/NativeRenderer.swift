@@ -159,12 +159,14 @@ struct NativeLyricEntry {
     let text: String
     let gap: Bool
     let lines: [String]
-    let y: CGFloat
+    var y: CGFloat
     let height: CGFloat
 }
 @MainActor final class NativeLyricsLayout {
     var entries: [NativeLyricEntry] = []
     var leadingPseudo = 0
+    /// Lines kept from the previous song above this song's first line (see setLines).
+    private(set) var carried = 0
     var width: CGFloat = 420
     let font = NativeTheme.font(18, medium: true)
     var lineH: CGFloat { NativeTheme.lineHeight(font) }
@@ -172,8 +174,15 @@ struct NativeLyricEntry {
     var viewportHeight: CGFloat { (anchor + lineH * 3 + 16).rounded() }
     var height: CGFloat { 24 + viewportHeight }
     var textWidth: CGFloat { max(120, width - 47) }
-    func setLines(_ lines: [LyricLine], width: CGFloat) {
-        self.width = width; entries = []; leadingPseudo = (lines.first?.time ?? 0) > 0 ? 1 : 0
+    /// `carryFrom`: the entry that was current when the next song's lyrics replace the last song's while the panel
+    /// stays open. That line and the one before it stay above the new first line, so the list scrolls on into the
+    /// new song instead of restarting at the top (like the Windows version's LyricsView.SetLines).
+    func setLines(_ lines: [LyricLine], width: CGFloat, carryFrom current: Int? = nil) {
+        var keep: [NativeLyricEntry] = []
+        if let current, width == self.width, current >= carried, entries.indices.contains(current) {
+            keep = Array(entries[max(carried, current - 1)...current])
+        }
+        self.width = width; entries = []; carried = 0; leadingPseudo = (lines.first?.time ?? 0) > 0 ? 1 : 0
         var texts = lines.map(\.text)
         if leadingPseudo == 1 { texts.insert("♪", at: 0) }
         var y: CGFloat = 0
@@ -184,9 +193,14 @@ struct NativeLyricEntry {
             let h = lineH * CGFloat(wrapped.count)
             entries.append(NativeLyricEntry(text: value, gap: gap, lines: wrapped, y: y, height: h)); y += h + 8
         }
+        guard !keep.isEmpty, !entries.isEmpty else { return }
+        // the kept lines end one gap above the new first line
+        var top: CGFloat = -8
+        for i in keep.indices.reversed() { top -= keep[i].height; keep[i].y = top; top -= 8 }
+        entries.insert(contentsOf: keep, at: 0); carried = keep.count
     }
     func entry(at time: Double, lines: [LyricLine]) -> Int {
-        min(max(0, (activeLyric(lines, at: time) ?? -leadingPseudo) + leadingPseudo), max(0, entries.count - 1))
+        min(carried + max(0, (activeLyric(lines, at: time) ?? -leadingPseudo) + leadingPseudo), max(0, entries.count - 1))
     }
     private func fit(_ text: String) -> String {
         if NativeTheme.width(text, font: font) <= textWidth { return text }

@@ -4,7 +4,7 @@ Pear Now Playing은 Pear Desktop(YouTube Music 데스크톱 클라이언트)에�
 
 - 저장소: `Roena0516/pear-now-playing`
 - 사용자 문서: `README.md` (한국어, 합니다체)
-- 버전: 올리는 기준과 고칠 곳은 `VERSIONING.md`에 있습니다. Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.7.1.0, User-Agent도 이 값을 읽음)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
+- 버전: 올리는 기준과 고칠 곳은 `VERSIONING.md`에 있습니다. Windows는 `src/Program.cs`의 AssemblyVersion(현재 1.7.2.0, User-Agent도 이 값을 읽음)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
 - macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). **맥 버전은 웬만하면 Windows 버전을 따라갑니다**(사용자 방침): 메뉴 구성과 이름, 상태·안내 문구, 기본값, 설정 키(단축키 문자열 형식 `Ctrl+Alt+Up` 포함), 로그 파일 이름과 형식, 동작 규칙을 Windows와 같게 맞추고, 플랫폼 차이 때문에 어쩔 수 없을 때만 다르게 합니다. 지금 남아 있는 차이: 설정 파일 형식(Windows `config.ini`, 맥 `config.json`), 여백 기본값과 단위(Windows 40/140px, 맥 Dock과 메뉴 막대를 뺀 영역 기준 24/24pt), 맥의 "Pear 연결 권한 다시 요청"이 음악 앱의 `config.json`에서 API 서버를 켜 주는 기능(PR #1에서 온 것), 맥 버전에 없는 `https` 설정, Windows의 안내 풍선(맥은 안내 카드로 대신함). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`).
 
 ## 작업 방식
@@ -135,5 +135,5 @@ Windows:
 - 메뉴는 위젯 설정(곡 정보 계속 표시, 위치, 모니터, 크기, 끌어서 옮기기)과 가사 설정(가사 표시, 다시 찾기, 타이밍)을 하위 메뉴로 나눕니다. "YouTube Music 가사 먼저 찾기"는 사용자 요청으로 메뉴에서 뺐고, 설정 파일의 `ytmLyrics`로만 바꿉니다. `alwaysShow`의 기본값은 `true`입니다(기존 설정 파일의 값은 그대로 둡니다).
 - **위젯은 모니터마다 하나씩** 둘 수 있고 위치도 모니터마다 다릅니다. Windows는 `Config.Widgets`(`WidgetPlace`, config.ini의 `widgetN=위치`, N은 메뉴의 모니터 번호)와 `OverlayGroup`(모니터별 `OverlayWindow`를 하나처럼 다루고, 그림은 한 번 그려서 창마다 복사본을 보냄)을 씁니다. 맥은 `Settings.widgets`(`WidgetSetting`)와 `OverlayController.widgets`(`WidgetPanels`)입니다. 표시 상태(카드 종류, 숨김 시점, 가사 스크롤)는 모든 위젯이 공유하고 위치만 따로 계산합니다. 연결이 끊긴 모니터의 위젯은 숨기고(하나도 없으면 첫 위젯을 주 모니터에), 모니터 구성이 바뀌면 다시 만듭니다. 모니터는 연결 순서의 번호로 구분하므로 다시 꽂으면 번호가 바뀔 수 있습니다. 끌어서 놓은 위젯은 자기 모니터 안에 머뭅니다.
 - 위젯은 평소 클릭을 통과시켜야 합니다(게임 위에 뜨기 때문입니다). 마우스를 받는 것은 "위젯 끌어서 옮기기" 모드가 켜져 있는 동안뿐이며, 이 모드에서는 곡 카드가 사라지지 않습니다. 놓으면 중심이 있는 모니터와 위·아래 절반을 기준으로 `Custom` 위치를 저장합니다.
-- 곡이 바뀔 때 가사가 이미 알려져 있으면(이번 실행의 캐시, 미리 받은 결과, 디스크 캐시: `LyricsProvider.Known` / `LyricsFinder.known`) 가사 카드를 닫지 않고 내용만 바꿉니다. 예전에는 카드를 먼저 닫았다가 다시 열어서, 아래쪽 배치에서 곡 카드가 내려갔다가 올라가는 문제가 있었습니다. 모르는 곡일 때만 카드를 닫고 찾습니다.
+- 곡이 바뀔 때 가사가 이미 알려져 있으면(이번 실행의 캐시, 미리 받은 결과, 디스크 캐시: `LyricsProvider.Known` / `LyricsFinder.known`) 가사 카드를 닫지 않고 내용만 바꿉니다. 예전에는 카드를 먼저 닫았다가 다시 열어서, 아래쪽 배치에서 곡 카드가 내려갔다가 올라가는 문제가 있었습니다. 모르는 곡일 때만 카드를 닫고 찾습니다. 이렇게 내용을 바꿀 때는 이전 곡에서 강조되어 있던 줄과 그 앞 줄을 새 곡의 첫 줄 위에 남겨 두고, 그 줄에서 새 곡의 줄로 이어서 스크롤합니다(`LyricsView.SetLines`의 `carryOver`, 맥은 `NativeLyricsLayout.setLines`의 `carryFrom`). 같은 곡의 가사가 다시 바뀌거나, 크기·너비가 바뀌거나, 가사 카드가 닫혀 있던 경우에는 처음부터 배치합니다.
 - 정보 카드("가사 다시 찾기" 결과 등)가 표시되는 동안에는 곡 카드를 다시 그리지 않습니다. 계속 표시 모드에서는 정보 카드가 3.5초 뒤에 곡 카드로 돌아갑니다. 예전에는 이 두 동작이 서로 꼬여서 곡 카드가 사라지는 버그가 있었습니다. macOS 버전도 같은 방식으로 동작합니다.

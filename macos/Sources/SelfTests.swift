@@ -75,7 +75,21 @@ import CoreGraphics
     titled.handle(["type": "PLAYER_INFO", "song": ["title": "Lemon", "mediaType": "ORIGINAL_MUSIC_VIDEO", "videoId": "mv"]])
     precondition(titled.cardTitle == "Lemon", "no video title: the song title")
     titled.stop()
-    print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, Pear song/state/seek messages")
+    // the next song's lyrics scroll on from the last song's line instead of restarting at the top
+    let view = NativeLyricsLayout()
+    let first = (0..<5).map { LyricLine(id: $0, time: Double($0 * 10), text: "first \($0)") }
+    let second = (0..<3).map { LyricLine(id: $0, time: Double(5 + $0 * 10), text: "second \($0)") }
+    view.setLines(first, width: 420)
+    precondition(view.carried == 0 && view.entry(at: 45, lines: first) == 4)
+    view.setLines(second, width: 420, carryFrom: 4)
+    precondition(view.carried == 2 && view.entries.count == 6 && view.entries[1].text == "first 4" && view.entries[0].text == "first 3")
+    precondition(abs(view.entries[1].y + view.entries[1].height + 8) < 0.001 && view.entries[2].y == 0, "the kept lines sit right above the new song")
+    precondition(view.entry(at: 0, lines: second) == 2 && view.entry(at: 6, lines: second) == 3, "new lines count after the kept ones")
+    view.setLines(first, width: 420, carryFrom: 2)
+    precondition(view.carried == 1 && view.entries[0].text == "♪", "only this song's lines are kept, never older carried ones")
+    view.setLines(second, width: 500, carryFrom: 3)
+    precondition(view.carried == 0, "a new width lays out from scratch")
+    print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, scrolling on into the next song, Pear song/state/seek messages")
 }
 
 @MainActor func runIntegrationTest() async {

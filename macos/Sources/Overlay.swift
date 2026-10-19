@@ -54,6 +54,7 @@ final class OverlayPanel: NSPanel {
     private var marqueeActive = false
     private var lastSecond = -1
     private var lines: [LyricLine] = []
+    private var linesSong = ""   // the song whose lyrics `lines` holds
     private var current = -1, previous = -1
     private var scrollFrom: CGFloat = 0, scrollTo: CGFloat = 0
     private var lyricStart = Date.distantPast
@@ -181,7 +182,7 @@ final class OverlayPanel: NSPanel {
             if index != current && lyrics.entries.indices.contains(index) {
                 scrollFrom = scroll; scrollTo = lyrics.entries[index].y - lyrics.anchor
                 previous = current; current = index
-                lyricDuration = abs(current - previous) > 2 ? 0.26 : 0.46; lyricStart = Date()
+                lyricDuration = abs(current - previous) > 2 && previous >= lyrics.carried ? 0.26 : 0.46; lyricStart = Date()
             }
             if previous >= 0 { redraw(card: false) }
             if progress >= 1 { previous = -1; scrollFrom = scrollTo }
@@ -194,8 +195,12 @@ final class OverlayPanel: NSPanel {
     func refresh() {
         let rebuild = lines != client.lines || lyrics.width != client.settings.panelWidth
         if rebuild {
-            lines = client.lines; lyrics.setLines(lines, width: client.settings.panelWidth)
-            current = lyrics.entry(at: client.elapsed + client.settings.lyricsOffsetMs / 1000, lines: lines)
+            // the next song's lyrics while the panel is open: scroll on from the last song's line
+            let carry = lyricsVisible && !lines.isEmpty && !client.lines.isEmpty && current >= 0 && linesSong != client.song.identity ? current : nil
+            lines = client.lines; linesSong = client.song.identity
+            lyrics.setLines(lines, width: client.settings.panelWidth, carryFrom: carry)
+            current = lyrics.carried > 0 ? lyrics.carried - 1   // still on the last song's line; tick() glides on
+                : lyrics.entry(at: client.elapsed + client.settings.lyricsOffsetMs / 1000, lines: lines)
             previous = -1
             scrollTo = lyrics.entries.indices.contains(current) ? lyrics.entries[current].y - lyrics.anchor : 0
             scrollFrom = scrollTo; lyricStart = .distantPast
