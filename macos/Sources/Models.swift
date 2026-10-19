@@ -1,6 +1,6 @@
 import Foundation
 
-let appVersion = "1.8.5"
+let appVersion = "1.8.6"
 
 /// One widget: the screen it is on (index into NSScreen.screens, the menu's "모니터 n" minus one) and where on it.
 /// "Custom": where the user dragged it, in points from the visible frame's left edge and from its top or bottom edge.
