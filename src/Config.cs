@@ -2,12 +2,51 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace PearNowPlaying
 {
     /// <summary>Custom: where the user dragged the widget (CustomX / CustomY / CustomFromBottom).</summary>
     internal enum OverlayPosition { TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight, Custom }
+
+    /// <summary>
+    /// One widget: the monitor it is on and where on that monitor ("widget2=BottomLeft" in config.ini, the number
+    /// being the menu's "모니터 2"). Custom: where the user dragged it, in px from the monitor's left edge and from
+    /// its top or bottom edge ("widget1=Custom 120 80 bottom").
+    /// </summary>
+    internal sealed class WidgetPlace
+    {
+        public int Monitor;
+        public OverlayPosition Position = OverlayPosition.BottomLeft;
+        public int CustomX = 40, CustomY = 140;
+        public bool CustomFromBottom = true;
+
+        public string Spec()
+        {
+            return Position == OverlayPosition.Custom
+                ? "Custom " + CustomX.ToString(CultureInfo.InvariantCulture) + " " + CustomY.ToString(CultureInfo.InvariantCulture) + " " + (CustomFromBottom ? "bottom" : "top")
+                : Position.ToString();
+        }
+
+        /// <summary>"BottomLeft" / "Custom 120 80 bottom"; null when it can't be read.</summary>
+        public static WidgetPlace Parse(int monitor, string spec)
+        {
+            var parts = (spec ?? "").Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            OverlayPosition pos;
+            if (parts.Length == 0 || !Enum.TryParse(parts[0], true, out pos) || !Enum.IsDefined(typeof(OverlayPosition), pos)) return null;
+            var w = new WidgetPlace { Monitor = monitor, Position = pos };
+            if (pos == OverlayPosition.Custom)
+            {
+                int x, y;
+                if (parts.Length < 3 || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out x)
+                    || !int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out y)) return null;
+                w.CustomX = Math.Max(0, x); w.CustomY = Math.Max(0, y);
+                w.CustomFromBottom = parts.Length < 4 || !parts[3].Equals("top", StringComparison.OrdinalIgnoreCase);
+            }
+            return w;
+        }
+    }
 
     internal sealed class Config
     {
@@ -23,16 +62,12 @@ namespace PearNowPlaying
         public bool Https = false;
 
         // Overlay
-        public OverlayPosition Position = OverlayPosition.BottomLeft;
+        /// <summary>The widgets, one per monitor (at least one).</summary>
+        public List<WidgetPlace> Widgets = new List<WidgetPlace> { new WidgetPlace() };
         public int MarginX = 40;
         public int MarginY = 140;
         public double Scale = 1.0;
         public int PanelWidth = 420;
-        public int Monitor = 0;
-        // Custom position (px on the monitor, no DPI scaling): from the left edge, and from the top or bottom edge
-        public int CustomX = 40;
-        public int CustomY = 140;
-        public bool CustomFromBottom = true;
         public double ShowSeconds = 6;
         public double Opacity = 0.92;
         public bool AlwaysShow = true;
@@ -82,16 +117,32 @@ namespace PearNowPlaying
                 c.Host = Get(map, "host", c.Host);
                 c.Port = GetInt(map, "port", c.Port);
                 c.Https = GetBool(map, "https", c.Https);
-                OverlayPosition pos;
-                if (Enum.TryParse(Get(map, "position", c.Position.ToString()), true, out pos)) c.Position = pos;
+                // widgets: "widget1=BottomLeft", "widget2=Custom 120 80 bottom" (numbers as in the menu, from 1)
+                var widgets = new List<WidgetPlace>();
+                foreach (var kv in map)
+                {
+                    int n;
+                    if (!kv.Key.StartsWith("widget", StringComparison.OrdinalIgnoreCase)
+                        || !int.TryParse(kv.Key.Substring(6), NumberStyles.None, CultureInfo.InvariantCulture, out n) || n < 1) continue;
+                    var w = WidgetPlace.Parse(n - 1, kv.Value);
+                    if (w != null && widgets.All(o => o.Monitor != w.Monitor)) widgets.Add(w);
+                }
+                if (widgets.Count == 0)
+                {
+                    // 1.6 and older: one widget, "monitor" (from 0) + "position" (+ customX/Y/FromBottom)
+                    var w = new WidgetPlace { Monitor = Math.Max(0, GetInt(map, "monitor", 0)) };
+                    OverlayPosition pos;
+                    if (Enum.TryParse(Get(map, "position", "BottomLeft"), true, out pos) && Enum.IsDefined(typeof(OverlayPosition), pos)) w.Position = pos;
+                    w.CustomX = Math.Max(0, GetInt(map, "customX", w.CustomX));
+                    w.CustomY = Math.Max(0, GetInt(map, "customY", w.CustomY));
+                    w.CustomFromBottom = GetBool(map, "customFromBottom", w.CustomFromBottom);
+                    widgets.Add(w);
+                }
+                c.Widgets = widgets.OrderBy(w => w.Monitor).ToList();
                 c.MarginX = GetInt(map, "marginX", c.MarginX);
                 c.MarginY = GetInt(map, "marginY", c.MarginY);
                 c.Scale = Clamp(GetDouble(map, "scale", c.Scale), 0.5, 3.0);
                 c.PanelWidth = Math.Max(260, Math.Min(1200, GetInt(map, "panelWidth", c.PanelWidth)));
-                c.Monitor = Math.Max(0, GetInt(map, "monitor", c.Monitor));
-                c.CustomX = Math.Max(0, GetInt(map, "customX", c.CustomX));
-                c.CustomY = Math.Max(0, GetInt(map, "customY", c.CustomY));
-                c.CustomFromBottom = GetBool(map, "customFromBottom", c.CustomFromBottom);
                 c.ShowSeconds = Clamp(GetDouble(map, "showSeconds", c.ShowSeconds), 1, 60);
                 c.Opacity = Clamp(GetDouble(map, "opacity", c.Opacity), 0.2, 1.0);
                 c.AlwaysShow = GetBool(map, "alwaysShow", c.AlwaysShow);
@@ -132,22 +183,17 @@ namespace PearNowPlaying
                 sb.AppendLine("port=" + Port.ToString(inv));
                 sb.AppendLine("https=" + B(Https));
                 sb.AppendLine();
-                sb.AppendLine("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight, Custom");
-                sb.AppendLine("# Custom은 트레이 메뉴의 '위젯 끌어서 옮기기'로 놓은 위치입니다(customX, customY, customFromBottom).");
-                sb.AppendLine("position=" + Position);
-                sb.AppendLine("# 화면 가장자리로부터의 여백(px)");
+                sb.AppendLine("# 위젯을 띄울 모니터와 위치. 'widget' 뒤의 숫자는 메뉴의 '모니터 1', '모니터 2'와 같은 번호입니다.");
+                sb.AppendLine("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight,");
+                sb.AppendLine("#       또는 Custom x y bottom|top (트레이 메뉴의 '위젯 끌어서 옮기기'로 놓은 위치, 모니터 왼쪽과 아래/위 가장자리에서 떨어진 px)");
+                foreach (var w in Widgets) sb.AppendLine("widget" + (w.Monitor + 1).ToString(inv) + "=" + w.Spec());
+                sb.AppendLine("# 화면 가장자리로부터의 여백(px, Custom이 아닌 위치에 적용)");
                 sb.AppendLine("marginX=" + MarginX.ToString(inv));
                 sb.AppendLine("marginY=" + MarginY.ToString(inv));
                 sb.AppendLine("# 크기 배율 (1.0 = 기본)");
                 sb.AppendLine("scale=" + Scale.ToString("0.##", inv));
                 sb.AppendLine("# 곡 카드와 가사 카드의 너비(px, 배율 적용 전)");
                 sb.AppendLine("panelWidth=" + PanelWidth.ToString(inv));
-                sb.AppendLine("# 표시할 모니터 번호 (0 = 주 모니터)");
-                sb.AppendLine("monitor=" + Monitor.ToString(inv));
-                sb.AppendLine("# 끌어서 놓은 위치: 모니터 왼쪽에서 customX(px), 위(customFromBottom=false) 또는 아래에서 customY(px)");
-                sb.AppendLine("customX=" + CustomX.ToString(inv));
-                sb.AppendLine("customY=" + CustomY.ToString(inv));
-                sb.AppendLine("customFromBottom=" + B(CustomFromBottom));
                 sb.AppendLine("# 곡이 바뀌었을 때 표시하는 시간(초)");
                 sb.AppendLine("showSeconds=" + ShowSeconds.ToString("0.##", inv));
                 sb.AppendLine("# 불투명도 (0.2 ~ 1.0)");

@@ -199,5 +199,19 @@ func testCustomPlacement() {
     precondition(high.lyrics.maxY == 1080 - 50, "top-anchored custom: lyrics move up when the card is gone")
     let decoded = try! JSONDecoder().decode(Settings.self, from: Data(#"{"position":"Custom","customX":12,"customY":34,"customFromBottom":false}"#.utf8))
     precondition(decoded.position == "Custom" && decoded.customX == 12 && decoded.customY == 34 && !decoded.customFromBottom)
-    print("PASS: dragged position (screen choice, top/bottom anchor, clamping), custom placement, new defaults")
+    // widgets, one per screen
+    let legacy16 = try! JSONDecoder().decode(Settings.self, from: Data(#"{"position":"Custom","monitor":1,"customX":120,"customY":80,"customFromBottom":false}"#.utf8))
+    precondition(legacy16.widgets == [WidgetSetting(monitor: 1, position: "Custom", customX: 120, customY: 80, customFromBottom: false)], "1.6 widget carried over")
+    let many = try! JSONDecoder().decode(Settings.self, from: Data(#"{"widgets":[{"monitor":2,"position":"TopRight","customX":0,"customY":0,"customFromBottom":true},{"monitor":0,"position":"BottomLeft","customX":24,"customY":24,"customFromBottom":true},{"monitor":2,"position":"TopLeft","customX":0,"customY":0,"customFromBottom":true}]}"#.utf8))
+    precondition(many.widgets.map(\.monitor) == [0, 2] && many.widgets[1].position == "TopRight", "sorted by screen, one widget per screen")
+    precondition(many.shownWidgets(screenCount: 3).count == 2 && many.shownWidgets(screenCount: 1).map(\.monitor) == [0], "widgets on missing screens are hidden")
+    var orphan = Settings(); orphan.widgets = [WidgetSetting(monitor: 3, position: "TopCenter")]
+    precondition(orphan.shownWidgets(screenCount: 2) == [WidgetSetting(monitor: 0, position: "TopCenter")], "no widget on a connected screen: the first one on the main screen")
+    let roundTrip = try! JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(many))
+    precondition(roundTrip.widgets == many.widgets)
+    let wide = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+    let left = NativePlacement.frames(screen: wide, config: many.placed(many.widgets[0]), cardHeight: 100, lyricHeight: 0, cardVisible: true, lyricsVisible: false)
+    let right = NativePlacement.frames(screen: wide, config: many.placed(many.widgets[1]), cardHeight: 100, lyricHeight: 0, cardVisible: true, lyricsVisible: false)
+    precondition(left.card.minX < 100 && left.card.minY < 100 && right.card.maxX > 1800 && right.card.maxY > 1000, "each widget follows its own position")
+    print("PASS: dragged position (screen choice, top/bottom anchor, clamping), custom placement, new defaults, one widget per screen with its own position")
 }

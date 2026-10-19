@@ -25,11 +25,24 @@ final class OverlayPanel: NSPanel {
         NSGraphicsContext.restoreGraphicsState()
     }
 }
+
+/// One widget's song card and lyrics panel, on its own screen.
+@MainActor final class WidgetPanels {
+    let card = OverlayController.makePanel(), lyrics = OverlayController.makePanel()
+    let cardCanvas = OverlayCanvas(), lyricsCanvas = OverlayCanvas()
+    var place: WidgetSetting
+    init(_ place: WidgetSetting) {
+        self.place = place
+        card.contentView = cardCanvas; lyrics.contentView = lyricsCanvas
+    }
+}
+
+/// The song card and lyrics panel on every widget's screen (like the Windows version's OverlayGroup): they all
+/// show the same thing and appear, fade and scroll together; only their positions differ, each following its
+/// widget's rule.
 @MainActor final class OverlayController {
-    let panel: OverlayPanel
-    let lyricsPanel: OverlayPanel
     let client: PearClient
-    private let cardCanvas = OverlayCanvas(), lyricsCanvas = OverlayCanvas()
+    private(set) var widgets: [WidgetPanels] = []
     private let lyrics = NativeLyricsLayout()
     private var timer: Timer?
     private var hideTask: Task<Void, Never>?
@@ -46,77 +59,110 @@ final class OverlayPanel: NSPanel {
     private var lyricStart = Date.distantPast
     private var lyricDuration: Double = 0.46
     private let preview: Bool
-    // dragging the widget: the panels normally let every click through (they sit over other apps)
+    // dragging a widget: the panels normally let every click through (they sit over other apps)
     private(set) var moveMode = false
-    private var dragging = false
+    private var dragging: WidgetPanels?
     private var dragStart = CGPoint.zero, cardStart = CGPoint.zero, lyricsStart = CGPoint.zero
     init(client: PearClient, preview: Bool) {
         self.client = client; self.preview = preview
-        panel = Self.makePanel(); lyricsPanel = Self.makePanel()
-        panel.contentView = cardCanvas; lyricsPanel.contentView = lyricsCanvas
-        cardCanvas.render = { [weak self] in
-            guard let self else { return }
-            NativeRenderer.drawCard(self.client, kind: self.kind, marqueeTime: Date().timeIntervalSince(self.marqueeStart), infoText: self.infoText)
-        }
-        lyricsCanvas.render = { [weak self] in
-            guard let self else { return }
-            self.lyrics.draw(paused: self.client.song.paused, opacity: self.client.settings.opacity,
-                             current: self.current, previous: self.previous, progress: self.progress, scroll: self.scroll)
-        }
         timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
         RunLoop.main.add(timer!, forMode: .common)
-        for canvas in [cardCanvas, lyricsCanvas] {
-            canvas.onDragBegan = { [weak self] in self?.beginDrag($0) }
-            canvas.onDragged = { [weak self] in self?.drag(to: $0) }
-            canvas.onDragEnded = { [weak self] in self?.endDrag() }
-        }
-        layout()
+        rebuildWidgets()
     }
 
-    /// "위젯 끌어서 옮기기": both panels take the mouse and stay up until the mode is turned off again.
+    /// One pair of panels per shown widget (call when widgets are added, removed or screens change).
+    func rebuildWidgets() {
+        dragging = nil
+        for w in widgets { w.card.orderOut(nil); w.lyrics.orderOut(nil) }
+        widgets = client.settings.shownWidgets(screenCount: NSScreen.screens.count).map { place in
+            let w = WidgetPanels(place)
+            w.cardCanvas.render = { [weak self] in
+                guard let self else { return }
+                NativeRenderer.drawCard(self.client, kind: self.kind, marqueeTime: Date().timeIntervalSince(self.marqueeStart), infoText: self.infoText)
+            }
+            w.lyricsCanvas.render = { [weak self] in
+                guard let self else { return }
+                self.lyrics.draw(paused: self.client.song.paused, opacity: self.client.settings.opacity,
+                                 current: self.current, previous: self.previous, progress: self.progress, scroll: self.scroll)
+            }
+            for canvas in [w.cardCanvas, w.lyricsCanvas] {
+                canvas.onDragBegan = { [weak self, weak w] in if let self, let w { self.beginDrag(w, $0) } }
+                canvas.onDragged = { [weak self] in self?.drag(to: $0) }
+                canvas.onDragEnded = { [weak self] in self?.endDrag() }
+                canvas.movable = moveMode
+            }
+            w.card.ignoresMouseEvents = !moveMode; w.lyrics.ignoresMouseEvents = !moveMode
+            return w
+        }
+        layout()
+        for w in widgets {
+            if cardVisible { w.card.alphaValue = 1; w.card.orderFrontRegardless() }
+            if lyricsVisible { w.lyrics.alphaValue = 1; w.lyrics.orderFrontRegardless() }
+        }
+        redraw()
+    }
+
+    private var cardPanels: [OverlayPanel] { widgets.map(\.card) }
+    private var lyricsPanels: [OverlayPanel] { widgets.map(\.lyrics) }
+    private func redraw(card: Bool = true, lyrics: Bool = true) {
+        for w in widgets { if card { w.cardCanvas.needsDisplay = true }; if lyrics { w.lyricsCanvas.needsDisplay = true } }
+    }
+    private func fade(_ panels: [OverlayPanel], to alpha: CGFloat, duration: Double, then done: (() -> Void)? = nil) {
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            for p in panels { p.animator().alphaValue = alpha }
+        }, completionHandler: { MainActor.assumeIsolated { done?() } })
+    }
+
+    /// "위젯 끌어서 옮기기": every widget's panels take the mouse and stay up until the mode is turned off again.
     func setMoveMode(_ on: Bool) {
         guard on != moveMode else { return }
         moveMode = on
-        for (panel, canvas) in [(self.panel, cardCanvas), (lyricsPanel, lyricsCanvas)] {
-            panel.ignoresMouseEvents = !on
-            canvas.movable = on
+        for w in widgets {
+            w.card.ignoresMouseEvents = !on; w.lyrics.ignoresMouseEvents = !on
+            w.cardCanvas.movable = on; w.lyricsCanvas.movable = on
         }
         if on { showInfo("위젯을 끌어서 옮긴 뒤, 메뉴에서 '위젯 끌어서 옮기기'를 다시 눌러 끝내세요") }
         else {
-            if dragging { endDrag() }
+            if dragging != nil { endDrag() }
             if client.song.title.isEmpty { hide() } else { show() }   // back to the normal show time
         }
     }
 
-    private func beginDrag(_ mouse: CGPoint) {
-        dragging = true; dragStart = mouse
-        cardStart = panel.frame.origin; lyricsStart = lyricsPanel.frame.origin
+    private func beginDrag(_ widget: WidgetPanels, _ mouse: CGPoint) {
+        dragging = widget; dragStart = mouse
+        cardStart = widget.card.frame.origin; lyricsStart = widget.lyrics.frame.origin
     }
 
     private func drag(to mouse: CGPoint) {
-        guard dragging else { return }
+        guard let w = dragging else { return }
         let dx = mouse.x - dragStart.x, dy = mouse.y - dragStart.y
-        if cardVisible { panel.setFrameOrigin(CGPoint(x: cardStart.x + dx, y: cardStart.y + dy)) }
-        if lyricsVisible { lyricsPanel.setFrameOrigin(CGPoint(x: lyricsStart.x + dx, y: lyricsStart.y + dy)) }
+        if cardVisible { w.card.setFrameOrigin(CGPoint(x: cardStart.x + dx, y: cardStart.y + dy)) }
+        if lyricsVisible { w.lyrics.setFrameOrigin(CGPoint(x: lyricsStart.x + dx, y: lyricsStart.y + dy)) }
     }
 
-    /// Save where the widget landed (screen, offsets, top or bottom anchor) as the "Custom" position.
+    /// Save where the widget landed as its "Custom" position on its own screen (it stays on that screen).
     private func endDrag() {
-        guard dragging else { return }
-        dragging = false
+        guard let w = dragging else { return }
+        dragging = nil
         var column = CGRect.null
-        if cardVisible { column = column.union(panel.frame) }
-        if lyricsVisible { column = column.union(lyricsPanel.frame) }
-        guard !column.isNull else { return }
-        let drop = NativePlacement.fromDrop(column: column, screens: NSScreen.screens.map(\.visibleFrame))
-        client.settings.position = "Custom"; client.settings.monitor = drop.monitor
-        client.settings.customX = drop.x; client.settings.customY = drop.y; client.settings.customFromBottom = drop.fromBottom
+        if cardVisible { column = column.union(w.card.frame) }
+        if lyricsVisible { column = column.union(w.lyrics.frame) }
+        let screens = NSScreen.screens
+        guard !column.isNull, w.place.monitor < screens.count else { layout(); return }
+        let drop = NativePlacement.fromDrop(column: column, screens: [screens[w.place.monitor].visibleFrame])
+        w.place.position = "Custom"; w.place.customX = drop.x; w.place.customY = drop.y; w.place.customFromBottom = drop.fromBottom
+        if let index = client.settings.widgets.firstIndex(where: { $0.monitor == w.place.monitor }) {
+            client.settings.widgets[index] = w.place
+        } else {
+            client.settings.widgets = [w.place]   // the shown widget stood in for one on a screen that's gone
+        }
         client.settings.save()
         layout()
     }
-    private static func makePanel() -> OverlayPanel {
+    static func makePanel() -> OverlayPanel {
         let panel = OverlayPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
         panel.ignoresMouseEvents = true; panel.level = .statusBar
@@ -137,12 +183,12 @@ final class OverlayPanel: NSPanel {
                 previous = current; current = index
                 lyricDuration = abs(current - previous) > 2 ? 0.26 : 0.46; lyricStart = Date()
             }
-            if previous >= 0 { lyricsCanvas.needsDisplay = true }
+            if previous >= 0 { redraw(card: false) }
             if progress >= 1 { previous = -1; scrollFrom = scrollTo }
         }
         if cardVisible {
             let second = Int(client.elapsed)
-            if marqueeActive || second != lastSecond { cardCanvas.needsDisplay = true; lastSecond = second }
+            if marqueeActive || second != lastSecond { redraw(lyrics: false); lastSecond = second }
         }
     }
     func refresh() {
@@ -158,34 +204,37 @@ final class OverlayPanel: NSPanel {
         if shouldShow != lyricsVisible {
             lyricsVisible = shouldShow
             if shouldShow {
-                layout(); lyricsPanel.alphaValue = 0; lyricsPanel.orderFrontRegardless()
-                NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; lyricsPanel.animator().alphaValue = 1 }
+                layout()
+                for p in lyricsPanels { p.alphaValue = 0; p.orderFrontRegardless() }
+                fade(lyricsPanels, to: 1, duration: 0.18)
             } else {
-                NSAnimationContext.runAnimationGroup({ context in context.duration = 0.45; lyricsPanel.animator().alphaValue = 0 }, completionHandler: { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard let self, !self.lyricsVisible else { return }; self.lyricsPanel.orderOut(nil)
-                    }
-                })
+                let panels = lyricsPanels
+                fade(panels, to: 0, duration: 0.45) { [weak self] in
+                    guard let self, !self.lyricsVisible else { return }
+                    for p in panels { p.orderOut(nil) }
+                }
             }
         }
         let title = kind == .info ? (infoText ?? client.status) : client.cardTitle
         marqueeActive = NativeTheme.width(title, font: NativeTheme.font(17, medium: true)) > NativeRenderer.cardLayout(client, kind: kind).textWidth + 0.5
-        cardCanvas.needsDisplay = true; lyricsCanvas.needsDisplay = true
+        redraw()
         layout(); tick()
     }
     func layout() {
-        if dragging { return }   // the mouse decides for now
         let screens = NSScreen.screens
         guard !screens.isEmpty else { return }
         let config = client.settings
-        let screen = screens[min(max(0, config.monitor), screens.count - 1)].visibleFrame
         let scale = config.scale
         let cardHeight = NativeRenderer.cardLayout(client, kind: kind).height * scale
         let lyricHeight = lyrics.height * scale
-        let frames = NativePlacement.frames(screen: screen, config: config, cardHeight: cardHeight, lyricHeight: lyricHeight, cardVisible: cardVisible, lyricsVisible: lyricsVisible)
-        cardCanvas.scale = scale; lyricsCanvas.scale = scale
-        move(panel, to: frames.card)
-        move(lyricsPanel, to: frames.lyrics)
+        for w in widgets where w !== dragging {   // the mouse decides for the one being dragged
+            let screen = screens[min(max(0, w.place.monitor), screens.count - 1)].visibleFrame
+            let frames = NativePlacement.frames(screen: screen, config: config.placed(w.place), cardHeight: cardHeight, lyricHeight: lyricHeight,
+                                                cardVisible: cardVisible, lyricsVisible: lyricsVisible)
+            w.cardCanvas.scale = scale; w.lyricsCanvas.scale = scale
+            move(w.card, to: frames.card)
+            move(w.lyrics, to: frames.lyrics)
+        }
     }
     private func move(_ panel: NSPanel, to frame: CGRect) {
         guard panel.frame != frame else { return }
@@ -195,6 +244,10 @@ final class OverlayPanel: NSPanel {
                 panel.animator().setFrame(frame, display: true)
             }
         } else { panel.setFrame(frame, display: true) }
+    }
+    private func appear(wasVisible: Bool) {
+        if !wasVisible { for p in cardPanels { p.alphaValue = 0; p.orderFrontRegardless() } }
+        fade(cardPanels, to: 1, duration: 0.18)
     }
     func show(temporary: Bool = true) {
         hideTask?.cancel()
@@ -209,8 +262,7 @@ final class OverlayPanel: NSPanel {
         identity = client.song.identity; wasPaused = client.song.paused
         let wasVisible = cardVisible; cardVisible = true
         refresh()
-        if !wasVisible { panel.alphaValue = 0; panel.orderFrontRegardless() }
-        NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; panel.animator().alphaValue = 1 }
+        appear(wasVisible: wasVisible)
         if temporary && !client.settings.alwaysShow && !moveMode {
             hideTask = Task { try? await Task.sleep(for: .seconds(client.settings.showSeconds)); guard !Task.isCancelled else { return }; hide() }
         }
@@ -229,8 +281,7 @@ final class OverlayPanel: NSPanel {
         hideTask?.cancel(); kind = .info; infoText = message; marqueeStart = Date()
         let wasVisible = cardVisible; cardVisible = true
         refresh()
-        if !wasVisible { panel.alphaValue = 0; panel.orderFrontRegardless() }
-        NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; panel.animator().alphaValue = 1 }
+        appear(wasVisible: wasVisible)
         // While "always show" keeps the song card up, the message only borrows its place for a few seconds
         // and the song card comes back; otherwise the message fades out like a normal card.
         let keep = client.settings.alwaysShow || moveMode
@@ -242,12 +293,12 @@ final class OverlayPanel: NSPanel {
         }
     }
     func hide() {
-        NSAnimationContext.runAnimationGroup({ context in context.duration = 0.45; panel.animator().alphaValue = 0 }, completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.panel.alphaValue == 0 else { return }
-                self.panel.orderOut(nil); self.cardVisible = false; self.layout()
-            }
-        })
+        let panels = cardPanels
+        fade(panels, to: 0, duration: 0.45) { [weak self] in
+            guard let self, let first = panels.first, first.alphaValue == 0 else { return }
+            for p in panels { p.orderOut(nil) }
+            self.cardVisible = false; self.layout()
+        }
     }
     func stop() { timer?.invalidate(); timer = nil; hideTask?.cancel() }
 }

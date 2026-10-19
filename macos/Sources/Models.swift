@@ -2,6 +2,16 @@ import Foundation
 
 let appVersion = "1.6.0"
 
+/// One widget: the screen it is on (index into NSScreen.screens, the menu's "모니터 n" minus one) and where on it.
+/// "Custom": where the user dragged it, in points from the visible frame's left edge and from its top or bottom edge.
+struct WidgetSetting: Codable, Equatable {
+    var monitor = 0
+    var position = "BottomLeft"
+    var customX: Double = 24
+    var customY: Double = 24
+    var customFromBottom = true
+}
+
 struct Settings: Codable {
     var host = "127.0.0.1"
     var port = 26538
@@ -41,7 +51,18 @@ struct Settings: Codable {
     var hotkeyAlwaysShow = "Ctrl+Alt+P"
     var hotkeyLyrics = "Ctrl+Alt+L"
     var positionLayoutVersion: Int? = 1
+    /// The widgets, one per screen (at least one). position / monitor / custom* above are the 1.6 single widget,
+    /// read only to carry an older config over.
+    var widgets: [WidgetSetting] = [WidgetSetting()]
     init() {}
+
+    /// These settings as one widget sees them (its screen and position), for NativePlacement.
+    func placed(_ widget: WidgetSetting) -> Settings {
+        var s = self
+        s.monitor = widget.monitor; s.position = widget.position
+        s.customX = widget.customX; s.customY = widget.customY; s.customFromBottom = widget.customFromBottom
+        return s
+    }
     // Keys missing from an older config.json keep their defaults instead of discarding the whole file.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -63,6 +84,14 @@ struct Settings: Codable {
         ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
         lyricsServer = try value(.lyricsServer, lyricsServer)
         positionLayoutVersion = try c.decodeIfPresent(Int.self, forKey: .positionLayoutVersion)
+        // one widget per screen; 1.6 configs have none and carry their single widget over
+        var seen = Set<Int>()
+        widgets = (try c.decodeIfPresent([WidgetSetting].self, forKey: .widgets) ?? [])
+            .filter { $0.monitor >= 0 && $0.customX.isFinite && $0.customY.isFinite && seen.insert($0.monitor).inserted }
+            .sorted { $0.monitor < $1.monitor }
+        if widgets.isEmpty {
+            widgets = [WidgetSetting(monitor: max(0, monitor), position: position, customX: customX, customY: customY, customFromBottom: customFromBottom)]
+        }
     }
     static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/PearNowPlaying-macOS")
     static let file = directory.appendingPathComponent("config.json")
@@ -82,6 +111,12 @@ struct Settings: Codable {
         guard (positionLayoutVersion ?? 0) < 1 else { return }
         if marginX == 40 && marginY == 140 { marginX = 24; marginY = 24 }
         positionLayoutVersion = 1
+    }
+    /// The widgets whose screen is connected; the first widget on the main screen if none is.
+    func shownWidgets(screenCount: Int) -> [WidgetSetting] {
+        let shown = widgets.filter { $0.monitor < screenCount }
+        if shown.isEmpty, var first = widgets.first { first.monitor = 0; return [first] }
+        return shown
     }
     func save() {
         try? FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)

@@ -43,7 +43,7 @@ import CoreText
         client.$titleRevision.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$artwork.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         registerHotkeys()
-        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.overlay.layout(); self?.updateMenu() } }
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.overlay.rebuildWidgets(); self?.updateMenu() } }
         updateMenu()
         if preview {
             client.handle(["type": "PLAYER_INFO", "isPlaying": true, "song": ["title": "Pear Now Playing · macOS", "artist": "오버레이 미리보기", "album": "한국어 · 日本語 · English", "songDuration": 240, "elapsedSeconds": 42, "isPaused": false]])
@@ -154,19 +154,23 @@ import CoreText
         add(titles, "곡 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle != "video", represented: "song")
         add(titles, "영상 제목 (Discord 상태와 같음)", #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
         submenu(widget, "영상 곡 제목", titles)
-        let position = NSMenu()
-        for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래")] {
-            add(position, label, #selector(position(_:)), state: client.settings.position == value, represented: value)
-        }
-        position.addItem(.separator())
-        add(position, "직접 옮긴 위치", #selector(position(_:)), state: client.settings.position == "Custom", represented: "Custom")
-        submenu(widget, "위치", position)
+        // one submenu per screen: whether it has a widget, and where on it (like the Windows version)
         let monitors = NSMenu()
-        let current = min(max(0, client.settings.monitor), max(0, NSScreen.screens.count - 1))
         for (index, screen) in NSScreen.screens.enumerated() {
             let size = screen.frame.size
-            add(monitors, "모니터 \(index + 1) · \(screen.localizedName)\(index == 0 ? " (주 모니터)" : "") \(Int(size.width))×\(Int(size.height))",
-                #selector(monitor(_:)), state: index == current, represented: index)
+            let place = client.settings.widgets.first { $0.monitor == index }
+            let screenMenu = NSMenu()
+            let toggle = NSMenuItem(title: "이 모니터에 표시", action: place == nil || client.settings.widgets.count > 1 ? #selector(toggleMonitor(_:)) : nil, keyEquivalent: "")
+            toggle.target = self; toggle.state = place != nil ? .on : .off; toggle.representedObject = index
+            screenMenu.addItem(toggle)   // the last widget can't be turned off (no action = greyed out)
+            screenMenu.addItem(.separator())
+            for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래"), ("Custom", "직접 옮긴 위치")] {
+                if value == "Custom" { screenMenu.addItem(.separator()) }
+                add(screenMenu, label, #selector(widgetPosition(_:)), state: place?.position == value, represented: "\(index)|\(value)")
+            }
+            let title = "모니터 \(index + 1) (\(index == 0 ? "주 모니터, " : "")\(Int(size.width))×\(Int(size.height)))"
+            let entry = NSMenuItem(title: title, action: nil, keyEquivalent: ""); entry.submenu = screenMenu; entry.state = place != nil ? .on : .off
+            monitors.addItem(entry)
         }
         submenu(widget, "모니터", monitors)
         let sizes = NSMenu(); for (scale, label) in [(0.8, "작게"), (1.0, "보통"), (1.25, "크게"), (1.5, "아주 크게")] { add(sizes, label, #selector(size(_:)), state: client.settings.scale == scale, represented: scale) }
@@ -220,12 +224,33 @@ import CoreText
     @objc func findLyrics() { client.findLyrics(force: true) }
     @objc func videoTitle(_ sender: NSMenuItem) { client.settings.videoTitle = sender.representedObject as! String; save() }
     @objc func toggleMoveMode() { overlay.setMoveMode(!overlay.moveMode); updateMenu() }
-    @objc func monitor(_ sender: NSMenuItem) { client.settings.monitor = sender.representedObject as! Int; save() }
+    @objc func toggleMonitor(_ sender: NSMenuItem) {
+        let index = sender.representedObject as! Int
+        if let found = client.settings.widgets.firstIndex(where: { $0.monitor == index }) {
+            guard client.settings.widgets.count > 1 else { return }
+            client.settings.widgets.remove(at: found)
+        } else {
+            // a new widget starts where the first one is (as a preset or the same dragged offsets)
+            var widget = client.settings.widgets.first ?? WidgetSetting(); widget.monitor = index
+            client.settings.widgets.append(widget); client.settings.widgets.sort { $0.monitor < $1.monitor }
+        }
+        client.settings.save(); overlay.rebuildWidgets(); overlay.show(); updateMenu()
+    }
     @objc func openLog() {
         if !FileManager.default.fileExists(atPath: Log.file.path) { Log.info("log opened") }
         NSWorkspace.shared.open(Log.file)
     }
-    @objc func position(_ sender: NSMenuItem) { client.settings.position = sender.representedObject as! String; save() }
+    @objc func widgetPosition(_ sender: NSMenuItem) {
+        let parts = (sender.representedObject as! String).split(separator: "|").map(String.init)
+        let index = Int(parts[0])!
+        if let found = client.settings.widgets.firstIndex(where: { $0.monitor == index }) {
+            client.settings.widgets[found].position = parts[1]
+        } else {
+            var widget = WidgetSetting(); widget.monitor = index; widget.position = parts[1]
+            client.settings.widgets.append(widget); client.settings.widgets.sort { $0.monitor < $1.monitor }
+        }
+        client.settings.save(); overlay.rebuildWidgets(); overlay.show(); updateMenu()
+    }
     @objc func size(_ sender: NSMenuItem) { client.settings.scale = sender.representedObject as! Double; save() }
     @objc func offset(_ sender: NSMenuItem) { client.settings.lyricsOffsetMs = Double(sender.representedObject as! Int); save() }
     @objc func previous() { client.control("previous") }
@@ -292,7 +317,7 @@ import CoreText
         _ = try await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
     @objc func openConfig() { NSWorkspace.shared.open(Settings.file) }
-    @objc func reload() { client.reload(); registerHotkeys(); overlay.show(); updateMenu() }
+    @objc func reload() { client.reload(); registerHotkeys(); overlay.rebuildWidgets(); overlay.show(); updateMenu() }
     @objc func quit() { NSApp.terminate(nil) }
 }
 
