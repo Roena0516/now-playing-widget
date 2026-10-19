@@ -31,6 +31,14 @@ namespace PearNowPlaying
         public double Elapsed;
         public bool IsPaused;
         public bool HasData { get { return !string.IsNullOrEmpty(Title) || !string.IsNullOrEmpty(VideoId); } }
+
+        /// <summary>A copy showing another title (the card's display title; lookups keep Pear's).</summary>
+        public SongInfo WithTitle(string title)
+        {
+            var copy = (SongInfo)MemberwiseClone();
+            copy.Title = title;
+            return copy;
+        }
     }
 
     /// <summary>

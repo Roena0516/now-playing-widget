@@ -255,6 +255,23 @@ enum CoverLyrics {
         return String(out)
     }
 
+    static let featTail = Rx(#"\s*(?:[\(（\[]\s*(?:feat|ft)\b\.?[^\)）\]]*[\)）\]]|\s(?:feat|ft)\.?\s.*)\s*$"#, ignoreCase: true)
+
+    /// The title to show for an album track. YouTube Music hands Pear the title in the app's language: a track
+    /// whose label registered a translated title shows only the translation ("Only Words"), while YouTube
+    /// Music's own queue lists it as "original - translation" ("心を刺す言葉だけ - Only Words (feat. …)").
+    /// When the queue title is exactly that pair and its second half is Pear's title, show both; otherwise
+    /// (no translation, Pear already showing the original, titles that merely contain " - ") keep Pear's title.
+    /// "(feat. …)" follows Pear's title: kept if Pear has it, not added otherwise. Same as src/CoverLyrics.cs.
+    static func displayTitle(_ pearTitle: String, queueTitle: String) -> String {
+        if pearTitle.trimmed.isEmpty || queueTitle.trimmed.isEmpty { return pearTitle }
+        let core = featTail.replace(pearTitle, with: "").trimmed
+        let feat = String(pearTitle.trimmed.dropFirst(core.count))
+        let parts = dashes.split(featTail.replace(queueTitle, with: "").trimmed)
+        guard parts.count == 2, !parts[0].trimmed.isEmpty, norm(parts[1]) == norm(core), norm(parts[0]) != norm(core) else { return pearTitle }
+        return parts[0].trimmed + " - " + parts[1].trimmed + feat
+    }
+
     /// Does a search hit's title name the same song? (case/width/punctuation ignored; "(feat. …)" etc. allowed)
     static func sameTitle(_ hit: String, _ wanted: String) -> Bool {
         let a = norm(Rx(#"[\(\[（【][^\)\]）】]*[\)\]）】]"#).replace(hit, with: " ")), b = norm(wanted)

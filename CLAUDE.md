@@ -109,6 +109,7 @@ Windows:
   - 「」『』 같은 따옴표 안의 이름을 사용하고, 【태그】와 "covered by …" 같은 꼬리 부분을 제거한 뒤, `/ ／ ｜ |`와 " - "를 기준으로 나눕니다.
   - 첫 부분이 업로더(아티스트)의 이름이면 그다음 부분을 곡명으로 봅니다.
   - 설명란의 `原曲：`, `作詞・作曲：`, `Music:` 줄에서 원곡자를 읽습니다.
+- `DisplayTitle`(앨범 곡 제목): Pear의 `title`은 YouTube Music 앱 언어로 번역된 제목입니다(`videoDetails.title`, 예: `Only Words`). YouTube Music `next`의 재생목록 항목 제목은 번역이 있으면 "원제 - 번역 (feat. …)"으로 옵니다. 미디어 타입이 AUDIO이고, 재생목록 제목이 정확히 두 부분이며, 뒷부분이 Pear 제목과 같을 때만 카드에 "원제 - 번역"을 보여줍니다. 가사 검색과 캐시 키에는 Pear 제목을 그대로 씁니다(`SongInfo.WithTitle`은 카드용 복사본). 재생목록 제목은 가사 검색이 받은 `Lookup` 결과를 재사용하고(`Known`), 가사가 캐시에서 나왔을 때만 제목용 `Lookup(withLyrics: false)`을 한 번 보냅니다. Pear의 `alternativeTitle`(`microformat.linkAlternates`)은 원제일 때도 있고 다른 언어 번역일 때도 있어서 쓰지 않습니다.
 - 아티스트 이름 비교(`SameArtist`)는 대소문자, 전각/반각, 문장부호, 악센트를 무시합니다("fhána"와 "fhana"를 같은 이름으로 봅니다).
 
 로그에서 확인한 해석상의 약점:

@@ -62,3 +62,20 @@ import Foundation
     check(candidates.ids == ["AAAAAAAAAAA", "FFFFFFFFFFF"] && candidates.hinted == Set(["AAAAAAAAAAA"]), "original candidates")
     print("PASS: cover parsing matches the Windows version (title/artist guesses, song names, arrangements, cover detection, original links)")
 }
+
+/// Album track titles ("original - translation") must match the Windows version (expected values from src/CoverLyrics.cs).
+@MainActor func runDisplayTitleTests() {
+    precondition(CoverLyrics.displayTitle("Only Words", queueTitle: "心を刺す言葉だけ - Only Words (feat. HATSUNE MIKU & KAFU)") == "心を刺す言葉だけ - Only Words", "display title: Only Words")
+    precondition(CoverLyrics.displayTitle("Only Words", queueTitle: "心を刺す言葉だけ - Only Words (feat. HATSUNE MIKU, KAFU)") == "心を刺す言葉だけ - Only Words", "display title: Only Words")
+    precondition(CoverLyrics.displayTitle("命に嫌われている", queueTitle: "命に嫌われている (feat. Yoisaki Kanade, Shinonome Ena, Hatsune Miku)") == "命に嫌われている", "display title: 命に嫌われている")
+    precondition(CoverLyrics.displayTitle("밤편지", queueTitle: "밤편지 - Through the Night") == "밤편지", "display title: 밤편지")
+    precondition(CoverLyrics.displayTitle("サイエンス - Science", queueTitle: "サイエンス - Science") == "サイエンス - Science", "display title: サイエンス - Science")
+    precondition(CoverLyrics.displayTitle("Only Words (feat. KAFU)", queueTitle: "心を刺す言葉だけ - Only Words (feat. KAFU)") == "心を刺す言葉だけ - Only Words (feat. KAFU)", "display title: Only Words (feat. KAFU)")
+    precondition(CoverLyrics.displayTitle("ALiCE", queueTitle: "ALiCE") == "ALiCE", "display title: ALiCE")
+    precondition(CoverLyrics.displayTitle("Song", queueTitle: "") == "Song", "display title: Song")
+    precondition(CoverLyrics.displayTitle("Title", queueTitle: "A - B - Title") == "Title", "display title: Title")
+    precondition(CoverLyrics.displayTitle("only words", queueTitle: "心を刺す言葉だけ - Only Words") == "心を刺す言葉だけ - Only Words", "display title: only words")
+    precondition(CoverLyrics.displayTitle("Lemon", queueTitle: "Lemon - レモン") == "Lemon", "display title: Lemon")
+    precondition(CoverLyrics.displayTitle("Night Dancer feat. X", queueTitle: "夜のダンサー - Night Dancer feat. X") == "夜のダンサー - Night Dancer feat. X", "display title: Night Dancer feat. X")
+    print("PASS: album track titles shown as original - translation, like the Windows version")
+}

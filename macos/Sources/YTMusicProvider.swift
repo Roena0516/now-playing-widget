@@ -81,6 +81,9 @@ struct VideoDescription {
 
     /// Lyrics plus the track's title/artist/length as YouTube Music lists it. Throws when the servers can't be
     /// reached or answer with an error; counts towards the relay's pause.
+    /// What a lookup earlier in this session learned about the video (no request), or nil.
+    func known(_ videoId: String) -> TrackInfo? { lookups[videoId + "|L"] ?? lookups[videoId + "|M"] }
+
     func lookup(_ videoId: String, withLyrics: Bool = true) async throws -> TrackInfo {
         if let known = lookups[videoId + (withLyrics ? "|L" : "|M")] { return known }
         if !withLyrics, let known = lookups[videoId + "|L"] { return known }

@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor func runLyricsTests() async {
     runCoverTests()
+    runDisplayTitleTests()
     let record = LyricRecord(trackName: "M@GICAL CURE! LOVE SHOT!", artistName: "SAWTOWNE feat. Hatsune Miku", duration: 202, instrumental: false, syncedLyrics: "[00:01.00]Test line", plainLyrics: "Test line")
     let song = Song(["title": "M@GICAL☆CURE! LOVE SHOT!", "alternativeTitle": "M@GICAL☆CURE! LOVE SHOT! (feat. Hatsune Miku)", "artist": "SAWTOWNE 및 初音ミク", "tags": ["SAWTOWNE", "Hatsune Miku"], "songDuration": 202])
     precondition(LyricsProvider.pick([record], song: song) != nil, "Artist tags must match multilingual artist names")

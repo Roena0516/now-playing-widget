@@ -28,6 +28,7 @@ import CoreText
             DispatchQueue.main.async { guard let self else { return }; if !self.client.song.title.isEmpty { self.overlay.show() }; self.updateMenu() }
         }.store(in: &subscriptions)
         client.$lines.sink { [weak self] _ in DispatchQueue.main.async { guard let self else { return }; self.overlay.refresh() } }.store(in: &subscriptions)
+        client.$titleRevision.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$artwork.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         hotkeys.action = { [weak self] id in
             guard let self else { return }

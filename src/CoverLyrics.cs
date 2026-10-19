@@ -278,6 +278,27 @@ namespace PearNowPlaying
             return sb.ToString();
         }
 
+        static readonly Regex FeatTail = new Regex(@"\s*(?:[\(（\[]\s*(?:feat|ft)\b\.?[^\)）\]]*[\)）\]]|\s(?:feat|ft)\.?\s.*)\s*$", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// The title to show for an album track. YouTube Music hands Pear the title in the app's language: a track
+        /// whose label registered a translated title shows only the translation ("Only Words"), while YouTube
+        /// Music's own queue lists it as "original - translation" ("心を刺す言葉だけ - Only Words (feat. …)").
+        /// When the queue title is exactly that pair and its second half is Pear's title, show both; otherwise
+        /// (no translation, Pear already showing the original, titles that merely contain " - ") keep Pear's title.
+        /// "(feat. …)" follows Pear's title: kept if Pear has it, not added otherwise.
+        /// </summary>
+        public static string DisplayTitle(string pearTitle, string queueTitle)
+        {
+            if (string.IsNullOrWhiteSpace(pearTitle) || string.IsNullOrWhiteSpace(queueTitle)) return pearTitle ?? "";
+            var core = FeatTail.Replace(pearTitle, "").Trim();
+            var feat = pearTitle.Trim().Substring(core.Length);
+            var parts = Regex.Split(FeatTail.Replace(queueTitle, "").Trim(), @"\s+[-－–—]\s+");
+            if (parts.Length != 2 || parts[0].Trim().Length == 0) return pearTitle;
+            if (Norm(parts[1]) != Norm(core) || Norm(parts[0]) == Norm(core)) return pearTitle;
+            return parts[0].Trim() + " - " + parts[1].Trim() + feat;
+        }
+
         /// <summary>Does a search hit's title name the same song? (case/width/punctuation ignored; "(feat. …)" etc. allowed)</summary>
         public static bool SameTitle(string hit, string wanted)
         {

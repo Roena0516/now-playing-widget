@@ -168,7 +168,7 @@ final class OverlayPanel: NSPanel {
                 })
             }
         }
-        let title = kind == .info ? (infoText ?? client.status) : client.song.title
+        let title = kind == .info ? (infoText ?? client.status) : client.cardTitle
         marqueeActive = NativeTheme.width(title, font: NativeTheme.font(17, medium: true)) > NativeRenderer.cardLayout(client, kind: kind).textWidth + 0.5
         cardCanvas.needsDisplay = true; lyricsCanvas.needsDisplay = true
         layout(); tick()

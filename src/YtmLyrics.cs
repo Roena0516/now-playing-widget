@@ -107,6 +107,15 @@ namespace PearNowPlaying
             };
         }
 
+        /// <summary>What a lookup earlier in this session learned about the video (no request), or null.</summary>
+        public TrackInfo Known(string videoId)
+        {
+            TrackInfo known;
+            if (string.IsNullOrEmpty(videoId)) return null;
+            if (Recall(lookups, videoId + "|L", out known) || Recall(lookups, videoId + "|M", out known)) return Copy(known);
+            return null;
+        }
+
         public async Task<TrackInfo> Lookup(string videoId, CancellationToken ct, bool withLyrics = true)
         {
             TrackInfo known;

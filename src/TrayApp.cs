@@ -281,6 +281,7 @@ namespace PearNowPlaying
                                         : result.Instrumental ? "가사: 연주곡"
                                         : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
                     if (!result.Failed) PrefetchNext(key);
+                    UpdateDisplayTitle(snapshot);
                     if (announceKey == key)
                     {
                         announceKey = null;
@@ -404,6 +405,40 @@ namespace PearNowPlaying
             TickLyrics(true);
         }
 
+        // ---- album track titles -----------------------------------------------------------
+
+        /// <summary>
+        /// The song as the card shows it: an album track whose title Pear gives only as a translation is shown as
+        /// "original - translation" (see CoverLyrics.DisplayTitle), once YouTube Music's queue entry is known.
+        /// </summary>
+        SongInfo ForCard(SongInfo song)
+        {
+            if (song.MediaType != "AUDIO") return song;
+            var track = lyricsProvider.Ytm.Known(song.VideoId);
+            if (track == null) return song;
+            var title = CoverLyrics.DisplayTitle(song.Title, track.Title);
+            return title == song.Title ? song : song.WithTitle(title);
+        }
+
+        /// <summary>
+        /// After the lyrics lookup: its YouTube Music answer carries the queue title, so show it. If the lyrics came
+        /// from a cache without asking YouTube Music, ask for the title alone (once per video and session).
+        /// </summary>
+        void UpdateDisplayTitle(SongInfo song)
+        {
+            if (song.MediaType != "AUDIO" || string.IsNullOrEmpty(song.VideoId)) return;
+            if (lyricsProvider.Ytm.Known(song.VideoId) != null) { if (cardWin.IsShowing) Rerender(); return; }
+            if (!cfg.YtmLyrics || lyricsProvider.Ytm.Paused) return;
+            var ct = lyricsCts != null ? lyricsCts.Token : CancellationToken.None;
+            Task.Run(async () =>
+            {
+                try { await lyricsProvider.Ytm.Lookup(song.VideoId, ct, false); }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) { Log.Write("INFO title lookup failed for " + song.VideoId + ": " + ex.Message); return; }
+                ui.Post(_ => { if (pear.Current.VideoId == song.VideoId && cardWin.IsShowing) Rerender(); }, null);
+            });
+        }
+
         // ---- card rendering ---------------------------------------------------------
 
         CardKind CurrentKind()
@@ -424,7 +459,7 @@ namespace PearNowPlaying
             infoUntil = DateTime.MinValue;
             song.Elapsed = PlaybackPositionFor(song);
             if (!cardWin.IsPresent || kind == CardKind.NowPlaying) marquee.Restart();
-            SetCardFrame(CardRenderer.BuildCard(song, kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
+            SetCardFrame(CardRenderer.BuildCard(ForCard(song), kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
             var bmp = cardFrame.Compose(MarqueeOffset());
             cardWin.ShowCard(bmp, PlaceCard(bmp.Size), KeepCard ? (double?)null : cfg.ShowSeconds);
             Reposition();
@@ -467,7 +502,7 @@ namespace PearNowPlaying
             var kind = lastKind;
             if (cardWin.IsPinned && kind == CardKind.Resumed) kind = CardKind.NowPlaying;
             song.Elapsed = PlaybackPositionFor(song);
-            SetCardFrame(CardRenderer.BuildCard(song, kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
+            SetCardFrame(CardRenderer.BuildCard(ForCard(song), kind, null, artImage, cfg.ShowAlbumArt, Scale, cfg.Opacity, PanelWidth, true));
             var bmp = cardFrame.Compose(MarqueeOffset());
             cardWin.UpdateCard(bmp, PlaceCard(bmp.Size));
             StartMarquee();

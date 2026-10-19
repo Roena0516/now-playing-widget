@@ -7,6 +7,8 @@ import Combine
     @Published var lines: [LyricLine] = []
     @Published var lyricsStatus = "가사 대기 중"
     @Published var artwork: Data?
+    /// Bumped when an album track's display title becomes known (see cardTitle).
+    @Published var titleRevision = 0
     var onLyricsNotice: ((String?) -> Void)?
     @Published var settings = Settings.load()
     private var connection: Task<Void, Never>?
@@ -155,6 +157,7 @@ import Combine
                     }
                     if force { onLyricsNotice?(LyricsNotice.message(for: result)) }
                     prefetchNext(after: track)
+                    updateDisplayTitle(track)
                     return
                 } catch {
                     if Task.isCancelled { return }
@@ -189,6 +192,26 @@ import Combine
         }
     }
     static var prefetchWaits: [Double] = [10, 30, 90]
+
+    /// The title the card shows: an album track whose title Pear gives only as a translation is shown as
+    /// "original - translation" (see CoverLyrics.displayTitle), once YouTube Music's queue entry is known.
+    var cardTitle: String {
+        guard song.mediaType == "AUDIO", let track = lyrics.ytm.known(song.videoId) else { return song.title }
+        return CoverLyrics.displayTitle(song.title, queueTitle: track.title)
+    }
+
+    /// After the lyrics lookup: its YouTube Music answer carries the queue title, so show it. If the lyrics came
+    /// from a cache without asking YouTube Music, ask for the title alone (once per video and session).
+    private func updateDisplayTitle(_ track: Song) {
+        guard track.mediaType == "AUDIO", !track.videoId.isEmpty else { return }
+        if lyrics.ytm.known(track.videoId) != nil { titleRevision += 1; return }
+        guard settings.ytmLyrics, !lyrics.ytm.paused else { return }
+        Task {
+            do { _ = try await lyrics.ytm.lookup(track.videoId, withLyrics: false) }
+            catch { if !Task.isCancelled { LyricsLog.write("INFO title lookup failed for \(track.videoId): \(error.localizedDescription)") }; return }
+            if song.videoId == track.videoId { titleRevision += 1 }
+        }
+    }
 
     /// The next song in Pear's queue (GET /api/v1/queue/next): title, artist, video ID and length only.
     /// Nil when there is no next song or Pear can't be asked.
