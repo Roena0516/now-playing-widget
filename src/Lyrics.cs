@@ -604,8 +604,31 @@ namespace PearNowPlaying
                 candidates = candidates.Where(c => Math.Abs(Num(c, "duration") - song.Duration) <= 15)
                                        .OrderBy(c => Math.Abs(Num(c, "duration") - song.Duration)).ToList();
             // prefer entries that actually have timestamps
-            return candidates.FirstOrDefault(c => !string.IsNullOrEmpty(Str(c, "syncedLyrics")))
-                ?? candidates.FirstOrDefault(c => Bool(c, "instrumental"));
+            var synced = candidates.FirstOrDefault(c => !string.IsNullOrEmpty(Str(c, "syncedLyrics")));
+            if (synced != null) return synced;
+            // "instrumental" hides the lyrics, so it has to be about this very version: other remixes of the song
+            // fall within the length tolerance too (PUPA (Endorfin. Remix) took the uma remix's mark). And if an entry
+            // of this version has words, the mark is someone's mistake.
+            var same = candidates.Where(c => SameVersion(Str(c, "trackName"), song)).ToList();
+            if (same.Any(c => !Bool(c, "instrumental") && !string.IsNullOrWhiteSpace(Str(c, "plainLyrics")))) return null;
+            return same.FirstOrDefault(c => Bool(c, "instrumental"));
+        }
+
+        /// <summary>
+        /// The same title once featured artists are left out, so remix and version tags must agree:
+        /// "PUPA (feat. Endorfin.) [Endorfin. Remix]" is "PUPA (Endorfin. Remix)", but "PUPA (uma Remix)" and "PUPA" are not.
+        /// </summary>
+        internal static bool SameVersion(string trackName, SongInfo song)
+        {
+            var t = Norm(WithoutFeat(trackName));
+            return t.Length > 0 && new[] { song.Title, song.AltTitle }.Any(x => Norm(WithoutFeat(x)) == t);
+        }
+
+        static string WithoutFeat(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return "";
+            var t = Regex.Replace(title, @"[\(\[（][^\)\]）]*\b(feat|ft|with)\b[^\)\]）]*[\)\]）]", " ", RegexOptions.IgnoreCase);
+            return Regex.Replace(t, @"\s+(feat\.?|ft\.?)\s.*$", "", RegexOptions.IgnoreCase);
         }
 
         /// <summary>A result's track name is this song (its title, alternative title or cleaned-up title).</summary>

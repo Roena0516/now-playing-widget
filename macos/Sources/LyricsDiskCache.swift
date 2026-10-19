@@ -10,7 +10,8 @@ import Foundation
     static let maxAge: TimeInterval = 90 * 86400
     /// Entries of older formats are dropped. 2 (1.7.1): 1.6–1.7 could save a same-name song's lyrics for a cover
     /// whose original didn't fit (see LyricsFinder.fromOriginal), so their entries are looked up again once.
-    nonisolated static let formatVersion = 2
+    /// 3 (1.7.3): another version's "instrumental" mark could be saved for a remix (see LyricsProvider.pick).
+    nonisolated static let formatVersion = 3
 
     private struct Entry: Codable {
         struct Line: Codable { var timeMs: Int; var text: String }

@@ -169,7 +169,23 @@ struct LyricRecord: Decodable {
                 .sorted { abs(($0.duration ?? 0) - song.duration) < abs(($1.duration ?? 0) - song.duration) }
         }
         // prefer entries that actually have timestamps
-        return candidates.first(where: \.hasSynced) ?? candidates.first { $0.instrumental == true }
+        if let synced = candidates.first(where: \.hasSynced) { return synced }
+        // "instrumental" hides the lyrics, so it has to be about this very version: other remixes of the song
+        // fall within the length tolerance too (PUPA (Endorfin. Remix) took the uma remix's mark). And if an entry
+        // of this version has words, the mark is someone's mistake. Same as src/Lyrics.cs.
+        let same = candidates.filter { sameVersion($0.trackName ?? "", song) }
+        if same.contains(where: { $0.instrumental != true && !($0.plainLyrics ?? "").trimmed.isEmpty }) { return nil }
+        return same.first { $0.instrumental == true }
+    }
+    /// The same title once featured artists are left out, so remix and version tags must agree:
+    /// "PUPA (feat. Endorfin.) [Endorfin. Remix]" is "PUPA (Endorfin. Remix)", but "PUPA (uma Remix)" and "PUPA" are not.
+    static func sameVersion(_ trackName: String, _ song: Song) -> Bool {
+        let t = norm(withoutFeat(trackName))
+        return !t.isEmpty && [song.title, song.alternativeTitle].contains { norm(withoutFeat($0)) == t }
+    }
+    private static func withoutFeat(_ title: String) -> String {
+        title.replacingOccurrences(of: #"[\(\[（][^\)\]）]*\b(feat|ft|with)\b[^\)\]）]*[\)\]）]"#, with: " ", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\s+(feat\.?|ft\.?)\s.*$"#, with: "", options: [.regularExpression, .caseInsensitive])
     }
     /// A result's track name is this song (its title, alternative title or cleaned-up title).
     static func titleFits(_ trackName: String, _ song: Song) -> Bool {
