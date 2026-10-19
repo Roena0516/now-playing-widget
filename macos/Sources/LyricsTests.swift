@@ -302,7 +302,7 @@ import Foundation
         try Data(#"{"version":1,"videoId":"oldVideo001","title":"","artist":"","source":"LRCLIB","instrumental":false,"savedAt":"2000-01-01T00:00:00Z","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
             .write(to: dir.appendingPathComponent("oldVideo001.json"))
         precondition(small.load("oldVideo001") == nil && !FileManager.default.fileExists(atPath: dir.appendingPathComponent("oldVideo001.json").path), "Expired entries are dropped")
-        try Data(#"{"version":2,"videoId":"oldFormat01","title":"","artist":"","source":"LRCLIB · 원곡 검색","instrumental":false,"savedAt":"\#(ISO8601DateFormatter().string(from: Date()))","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
+        try Data(#"{"version":3,"videoId":"oldFormat01","title":"","artist":"","source":"LRCLIB · 원곡 검색","instrumental":false,"savedAt":"\#(ISO8601DateFormatter().string(from: Date()))","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
             .write(to: dir.appendingPathComponent("oldFormat01.json"))
         precondition(small.load("oldFormat01") == nil, "entries of older formats are looked up again")
         small.save(Song(title: "x", artist: "y", videoId: "../../evil1"), .instrumental)

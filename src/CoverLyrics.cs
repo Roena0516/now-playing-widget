@@ -24,6 +24,9 @@ namespace PearNowPlaying
             @"原曲|本家|元曲|オリジナル|original|원곡|오리지널|song\s*by|music\s*by|曲\s*[:：/]|作詞作曲|作曲",
             RegexOptions.IgnoreCase);
 
+        // a title tag saying a song is the singer's own ("【MV】Since 1998.／莉犬【オリジナル曲】"), not the original of this cover
+        static readonly Regex OwnSongTag = new Regex(@"[【\[（(]\s*(オリジナル|original)[^】\]）)]*[】\]）)]", RegexOptions.IgnoreCase);
+
         // lines that point somewhere else (instrumental, other covers, the singer's channel …)
         static readonly Regex OtherHint = new Regex(
             @"off\s*vocal|offvocal|inst\b|instrumental|karaoke|カラオケ|オフボーカル|mix\s*[:：]|illust|イラスト|動画\s*[:：]|movie\s*[:：]|前回|previous|playlist|再生リスト|members|メンバー",
@@ -324,6 +327,20 @@ namespace PearNowPlaying
         }
 
         /// <param name="hinted">IDs whose line (or the line above) says 原曲 / 本家 / original / 원곡.</param>
+        /// <summary>
+        /// The text that says what a link is: its own line and the line above ("原曲" / URL), and one more line up when
+        /// those belong to the same block ("■ご本家様：…" / "プロポーズ / 可不" / URL). A blank line or another link ends the block.
+        /// </summary>
+        static string HintContext(string[] lines, int i)
+        {
+            var context = lines[i];
+            if (i > 0) context += " " + lines[i - 1];
+            if (i > 1 && !string.IsNullOrWhiteSpace(lines[i - 1]) && !VideoLink.IsMatch(lines[i - 1])
+                && !string.IsNullOrWhiteSpace(lines[i - 2]) && !VideoLink.IsMatch(lines[i - 2]))
+                context += " " + lines[i - 2];
+            return context;
+        }
+
         public static List<string> OriginalCandidates(VideoDescription desc, string ownId, out HashSet<string> hinted)
         {
             hinted = new HashSet<string>();
@@ -336,9 +353,8 @@ namespace PearNowPlaying
                 foreach (Match m in VideoLink.Matches(lines[i]))
                 {
                     var id = m.Groups[1].Value;
-                    // the hint is usually on the same line or the line above ("原曲" / URL)
-                    var context = lines[i] + " " + (i > 0 ? lines[i - 1] : "");
-                    int score = OriginalHint.IsMatch(context) ? 2 : 0;
+                    var context = HintContext(lines, i);
+                    int score = OriginalHint.IsMatch(OwnSongTag.Replace(context, " ")) ? 2 : 0;
                     if (score > 0) hinted.Add(id);
                     if (OtherHint.IsMatch(context)) score -= 3;
                     scored.Add(Tuple.Create(id, score, order++));

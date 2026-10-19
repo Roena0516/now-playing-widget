@@ -60,6 +60,9 @@ import Foundation
     check(CoverLyrics.titleMatchesCover(Song(title: "Imperial Girl / 帝国少女 歌ってみた", artist: "Y"), TrackInfo(title: "R Sound Design - 帝国少女", artist: "R Sound Design")) == true, "R Sound Design - 帝国少女")
     let candidates = CoverLyrics.originalCandidates(VideoDescription(text: "原曲 / 本家\nhttps://www.youtube.com/watch?v=AAAAAAAAAAA\nMix: https://youtu.be/BBBBBBBBBBB\n前回の歌ってみた https://youtu.be/CCCCCCCCCCC\nhttps://youtu.be/DDDDDDDDDDD\nhttps://www.youtube.com/watch?list=x&v=EEEEEEEEEEE\nhttps://youtu.be/AAAAAAAAAAA", linkedIds: ["FFFFFFFFFFF"]), ownId: "EEEEEEEEEEE")
     check(candidates.ids == ["AAAAAAAAAAA", "FFFFFFFFFFF"] && candidates.hinted == Set(["AAAAAAAAAAA"]), "original candidates")
+    // "■ご本家様" two lines above its link, and the singer's own songs tagged 【オリジナル曲】 aren't originals (莉犬's プロポーズ)
+    let riinu = CoverLyrics.originalCandidates(VideoDescription(text: "■ご本家様：内緒のピアス 様\nプロポーズ / 可不\nhttps://youtu.be/AAAAAAAAAAA\n■Mix：Y STUDIO 様\n\n🍓【MV】わんぬ／莉犬\nhttps://youtu.be/BBBBBBBBBBB\n\n🍓【MV】Since 1998.／莉犬【オリジナル曲】\nhttps://youtu.be/CCCCCCCCCCC"), ownId: "x")
+    check(riinu.ids == ["AAAAAAAAAAA", "BBBBBBBBBBB", "CCCCCCCCCCC"] && riinu.hinted == Set(["AAAAAAAAAAA"]), "original candidates: ご本家様 block")
     print("PASS: cover parsing matches the Windows version (title/artist guesses, song names, arrangements, cover detection, original links)")
 }
 

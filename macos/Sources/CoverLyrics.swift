@@ -51,6 +51,8 @@ enum CoverLyrics {
     static let originalHint = Rx(#"原曲|本家|元曲|オリジナル|original|원곡|오리지널|song\s*by|music\s*by|曲\s*[:：/]|作詞作曲|作曲"#, ignoreCase: true)
 
     // lines that point somewhere else (instrumental, other covers, the singer's channel …)
+    /// A title tag saying a song is the singer's own ("【MV】Since 1998.／莉犬【オリジナル曲】"), not the original of this cover.
+    static let ownSongTag = Rx(#"[【\[（(]\s*(オリジナル|original)[^】\]）)]*[】\]）)]"#, ignoreCase: true)
     static let otherHint = Rx(#"off\s*vocal|offvocal|inst\b|instrumental|karaoke|カラオケ|オフボーカル|mix\s*[:：]|illust|イラスト|動画\s*[:：]|movie\s*[:：]|前回|previous|playlist|再生リスト|members|メンバー"#, ignoreCase: true)
 
     // titles whose music differs from the original
@@ -286,6 +288,16 @@ enum CoverLyrics {
     /// Up to six video IDs from the description (each costs a request only if the ones before it were no use), the likeliest original first: links on lines that say
     /// "原曲 / 本家 / original / 원곡 …", then other links in order. Links on off-vocal / mix / illust lines last.
     /// `hinted`: IDs whose line (or the line above) says 原曲 / 本家 / original / 원곡.
+    /// The text that says what a link is: its own line and the line above ("原曲" / URL), and one more line up when
+    /// those belong to the same block ("■ご本家様：…" / "プロポーズ / 可不" / URL). A blank line or another link ends the block.
+    static func hintContext(_ lines: [String], _ i: Int) -> String {
+        var context = lines[i]
+        if i > 0 { context += " " + lines[i - 1] }
+        if i > 1, !lines[i - 1].trimmed.isEmpty, !videoLink.matches(lines[i - 1]), !lines[i - 2].trimmed.isEmpty, !videoLink.matches(lines[i - 2]) {
+            context += " " + lines[i - 2]
+        }
+        return context
+    }
     static func originalCandidates(_ desc: VideoDescription?, ownId: String) -> (ids: [String], hinted: Set<String>) {
         guard let desc else { return ([], []) }
         var hinted = Set<String>()
@@ -293,9 +305,8 @@ enum CoverLyrics {
         let lines = desc.text.replacingOccurrences(of: "\r", with: "").components(separatedBy: "\n")
         for (i, line) in lines.enumerated() {
             for m in videoLink.allGroups(line) {
-                // the hint is usually on the same line or the line above ("原曲" / URL)
-                let context = line + " " + (i > 0 ? lines[i - 1] : "")
-                var score = originalHint.matches(context) ? 2 : 0
+                let context = hintContext(lines, i)
+                var score = originalHint.matches(ownSongTag.replace(context, with: " ")) ? 2 : 0
                 if score > 0 { hinted.insert(m[1]) }
                 if otherHint.matches(context) { score -= 3 }
                 scored.append((m[1], score, scored.count))
