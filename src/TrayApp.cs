@@ -52,6 +52,8 @@ namespace PearNowPlaying
         LyricsResult lyrics;
         string lyricsKey;
         string lyricsViewSong;      // the song whose lyrics the lyrics view last laid out
+        List<LyricLine> nextLines;  // the next song's lyrics (fetched ahead), shown below this song's last line
+        string nextLinesFor;        // the lyricsKey they were fetched after
         CancellationTokenSource lyricsCts;
         CancellationTokenSource prefetchCts;
         bool lyricPaused;
@@ -338,6 +340,7 @@ namespace PearNowPlaying
             {
                 // the next song's lyrics while the panel is open: scroll on from the last song's line
                 lyricsView.SetLines(lyrics.Lines, Scale, PanelWidth, lyricsWin.IsPresent && lyricsViewSong != null && lyricsViewSong != lyricsKey);
+                lyricsView.SetNext(nextLinesFor == lyricsKey ? nextLines : null);
                 lyricsViewSong = lyricsKey;
                 lyricsLayoutKey = layoutKey;
                 force = true;
@@ -407,13 +410,33 @@ namespace PearNowPlaying
                             if (track.VideoType != "MUSIC_VIDEO_TYPE_ATV") return;
                             next.MediaType = "AUDIO";
                         }
-                        if (await lyricsProvider.Prefetch(next, ct)) return;
+                        if (await lyricsProvider.Prefetch(next, ct))
+                        {
+                            var known = lyricsProvider.Ahead(next);
+                            if (known != null && known.HasSynced)
+                                ui.Post(_ =>
+                                {
+                                    if (ct.IsCancellationRequested || forKey != lyricsKey) return;
+                                    ShowNextLines(known.Lines);
+                                }, null);
+                            return;
+                        }
                         Log.Info("fetching ahead failed (lyrics server busy or unreachable), will try again while this song plays");
                     }
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { Log.Write("INFO fetching ahead failed: " + ex.Message); }
             });
+        }
+
+        /// <summary>The next song's lyrics below this song's, so its first lines come into view as this one ends.</summary>
+        void ShowNextLines(List<LyricLine> lines)
+        {
+            nextLines = lines;
+            nextLinesFor = lyricsKey;
+            if (lyricsLayoutKey == null || !lyricsView.HasLines) return;   // laid out with them when it happens
+            lyricsView.SetNext(lines);
+            TickLyrics(true);
         }
 
         void RetryLyrics()

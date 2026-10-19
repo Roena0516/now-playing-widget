@@ -123,6 +123,9 @@ struct LrclibFailed: LocalizedError {
 
     /// Look the next song up ahead of time. Only a found result is kept for it; if nothing turns up, the song
     /// is looked up again normally when it starts (with Pear's fuller song info).
+    /// What prefetch has for the next song, without taking it (known does that when the song starts).
+    func ahead(_ next: Song) -> LyricsLookup? { prefetched[next.videoId] ?? cache[Self.key(next)] }
+
     func prefetch(_ next: Song) async throws {
         if cache[Self.key(next)] != nil || prefetched[next.videoId] != nil { return }
         log("INFO fetching lyrics ahead for the next song: \(next.artist) - \(next.title)")

@@ -8,6 +8,8 @@ import Combine
                authorizing = "Pear Desktop에서 허용 대기 중", denied = "Pear Desktop에서 연결 거부됨", connected = "Pear Desktop에 연결됨"
     @Published var status = PearClient.starting
     @Published var lines: [LyricLine] = []
+    /// The next song's lyrics (fetched ahead), shown below this song's last line.
+    @Published var nextLines: [LyricLine] = []
     @Published var lyricsStatus = "가사: -"
     /// How the last lyrics lookup ended (nil while looking), for the "가사 표시" toggle's message.
     private(set) var lyricsOutcome: LyricsLookup?
@@ -185,6 +187,7 @@ import Combine
     }
     func findLyrics(force: Bool = false) {
         lyricTask?.cancel(); prefetchTask?.cancel()
+        nextLines = []
         let track = song
         // already known (fetched ahead, cached): swap the lyrics in place, so the lyrics card doesn't close and
         // reopen (which made the song card drop down and come back up)
@@ -260,6 +263,7 @@ import Combine
                         next.mediaType = "AUDIO"
                     }
                     try await lyrics.prefetch(next)
+                    if !Task.isCancelled, case .synced(let found, _)? = lyrics.ahead(next) { nextLines = found }
                     return
                 } catch {
                     if Task.isCancelled { return }

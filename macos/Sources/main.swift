@@ -40,6 +40,7 @@ import CoreText
             }
         }.store(in: &subscriptions)
         client.$lines.sink { [weak self] _ in DispatchQueue.main.async { guard let self else { return }; self.overlay.refresh() } }.store(in: &subscriptions)
+        client.$nextLines.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$titleRevision.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$artwork.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         registerHotkeys()

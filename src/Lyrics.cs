@@ -444,6 +444,17 @@ namespace PearNowPlaying
         /// is looked up again normally when it starts (with Pear's fuller song info).
         /// </summary>
         /// <returns>false when the lookup failed (lyrics server busy or unreachable) and is worth trying again</returns>
+        /// <summary>What Prefetch has for the next song, without taking it (Known does that when the song starts).</summary>
+        public LyricsResult Ahead(SongInfo next)
+        {
+            lock (gate)
+            {
+                LyricsResult hit;
+                if (!string.IsNullOrEmpty(next.VideoId) && prefetched.TryGetValue(next.VideoId, out hit)) return hit;
+                return cache.TryGetValue(next.VideoId + "|" + next.Title, out hit) ? hit : null;
+            }
+        }
+
         public async Task<bool> Prefetch(SongInfo next, CancellationToken ct)
         {
             lock (gate)

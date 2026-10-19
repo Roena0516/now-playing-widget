@@ -55,6 +55,7 @@ final class OverlayPanel: NSPanel {
     private var lastSecond = -1
     private var lines: [LyricLine] = []
     private var linesSong = ""   // the song whose lyrics `lines` holds
+    private var shownNext: [LyricLine] = []   // the next song's lines shown below this song's
     private var current = -1, previous = -1
     private var scrollFrom: CGFloat = 0, scrollTo: CGFloat = 0
     private var lyricStart = Date.distantPast
@@ -199,11 +200,16 @@ final class OverlayPanel: NSPanel {
             let carry = lyricsVisible && !lines.isEmpty && !client.lines.isEmpty && current >= 0 && linesSong != client.song.identity ? current : nil
             lines = client.lines; linesSong = client.song.identity
             lyrics.setLines(lines, width: client.settings.panelWidth, carryFrom: carry)
-            current = lyrics.carried > 0 ? lyrics.carried - 1   // still on the last song's line; tick() glides on
+            lyrics.setNext(client.nextLines); shownNext = client.nextLines
+            current = lyrics.carriedCurrent >= 0 ? lyrics.carriedCurrent   // still on the last song's line; tick() glides on
                 : lyrics.entry(at: client.elapsed + client.settings.lyricsOffsetMs / 1000, lines: lines)
             previous = -1
             scrollTo = lyrics.entries.indices.contains(current) ? lyrics.entries[current].y - lyrics.anchor : 0
             scrollFrom = scrollTo; lyricStart = .distantPast
+        }
+        else if shownNext != client.nextLines {
+            // the next song's lyrics arrived (or went away): below this song's last line
+            lyrics.setNext(client.nextLines); shownNext = client.nextLines
         }
         let shouldShow = client.settings.showLyrics && !lines.isEmpty && !client.song.title.isEmpty
         if shouldShow != lyricsVisible {
