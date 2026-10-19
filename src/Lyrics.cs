@@ -291,8 +291,10 @@ namespace PearNowPlaying
                     {
                         // "ビノミ - Binomi": also try the title without the romanized/translated half
                         var primary = CoverLyrics.PrimaryTitle(orig.Title, orig.Artist);
+                        // artist names in the title count too (as tags: they vouch for results with this title)
                         var l = await FindLrclib(new SongInfo { Title = orig.Title, AltTitle = primary != orig.Title ? primary : "",
-                                                                Artist = orig.Artist, Duration = orig.Duration, VideoId = id }, ct);
+                                                                Artist = orig.Artist, Duration = orig.Duration, VideoId = id,
+                                                                Tags = CoverLyrics.ArtistsInTitle(orig.Title, primary) }, ct);
                         if (l.HasSynced)
                         {
                             l.Source = "LRCLIB · 원곡";
@@ -715,6 +717,10 @@ namespace PearNowPlaying
                 .Where(it => titles.Contains(Norm(Str(it, "trackName"))) || titles.Contains(Norm(CleanTitle(Str(it, "trackName")))))
                 .Where(it => Math.Abs(Num(it, "duration") - song.Duration) <= tolerance)
                 .ToList();
+            // Lyrics that sing the title are this song's: an album's lyrics can be uploaded under another track's name
+            // (トンデモワンダーズ's, several times, as "チュルリラ・チュルリラ・ダッダッダ!"). Only when some do.
+            var singing = matches.Where(it => titles.Any(t => t.Length >= 3 && Norm(Str(it, "syncedLyrics")).Contains(t))).ToList();
+            if (singing.Count > 0) matches = singing;
             var groups = matches
                 .GroupBy(LyricsTiming)
                 .Select(g => new { Items = g.ToList(), Copies = g.Select(it => Str(it, "id") + "|" + Num(it, "id")).Distinct().Count() })

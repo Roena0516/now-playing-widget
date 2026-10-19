@@ -288,6 +288,18 @@ enum CoverLyrics {
         let t = Rx(#"[\s\u3000]+\S*\s*(?:ver\.?|version)\s*$"#, ignoreCase: true).replace(title, with: "").trimmed
         return t.isEmpty ? title : t
     }
+    /// Artist names written beside the song in a video title: "チュルリラ・チュルリラ・ダッダッダ！ - 和田たけあき(くらげP) /
+    /// Chururira … - KurageP" -> "和田たけあき(くらげP)". YouTube Music may give the channel's romanized name
+    /// ("WADATAKEAKI KurageP") while LRCLIB lists the one in the title. Same as src/CoverLyrics.cs.
+    static func artistsInTitle(_ title: String, songName: String) -> [String] {
+        Rx(#"\s*[/／｜|]\s*"#).split(title).compactMap { part in
+            let dash = dashes.split(part).map(\.trimmed).filter { !$0.isEmpty }
+            guard dash.count == 2 else { return nil }
+            if sameTitle(dash[0], songName) && !sameTitle(dash[1], songName) { return dash[1] }
+            if sameTitle(dash[1], songName) && !sameTitle(dash[0], songName) { return dash[0] }
+            return nil
+        }
+    }
     /// "心を刺す言葉だけ - Only Words" -> both halves (a song LRCLIB may list under either), else none. Same as src/CoverLyrics.cs.
     static func titleHalves(_ title: String) -> [String] {
         let parts = dashes.split(title).map(\.trimmed)

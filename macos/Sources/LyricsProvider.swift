@@ -222,10 +222,14 @@ struct LyricRecord: Decodable {
         var titles = Set([norm(song.title), norm(cleanTitle(song.title))])
         if !song.alternativeTitle.isEmpty { titles.insert(norm(song.alternativeTitle)); titles.insert(norm(cleanTitle(song.alternativeTitle))) }
         titles.remove("")
-        let matches = records.filter {
+        var matches = records.filter {
             $0.hasSynced && $0.fits(song.duration) && abs(($0.duration ?? 0) - song.duration) <= tolerance
                 && (titles.contains(norm($0.trackName ?? "")) || titles.contains(norm(cleanTitle($0.trackName ?? ""))))
         }
+        // Lyrics that sing the title are this song's: an album's lyrics can be uploaded under another track's name
+        // (トンデモワンダーズ's, several times, as "チュルリラ・チュルリラ・ダッダッダ!"). Only when some do.
+        let singing = matches.filter { r in titles.contains { $0.count >= 3 && norm(r.syncedLyrics ?? "").contains($0) } }
+        if !singing.isEmpty { matches = singing }
         func gap(_ r: LyricRecord) -> Double { abs((r.duration ?? 0) - song.duration) }
         func key(_ r: LyricRecord) -> String { r.id.map(String.init) ?? "\(r.trackName ?? "")|\(r.artistName ?? "")|\(r.duration ?? 0)" }
         struct Group { let items: [LyricRecord]; let copies: Int; let closest: Double }

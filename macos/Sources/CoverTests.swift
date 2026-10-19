@@ -69,6 +69,9 @@ import Foundation
     // "■ご本家様" two lines above its link, and the singer's own songs tagged 【オリジナル曲】 aren't originals (莉犬's プロポーズ)
     let riinu = CoverLyrics.originalCandidates(VideoDescription(text: "■ご本家様：内緒のピアス 様\nプロポーズ / 可不\nhttps://youtu.be/AAAAAAAAAAA\n■Mix：Y STUDIO 様\n\n🍓【MV】わんぬ／莉犬\nhttps://youtu.be/BBBBBBBBBBB\n\n🍓【MV】Since 1998.／莉犬【オリジナル曲】\nhttps://youtu.be/CCCCCCCCCCC"), ownId: "x")
     check(riinu.ids == ["AAAAAAAAAAA", "BBBBBBBBBBB", "CCCCCCCCCCC"] && riinu.hinted == Set(["AAAAAAAAAAA"]), "original candidates: ご本家様 block")
+    // artist names beside the song in a video title (expected values from src/CoverLyrics.cs)
+    check(CoverLyrics.artistsInTitle("チュルリラ・チュルリラ・ダッダッダ！ -  和田たけあき(くらげP) / Chururira Chururira Daddadda! - KurageP", songName: "チュルリラ・チュルリラ・ダッダッダ！") == ["和田たけあき(くらげP)"], "artists in title: チュルリラ")
+    check(CoverLyrics.artistsInTitle("Lemon", songName: "Lemon").isEmpty && CoverLyrics.artistsInTitle("DECO*27 - ヴァンパイア feat. 初音ミク", songName: "ヴァンパイア") == ["DECO*27"], "artists in title: none / DECO*27")
     print("PASS: cover parsing matches the Windows version (title/artist guesses, song names, arrangements, cover detection, original links)")
 }
 

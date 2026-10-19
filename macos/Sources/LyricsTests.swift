@@ -60,6 +60,10 @@ import Foundation
     precondition(LyricsProvider.pickByTitle([oneCover, english], song: short, tolerance: 10, copies: 3) == nil, "two different covers and no clear winner: nothing")
     precondition(LyricsProvider.pickByTitle([oneCover, english] + pv, song: short, tolerance: 10, copies: 3)?.artistName == "kasidid2", "three identical uploads win")
     precondition(LyricsProvider.pickByTitle([oneCover], song: short, tolerance: 10, copies: 3)?.artistName == "FalKKonE and Rena", "a single kind of match is taken as is (ryo / supercell)")
+    // another song's lyrics uploaded several times under this title lose to lyrics that sing the title
+    let mislabeled2 = (1...4).map { LyricRecord(trackName: "チュルリラ・チュルリラ・ダッダッダ!", artistName: "ワンダーランズ×ショウタイム", duration: 197, instrumental: false, syncedLyrics: "[00:01.00]エビバディ→解体！\n[03:00.00]トンデモワンダーズ", id: $0) }
+    let singsTitle = LyricRecord(trackName: "チュルリラ・チュルリラ・ダッダッダ!", artistName: "和田たけあき(くらげP)", duration: 196, instrumental: false, syncedLyrics: "[00:15.00]ざっと数えて40名\n[01:00.00]チュルリラ チュルリラ ダッダッダ", id: 9)
+    precondition(LyricsProvider.pickByTitle(mislabeled2 + [singsTitle], song: Song(title: "チュルリラ・チュルリラ・ダッダッダ！", artist: "x", duration: 197))?.artistName == "和田たけあき(くらげP)", "lyrics that sing the title win")
     // a tag only vouches for the artist: "LAMIA" by BlackY (tagged with its own title) must not take Lamia's song
     let lamia = Song(["title": "LAMIA", "alternativeTitle": "LAMIA", "artist": "BlackY", "album": "ONGEKI Sound Collection 06",
                       "tags": ["BlackY", "ブラッキー", "ONGEKI Sound Collection 06", "LAMIA"], "songDuration": 150])
@@ -360,7 +364,7 @@ import Foundation
         try Data(#"{"version":1,"videoId":"oldVideo001","title":"","artist":"","source":"LRCLIB","instrumental":false,"savedAt":"2000-01-01T00:00:00Z","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
             .write(to: dir.appendingPathComponent("oldVideo001.json"))
         precondition(small.load("oldVideo001") == nil && !FileManager.default.fileExists(atPath: dir.appendingPathComponent("oldVideo001.json").path), "Expired entries are dropped")
-        try Data(#"{"version":4,"videoId":"oldFormat01","title":"","artist":"","source":"LRCLIB · 원곡 검색","instrumental":false,"savedAt":"\#(ISO8601DateFormatter().string(from: Date()))","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
+        try Data(#"{"version":5,"videoId":"oldFormat01","title":"","artist":"","source":"LRCLIB · 원곡 검색","instrumental":false,"savedAt":"\#(ISO8601DateFormatter().string(from: Date()))","lines":[{"timeMs":1,"text":"x"}]}"#.utf8)
             .write(to: dir.appendingPathComponent("oldFormat01.json"))
         precondition(small.load("oldFormat01") == nil, "entries of older formats are looked up again")
         small.save(Song(title: "x", artist: "y", videoId: "../../evil1"), .instrumental)

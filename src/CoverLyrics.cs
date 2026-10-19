@@ -328,6 +328,24 @@ namespace PearNowPlaying
             return t.Length > 0 ? t : title;
         }
 
+        /// <summary>
+        /// Artist names written beside the song in a video title: "チュルリラ・チュルリラ・ダッダッダ！ - 和田たけあき(くらげP) /
+        /// Chururira … - KurageP" -> "和田たけあき(くらげP)". YouTube Music may give the channel's romanized name
+        /// ("WADATAKEAKI KurageP") while LRCLIB lists the one in the title.
+        /// </summary>
+        public static List<string> ArtistsInTitle(string title, string songName)
+        {
+            var found = new List<string>();
+            foreach (var part in Regex.Split(title ?? "", @"\s*[/／｜|]\s*"))
+            {
+                var dash = Regex.Split(part, @"\s+[-－–—]\s+").Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+                if (dash.Count != 2) continue;
+                if (SameTitle(dash[0], songName) && !SameTitle(dash[1], songName)) found.Add(dash[1]);
+                else if (SameTitle(dash[1], songName) && !SameTitle(dash[0], songName)) found.Add(dash[0]);
+            }
+            return found;
+        }
+
         /// <summary>"心を刺す言葉だけ - Only Words" -> both halves (a song LRCLIB may list under either), else none.</summary>
         public static List<string> TitleHalves(string title)
         {
