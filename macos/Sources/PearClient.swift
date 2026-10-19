@@ -157,17 +157,18 @@ import Combine
             anchor = Date()
         case "POSITION_CHANGED":
             let position = (message["position"] as? NSNumber)?.doubleValue ?? song.elapsed
-            // At the end of a song Pear reports position 0 about 0.3s before VIDEO_CHANGED names the next song, so
-            // for a moment the old song looks rewound (its lyrics scrolled back to the top). VIDEO_CHANGED brings
-            // the position itself; a song played again gets it from the next tick. Same as src/PearClient.cs.
-            if Self.isRewindAtEnd(position, last: elapsed, duration: song.duration) { break }
+            // When a song ends Pear reports position 0 about 0.3s before VIDEO_CHANGED names the next song, so for a
+            // moment the old song looks rewound (its lyrics scrolled back to the top). Not only in its last seconds:
+            // the length Pear gives can be off, or songs overlap (crossfade). VIDEO_CHANGED brings the position itself;
+            // a seek to the start or a repeated song gets it from the next tick. Same as src/PearClient.cs.
+            if Self.isJumpToStart(position, last: elapsed) { break }
             song.elapsed = position; anchor = Date()
         default: break
         }
     }
-    /// Position 0 while the song was in its last seconds: the next song is starting, not a seek.
-    nonisolated static func isRewindAtEnd(_ position: Double, last: Double, duration: Double) -> Bool {
-        position < 1 && duration > 0 && last >= duration - 3
+    /// Back to 0 from well into the song: most likely the next song starting, so it waits a tick.
+    nonisolated static func isJumpToStart(_ position: Double, last: Double) -> Bool {
+        position < 1 && last >= 10
     }
     func control(_ action: String) {
         Task {
