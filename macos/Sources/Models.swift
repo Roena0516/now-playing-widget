@@ -1,6 +1,6 @@
 import Foundation
 
-let appVersion = "1.5.2"
+let appVersion = "1.6.0"
 
 struct Settings: Codable {
     var host = "127.0.0.1"
