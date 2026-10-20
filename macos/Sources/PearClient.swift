@@ -42,6 +42,7 @@ struct PlayerState {
     static let starting = "연결 준비 중", waiting = "Pear Desktop 기다리는 중 (API 서버 확인)",
                authorizing = "Pear Desktop에서 허용 대기 중", denied = "Pear Desktop에서 연결 거부됨", connected = "Pear Desktop에 연결됨",
                waitingAny = "YouTube Music 기다리는 중 (브라우저, Pear Desktop)", waitingBrowser = "브라우저의 YouTube Music 기다리는 중",
+               notLinked = "Pear Desktop 연결 안 됨 (메뉴에서 연결 요청)",
                browserPrefix = "브라우저 YouTube Music에 연결됨"
     static func browserConnected(_ name: String) -> String { browserPrefix + " (\(name))" }
     @Published var status = PearClient.starting
@@ -127,10 +128,16 @@ struct PlayerState {
         if browserRunning, let name = browser.browser, source == .browser || pearStatus != PearClient.connected { next = PearClient.browserConnected(name) }
         else if settings.source == "browser" { next = PearClient.waitingBrowser }
         else if settings.source == "auto" && pearStatus == PearClient.waiting { next = PearClient.waitingAny }
+        else if settings.source == "auto" && pearStatus == PearClient.notLinked { next = PearClient.waitingBrowser }
         else { next = pearStatus }
         if status != next { status = next }
     }
-    func retryAuth() { token = nil; try? FileManager.default.removeItem(at: tokenFile); start() }
+    /// "Pear Desktop 연결 요청": ask Pear for a token now (Pear shows its allow dialog the first time).
+    func retryAuth() { token = nil; try? FileManager.default.removeItem(at: tokenFile); linkRequested = true; start() }
+    /// Pear is asked for a token only when the user picks "Pear Desktop 연결 요청", or when a token Pear gave before
+    /// was rejected (it expired): never on its own at first start, so Pear's allow dialog doesn't pop up for users of
+    /// the browser alone, and nothing is asked again and again while Pear isn't there.
+    private var linkRequested = false
     func stop() { discord.show(nil); connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); stopBrowser() }
     func reload() { settings = Settings.load(); settings.save(); applyLyricsSources(); start() }
     private func persistToken(_ value: String) throws {
@@ -143,12 +150,29 @@ struct PlayerState {
     private var lastFailure = ""
     private func noteFailure(_ text: String) { if text != lastFailure { lastFailure = text; Log.write(text) } }
 
+    /// Whether Pear's API server answers at all (any HTTP status will do).
+    func apiReachable() async -> Bool {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/song"))
+        request.timeoutInterval = 3
+        guard let (_, response) = try? await session.data(for: request) else { return false }
+        return response is HTTPURLResponse
+    }
+
     private func run() async {
         token = try? String(contentsOf: tokenFile, encoding: .utf8)
         while !Task.isCancelled {
             var closeInfo = ""
             do {
                 if token == nil {
+                    guard linkRequested else { pearStatus = PearClient.notLinked; return }
+                    linkRequested = false
+                    // Pear not there (not running, or its API server plugin off): say so once instead of waiting on it
+                    guard await apiReachable() else {
+                        Log.info("Pear link requested, but its API server doesn't answer at \(baseURL.absoluteString)")
+                        pearStatus = PearClient.notLinked
+                        onLyricsNotice?("Pear Desktop에 연결하지 못했습니다. Pear Desktop이 실행 중이고 API 서버 플러그인이 켜져 있는지 확인해 주십시오")
+                        return
+                    }
                     // the name Pear shows in its allow dialog; kept from the app's old name so updating doesn't ask again
                     var req = URLRequest(url: baseURL.appendingPathComponent("auth/pear-now-playing-macos"))
                     req.httpMethod = "POST"; req.httpBody = Data()
@@ -165,7 +189,7 @@ struct PlayerState {
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                     if code == 403 {
                         pearStatus = PearClient.denied; Log.info("auth denied by Pear (403)")
-                        onLyricsNotice?("Pear Desktop에서 연결이 거부되었습니다. 메뉴의 'Pear 연결 권한 다시 요청'으로 다시 시도할 수 있습니다.")
+                        onLyricsNotice?("Pear Desktop에서 연결이 거부되었습니다. 메뉴의 'Pear Desktop 연결 요청'으로 다시 시도할 수 있습니다.")
                         return
                     }
                     guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any], let value = obj["accessToken"] as? String, !value.isEmpty else {
@@ -204,6 +228,7 @@ struct PlayerState {
                     if ws.closeCode == .policyViolation || http == 401 {
                         Log.info("token rejected by Pear\(closeInfo), requesting a new one")
                         token = nil; try? FileManager.default.removeItem(at: tokenFile)
+                        linkRequested = true   // linked before: a new token is asked for at once
                     }
                     throw error
                 }

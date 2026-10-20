@@ -14,6 +14,7 @@ from pathlib import Path
 
 TOKEN = 'integration-token'
 controls = []
+auth_requests = []
 # Pear 3.11 checks a bearer header on the WebSocket upgrade (and answers 401); 3.12 accepts the upgrade and
 # reads the `token` query parameter, closing with 1008 when it is missing. The app must work with both.
 MODE = '3.12'
@@ -31,6 +32,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers.get('Content-Length', '0')))
         if self.path == '/auth/pear-now-playing-macos':
+            auth_requests.append(self.path)
             self.reply(200, {'accessToken': TOKEN})
         elif self.path in ['/api/v1/next', '/api/v1/previous', '/api/v1/toggle-play']:
             if self.headers.get('Authorization') != 'Bearer ' + TOKEN:
@@ -49,6 +51,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/test-controls':
             self.reply(200, controls)
+            return
+        if self.path == '/test-auth':
+            self.reply(200, {'count': len(auth_requests)})
             return
         if self.path == '/api/v1/queue/next':
             if self.headers.get('Authorization') != 'Bearer ' + TOKEN:

@@ -14,7 +14,8 @@ using System.Web.Script.Serialization;
 
 namespace PearNowPlaying
 {
-    internal enum PearStatus { Starting, Waiting, Authorizing, Denied, Connected }
+    /// <summary>NotLinked: no token yet, and Pear isn't asked for one until the user picks "Pear Desktop 연결 요청".</summary>
+    internal enum PearStatus { Starting, Waiting, Authorizing, Denied, Connected, NotLinked }
 
     /// <summary>Where songs come from: Pear Desktop's API server, or YouTube Music in a web browser (BrowserSource).</summary>
     internal enum SongSource { Pear, Browser }
@@ -139,6 +140,15 @@ namespace PearNowPlaying
 
         /// <summary>Pear's connection state changed.</summary>
         public event Action<PearStatus> StatusChanged;
+        /// <summary>A message for the user (shown as an info card).</summary>
+        public event Action<string> Notice;
+
+        /// <summary>
+        /// Pear is asked for a token only when the user picks "Pear Desktop 연결 요청", or when a token Pear gave before
+        /// was rejected (it expired): never on its own at first start, so Pear's allow dialog doesn't pop up for users of
+        /// the browser alone, and nothing is asked again and again while Pear isn't there.
+        /// </summary>
+        volatile bool linkRequested;
         /// <summary>The status line changed (Pear's state, the browser playing, or the source shown).</summary>
         public event Action StatusLineChanged;
         public event Action<SongInfo, bool> SongUpdated;   // (song, isNewSong)
@@ -192,9 +202,10 @@ namespace PearNowPlaying
             ApplySource();
         }
 
-        /// <summary>Called from the tray menu after the user was denied, to ask Pear again.</summary>
+        /// <summary>"Pear Desktop 연결 요청" in the tray menu: ask Pear for a token now (its allow dialog the first time).</summary>
         public void RetryAuth()
         {
+            linkRequested = true;
             retrySignal.Release();
             Abort();
         }
@@ -214,8 +225,24 @@ namespace PearNowPlaying
                     token = Config.ReadToken();
                     if (string.IsNullOrEmpty(token))
                     {
-                        var result = await RequestToken(ct);
-                        if (result == AuthResult.Unreachable) { SetStatus(PearStatus.Waiting); await Wait(3000, ct); continue; }
+                        if (!linkRequested)
+                        {
+                            SetStatus(PearStatus.NotLinked);
+                            await retrySignal.WaitAsync(ct);   // until "Pear Desktop 연결 요청" (or a reconnect)
+                            continue;
+                        }
+                        linkRequested = false;
+                        // Pear not there (not running, or its API server plugin off): say so once. (On Windows a refused
+                        // local connection takes about 2 seconds, which looked like Pear holding the request open for
+                        // its allow dialog: "'허용'을 눌러 주십시오" every few seconds without Pear.)
+                        var result = await Reachable(ct) ? await RequestToken(ct) : AuthResult.Unreachable;
+                        if (result == AuthResult.Unreachable)
+                        {
+                            Log.Info("Pear link requested, but its API server doesn't answer at " + cfg.BaseHttp);
+                            SetStatus(PearStatus.NotLinked);
+                            Post(() => { var h = Notice; if (h != null) h("Pear Desktop에 연결하지 못했습니다. Pear Desktop이 실행 중이고 API 서버 플러그인이 켜져 있는지 확인해 주십시오"); });
+                            continue;
+                        }
                         if (result == AuthResult.Denied)
                         {
                             SetStatus(PearStatus.Denied);
@@ -231,6 +258,7 @@ namespace PearNowPlaying
                         Log.Info("token rejected by Pear, requesting a new one");
                         Config.WriteToken(null);
                         token = null;
+                        linkRequested = true;   // linked before: a new token is asked for at once
                         continue;
                     }
                     SetStatus(PearStatus.Waiting);
@@ -253,6 +281,21 @@ namespace PearNowPlaying
         }
 
         enum AuthResult { Ok, Denied, Unreachable }
+
+        /// <summary>Whether Pear's API server answers at all (any HTTP status will do).</summary>
+        async Task<bool> Reachable(CancellationToken ct)
+        {
+            try
+            {
+                using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    timeout.CancelAfter(TimeSpan.FromSeconds(4));
+                    using (await http.GetAsync(cfg.BaseHttp + "/api/v1/song", timeout.Token)) return true;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch { return false; }
+        }
 
         async Task<AuthResult> RequestToken(CancellationToken ct)
         {
@@ -508,12 +551,14 @@ namespace PearNowPlaying
                 if (name != null && (Source == SongSource.Browser || Status != PearStatus.Connected)) return "브라우저 YouTube Music에 연결됨 (" + name + ")";
                 if (cfg.Source == "browser") return "브라우저의 YouTube Music 기다리는 중";
                 if (cfg.Source == "auto" && Status == PearStatus.Waiting) return "YouTube Music 기다리는 중 (브라우저, Pear Desktop)";
+                if (cfg.Source == "auto" && Status == PearStatus.NotLinked) return "브라우저의 YouTube Music 기다리는 중";
                 switch (Status)
                 {
                     case PearStatus.Waiting: return "Pear Desktop 기다리는 중 (API 서버 확인)";
                     case PearStatus.Authorizing: return "Pear Desktop에서 허용 대기 중";
                     case PearStatus.Denied: return "Pear Desktop에서 연결 거부됨";
                     case PearStatus.Connected: return "Pear Desktop에 연결됨";
+                    case PearStatus.NotLinked: return "Pear Desktop 연결 안 됨 (메뉴에서 연결 요청)";
                     default: return "연결 준비 중";
                 }
             }

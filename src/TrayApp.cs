@@ -131,7 +131,7 @@ namespace PearNowPlaying
             discordButtonItem = new ToolStripMenuItem("GitHub 버튼 표시", null, (s, e) => { cfg.DiscordButton = !cfg.DiscordButton; cfg.Save(); SyncDiscord(); });
             discordMenu = new ToolStripMenuItem("Discord");
             discordMenu.DropDownItems.AddRange(new ToolStripItem[] { discordItem, discordButtonItem });
-            retryAuthItem = new ToolStripMenuItem("Pear 연결 권한 다시 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); });
+            retryAuthItem = new ToolStripMenuItem("Pear Desktop 연결 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); });
 
             // at the top, so a new version ("업데이트 설치 (x.y.z)") is seen first
             updateItem = new ToolStripMenuItem("업데이트 확인", null, (s, e) => UpdateClicked());
@@ -182,6 +182,7 @@ namespace PearNowPlaying
             pear = new PearClient(ui, cfg, lyricsProvider.Ytm);
             pear.StatusChanged += OnStatus;
             pear.StatusLineChanged += OnStatusLine;
+            pear.Notice += ShowInfo;
             pear.SongUpdated += OnSong;
             pear.PlayStateChanged += OnPlayState;
             pear.PositionChanged += OnPosition;
@@ -228,7 +229,7 @@ namespace PearNowPlaying
                     ShowInfo("Pear Desktop에서 '허용'을 눌러 주십시오");
                     break;
                 case PearStatus.Denied:
-                    Balloon("Pear Desktop에서 연결이 거부되었습니다. 트레이 메뉴의 'Pear 연결 권한 다시 요청'으로 다시 시도할 수 있습니다.");
+                    Balloon("Pear Desktop에서 연결이 거부되었습니다. 트레이 메뉴의 'Pear Desktop 연결 요청'으로 다시 시도할 수 있습니다.");
                     break;
                 case PearStatus.Connected:
                     if (!everConnected)

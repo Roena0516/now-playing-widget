@@ -175,8 +175,28 @@ import CoreGraphics
         precondition(Set(controls) == Set(["next", "previous", "toggle-play"]))
         let next = try await client.nextSong()
         precondition(next?.title == "다음 곡" && next?.artist == "다음 가수" && next?.videoId == "next-track01" && next?.duration == 185 && next?.mediaType == "UNKNOWN", "queue/next")
-        print("PASS: expired-token reconnect, POST auth, WebSocket song/state/seek, bearer controls, token permissions, next song in the queue")
         client.stop(); try? FileManager.default.removeItem(at: directory)
+
+        // never linked: Pear isn't asked for a token (no allow dialog) until the user picks "Pear Desktop 연결 요청"
+        func authRequests() async throws -> Int {
+            let (data, _) = try await URLSession.shared.data(from: client.baseURL.appendingPathComponent("test-auth"))
+            return ((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["count"] as? Int) ?? -1
+        }
+        let fresh = FileManager.default.temporaryDirectory.appendingPathComponent("pear-integration-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: fresh) }
+        let newcomer = PearClient(directory: fresh, loadRemoteAssets: false)
+        newcomer.settings.port = client.settings.port; newcomer.settings.source = "pear"
+        let before = try await authRequests()
+        newcomer.start()
+        try await Task.sleep(for: .milliseconds(1500))
+        let unasked = try await authRequests()
+        precondition(unasked == before && newcomer.status == PearClient.notLinked, "no token request on its own: \(newcomer.status)")
+        newcomer.retryAuth()
+        for _ in 0..<60 { if newcomer.song.videoId == "integration-track" { break }; try await Task.sleep(for: .milliseconds(100)) }
+        let asked = try await authRequests()
+        precondition(asked == before + 1 && newcomer.song.videoId == "integration-track", "linked when asked")
+        newcomer.stop()
+        print("PASS: expired-token reconnect, POST auth, WebSocket song/state/seek, bearer controls, token permissions, next song in the queue, no token request until asked")
         exit(0)
     } catch { fputs("Integration failed: \(error)\n", stderr); exit(1) }
 }

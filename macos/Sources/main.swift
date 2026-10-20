@@ -224,7 +224,7 @@ import CoreText
         add(discord, "GitHub 버튼 표시", client.settings.discordPresence ? #selector(toggleDiscordButton) : nil, state: client.settings.discordButton)
         submenu(menu, "Discord", discord)
         menu.addItem(.separator())
-        if client.settings.source != "browser" { add(menu, "Pear 연결 권한 다시 요청", #selector(retry)) }
+        if client.settings.source != "browser" { add(menu, "Pear Desktop 연결 요청", #selector(retry)) }
         add(menu, "설정 파일 열기", #selector(openConfig))
         add(menu, "설정 다시 불러오기", #selector(reload))
         add(menu, "오류 기록 열기", #selector(openLog))
