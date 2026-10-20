@@ -202,6 +202,19 @@ func parseLRC(_ source: String) -> [LyricLine] {
         let text = line.replacingOccurrences(of: #"<\d+:\d+(?:[.:]\d+)?>\s*"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
         entries += times.map { ($0, text.isEmpty ? "♪" : text) }
     }
-    return entries.map { (max(0, $0.0 + offset), $0.1) }.sorted { $0.0 < $1.0 }.enumerated().map { LyricLine(id: $0.offset, time: $0.element.0, text: $0.element.1) }
+    // sorted by time, keeping the file's order within a time
+    let sorted = entries.enumerated().map { (max(0, $0.element.0 + offset), $0.offset, $0.element.1) }.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
+    return firstPerTime(sorted.enumerated().map { LyricLine(id: $0.offset, time: $0.element.0, text: $0.element.2) })
+}
+
+/// Only the first of lines sharing a time stamp (lines sorted by time), numbered again. Some uploads put a
+/// romanization or translation under the same stamp as each line ("無敵の笑顔で荒らすメディア" / "Muteki no egao de
+/// arasu media"); both would show, and the highlight would sit on the second. Same as Lrc.FirstPerTime in src/Lyrics.cs.
+func firstPerTime(_ lines: [LyricLine]) -> [LyricLine] {
+    var kept: [LyricLine] = []
+    for line in lines where kept.last.map({ Int(($0.time * 1000).rounded()) != Int((line.time * 1000).rounded()) }) ?? true {
+        kept.append(LyricLine(id: kept.count, time: line.time, text: line.text))
+    }
+    return kept
 }
 func activeLyric(_ lines: [LyricLine], at time: Double) -> Int? { lines.lastIndex { $0.time <= time } }

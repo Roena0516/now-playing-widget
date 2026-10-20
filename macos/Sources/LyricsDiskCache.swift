@@ -60,8 +60,9 @@ import Foundation
                 try? FileManager.default.removeItem(at: url); return nil
             }
             if entry.instrumental { return .instrumental }
-            let lines = entry.lines.sorted { $0.timeMs < $1.timeMs }.enumerated()
-                .map { LyricLine(id: $0.offset, time: Double($0.element.timeMs) / 1000, text: $0.element.text) }
+            // stable by time; lines saved before 1.9.3 may still share a time stamp
+            let lines = firstPerTime(entry.lines.enumerated().sorted { ($0.element.timeMs, $0.offset) < ($1.element.timeMs, $1.offset) }
+                .map { LyricLine(id: 0, time: Double($0.element.timeMs) / 1000, text: $0.element.text) })
             return .synced(lines, source: entry.source)
         } catch {
             log("INFO lyrics cache: couldn't read \(videoId) (\(error.localizedDescription))")

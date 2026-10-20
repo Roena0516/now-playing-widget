@@ -94,7 +94,20 @@ namespace PearNowPlaying
             }
             // applied the same way as Pear Desktop's parser
             if (offset != 0) foreach (var l in lines) l.TimeMs = Math.Max(0, l.TimeMs + offset);
-            return lines.OrderBy(l => l.TimeMs).ToList();
+            return FirstPerTime(lines.OrderBy(l => l.TimeMs).ToList());   // OrderBy is stable: file order within a time
+        }
+
+        /// <summary>
+        /// Only the first of lines sharing a time stamp (lines sorted by time). Some uploads put a romanization or
+        /// translation under the same stamp as each line ("無敵の笑顔で荒らすメディア" / "Muteki no egao de arasu
+        /// media"); both would show, and the highlight would sit on the second.
+        /// </summary>
+        public static List<LyricLine> FirstPerTime(List<LyricLine> lines)
+        {
+            var kept = new List<LyricLine>(lines.Count);
+            foreach (var l in lines)
+                if (kept.Count == 0 || kept[kept.Count - 1].TimeMs != l.TimeMs) kept.Add(l);
+            return kept;
         }
     }
 

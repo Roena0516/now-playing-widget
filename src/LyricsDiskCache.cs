@@ -92,7 +92,7 @@ namespace PearNowPlaying
                     object inst;
                     bool instrumental = d.TryGetValue("instrumental", out inst) && inst is bool && (bool)inst;
                     if (lines.Count == 0 && !instrumental) { File.Delete(path); return null; }
-                    return new LyricsResult { Lines = lines.OrderBy(l => l.TimeMs).ToList(), Instrumental = instrumental, Source = Str(d, "source") };
+                    return new LyricsResult { Lines = Lrc.FirstPerTime(lines.OrderBy(l => l.TimeMs).ToList()), Instrumental = instrumental, Source = Str(d, "source") };
                 }
                 catch (Exception ex)
                 {

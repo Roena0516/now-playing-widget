@@ -10,6 +10,15 @@ import CoreGraphics
     let enhanced = parseLRC("[00:01:25]<00:01.250>hello\n[00:02.1234]second\n[offset:100]\n[offset:-200]")
     precondition(enhanced.count == 2 && enhanced[0].text == "hello" && abs(enhanced[0].time - 1.05) < 0.00001 && abs(enhanced[1].time - 1.923) < 0.00001)
     precondition(parseLRC("not a lyric [00:01]ignored").isEmpty)
+    // lines sharing a stamp (a romanization under each line): only the first is kept
+    let doubled = parseLRC("[00:03.78]知りたいその秘密\n[00:00.87]無敵の笑顔で\n[00:00.87]Muteki no egao de\n[00:03.78]Shiritai sono himitsu\n[00:05.00](You're my savior)\n[00:05.00](You're my savior)")
+    precondition(doubled.map(\.text) == ["無敵の笑顔で", "知りたいその秘密", "(You're my savior)"] && doubled.map(\.id) == [0, 1, 2], "first line per stamp: \(doubled.map(\.text))")
+    let savedDir = FileManager.default.temporaryDirectory.appendingPathComponent("pear-lyrics-doubled-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: savedDir) }
+    let saved = LyricsDiskCache(directory: savedDir)
+    saved.save(Song(title: "アイドル", artist: "YOASOBI", videoId: "doubledVid1", duration: 215),
+               .synced([LyricLine(id: 0, time: 0.87, text: "無敵の笑顔で"), LyricLine(id: 1, time: 0.87, text: "Muteki no egao de"), LyricLine(id: 2, time: 3.78, text: "知りたい")], source: "LRCLIB"))
+    guard case .synced(let reloaded, _)? = saved.load("doubledVid1"), reloaded.map(\.text) == ["無敵の笑顔で", "知りたい"] else { preconditionFailure("saved lines sharing a stamp: first only") }
     let client = PearClient(loadRemoteAssets: false)
     client.handle(["type": "PLAYER_INFO", "isPlaying": false, "position": 20, "song": ["alternativeTitle": "日本語", "songDuration": 200, "videoId": "test"]])
     precondition(client.song.title == "日本語" && client.song.paused && client.elapsed == 20)
