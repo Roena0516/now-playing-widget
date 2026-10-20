@@ -29,6 +29,15 @@ enum Log {
         } catch { NSLog("Pear Now Playing log: %@", error.localizedDescription) }
     }
 
+    /// " (built yyyy-MM-dd HH:mm)": when this executable was built (its modification time, kept by the DMG and
+    /// updates), so logs of builds that share a version number can be told apart.
+    static var buildStamp: String {
+        guard let path = Bundle.main.executablePath,
+              let built = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { return "" }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd HH:mm"
+        return " (built \(f.string(from: built)))"
+    }
+
     /// Versions before 1.5.3 kept only lyrics lookups, in lyrics.log: carry it over.
     static func migrate() {
         let old = file.deletingLastPathComponent().appendingPathComponent("lyrics.log")

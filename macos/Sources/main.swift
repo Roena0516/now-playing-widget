@@ -18,7 +18,7 @@ import CoreText
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         Log.migrate()
-        Log.info("start \(appVersion)")
+        Log.info("start \(appVersion)\(Log.buildStamp)")
         registerFonts()
         client.settings.save()
         overlay = OverlayController(client: client, preview: preview)

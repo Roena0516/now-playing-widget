@@ -18,6 +18,19 @@ namespace PearNowPlaying
     internal static class AppInfo
     {
         public static readonly string Version = typeof(AppInfo).Assembly.GetName().Version.ToString(3);
+
+        /// <summary>
+        /// " (built yyyy-MM-dd HH:mm)": when this exe was built (its modification time, kept by the release zip and
+        /// updates), so logs of builds that share a version number can be told apart.
+        /// </summary>
+        public static string BuildStamp
+        {
+            get
+            {
+                try { return " (built " + System.IO.File.GetLastWriteTime(Application.ExecutablePath).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + ")"; }
+                catch { return ""; }
+            }
+        }
     }
 
     internal static class Program
@@ -57,7 +70,7 @@ namespace PearNowPlaying
                 AppDomain.CurrentDomain.UnhandledException += (s, e) => Log.Write("FATAL " + e.ExceptionObject);
 
                 SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
-                Log.Info("start " + AppInfo.Version);
+                Log.Info("start " + AppInfo.Version + AppInfo.BuildStamp);
                 Updater.CleanupOld(Application.ExecutablePath);
                 Application.Run(new TrayApp());
                 Log.Info("exit");

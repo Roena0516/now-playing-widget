@@ -54,6 +54,7 @@ import CoreGraphics
     precondition(client.elapsed < 1, "near the start, 0 is taken at once")
     precondition(parseLRC("[ar:Artist]\nplain text").isEmpty)
     client.stop()
+    precondition(Log.buildStamp.hasPrefix(" (built 20"), "the start line says when this build was made: \(Log.buildStamp)")
     browserSourceTests()
     coverSearchTests()
     let socketRequest = makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: "test-token")
