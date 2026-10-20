@@ -73,24 +73,24 @@ import CoreText
                 Log.info("update available: \(found.version) (\(found.assetName))")
                 if manual || found.version != announcedUpdate {
                     announcedUpdate = found.version
-                    overlay.showInfo("새 버전 \(found.version)이 있어요. 메뉴에서 업데이트할 수 있어요")
+                    overlay.showInfo("새 버전 \(found.version)이 나왔습니다. 메뉴에서 업데이트할 수 있습니다")
                 }
-            } else if manual { overlay.showInfo("최신 버전이에요 (\(appVersion))") }
+            } else if manual { overlay.showInfo("최신 버전입니다 (\(appVersion))") }
         } catch {
             Log.write("INFO update check failed: \(error.localizedDescription)")
-            if manual { overlay.showInfo("업데이트를 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
+            if manual { overlay.showInfo("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오") }
         }
     }
 
     @objc func updateClicked() {
         guard let target = update else {
-            overlay.showInfo("업데이트를 확인하는 중이에요")
+            overlay.showInfo("업데이트를 확인하고 있습니다")
             Task { await checkForUpdate(manual: true) }
             return
         }
         guard !installing else { return }
         installing = true
-        overlay.showInfo("업데이트를 받는 중이에요 (\(target.version))")
+        overlay.showInfo("업데이트를 받고 있습니다 (\(target.version))")
         Task {
             var dmg: URL?
             do {
@@ -104,7 +104,7 @@ import CoreText
                 // e.g. no permission to replace the app (another user's install, run from the DMG): install by hand
                 Log.write("WARN update to \(target.version) failed: \(error.localizedDescription)")
                 installing = false
-                overlay.showInfo(dmg != nil ? "업데이트하지 못했어요. 받은 파일을 열게요" : "업데이트하지 못했어요. 릴리스 페이지를 열게요")
+                overlay.showInfo(dmg != nil ? "업데이트하지 못했습니다. 받은 파일을 엽니다" : "업데이트하지 못했습니다. 릴리스 페이지를 엽니다")
                 if let dmg { NSWorkspace.shared.open(dmg) } else if let page = URL(string: target.pageURL) { NSWorkspace.shared.open(page) }
             }
         }
@@ -126,7 +126,7 @@ import CoreText
         ].compactMap { $0 }
         if !errors.isEmpty {
             Log.write("WARN hotkeys not registered: " + errors.joined(separator: ", "))
-            overlay?.showInfo("단축키를 등록하지 못했어요: " + errors.joined(separator: ", "))
+            overlay?.showInfo("단축키를 등록하지 못했습니다: " + errors.joined(separator: ", "))
         }
     }
     func applicationWillTerminate(_ notification: Notification) {
@@ -237,18 +237,18 @@ import CoreText
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
     @objc func toggleAlbumOnly() {
         client.settings.lyricsAlbumOnly.toggle(); client.settings.save(); updateMenu()
-        overlay.showInfo(client.settings.lyricsAlbumOnly ? "앨범 곡에서만 가사를 표시해요" : "모든 곡에서 가사를 표시해요")
+        overlay.showInfo(client.settings.lyricsAlbumOnly ? "앨범 곡에서만 가사를 표시합니다" : "모든 곡에서 가사를 표시합니다")
         client.findLyrics()   // decide again for the current song
     }
     @objc func toggleLyrics() {
         client.settings.showLyrics.toggle(); client.settings.save(); updateMenu()
         // the same messages as the Windows version's ToggleLyrics
-        if !client.settings.showLyrics { overlay.refresh(); overlay.showInfo("가사 표시를 껐어요"); return }
+        if !client.settings.showLyrics { overlay.refresh(); overlay.showInfo("가사 표시를 껐습니다"); return }
         overlay.refresh()
-        if client.lyricsFailed { overlay.showInfo("가사 서버에 연결하지 못했어요"); return }
+        if client.lyricsFailed { overlay.showInfo("가사 서버에 연결하지 못했습니다"); return }
         guard let outcome = client.lyricsOutcome else { return }   // still looking
         if case .synced = outcome { return }
-        overlay.showInfo("이 곡은 싱크 가사를 찾지 못했어요")
+        overlay.showInfo("이 곡의 싱크 가사를 찾지 못했습니다")
     }
     @objc func findLyrics() { client.findLyrics(force: true) }
     @objc func videoTitle(_ sender: NSMenuItem) { client.settings.videoTitle = sender.representedObject as! String; save() }
@@ -294,7 +294,7 @@ import CoreText
         let value = sender.representedObject as! String
         guard client.settings.source != value else { return }
         client.settings.source = value; client.settings.save(); client.start(); updateMenu()
-        overlay.showInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시해요" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시해요" : "브라우저와 Pear Desktop 중 재생 중인 곡을 표시해요")
+        overlay.showInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시합니다" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시합니다" : "브라우저와 Pear Desktop 중에서 재생 중인 곡을 표시합니다")
     }
     @objc func previous() { client.control("previous") }
     @objc func togglePlay() { client.control("toggle-play") }
@@ -348,12 +348,12 @@ import CoreText
         let candidates = ["/Applications/YouTube Music.app", "/Applications/Pear Desktop.app", NSHomeDirectory() + "/Applications/YouTube Music.app", NSHomeDirectory() + "/Applications/Pear Desktop.app"]
         guard let url = running?.bundleURL ?? candidates.first(where: { FileManager.default.fileExists(atPath: $0) }).map({ URL(fileURLWithPath: $0) }) else { throw PlayerSetup.SetupError.configNotFound }
         if let running {
-            guard running.terminate() else { throw NSError(domain: "PlayerSetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "음악 앱을 종료할 수 없습니다. 직접 종료 후 다시 실행해 주세요."]) }
+            guard running.terminate() else { throw NSError(domain: "PlayerSetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "음악 앱을 종료할 수 없습니다. 직접 종료한 뒤에 다시 실행해 주십시오."]) }
             for _ in 0..<50 {
                 if running.isTerminated { break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            guard running.isTerminated else { throw NSError(domain: "PlayerSetup", code: 2, userInfo: [NSLocalizedDescriptionKey: "음악 앱이 아직 종료되지 않았습니다. 직접 종료 후 다시 실행해 주세요."]) }
+            guard running.isTerminated else { throw NSError(domain: "PlayerSetup", code: 2, userInfo: [NSLocalizedDescriptionKey: "음악 앱이 아직 종료되지 않았습니다. 직접 종료한 뒤에 다시 실행해 주십시오."]) }
         }
         // Some versions save in-memory preferences on quit; reapply after termination.
         _ = try PlayerSetup.apply(to: PlayerSetup.configURL(), port: client.settings.port)

@@ -95,7 +95,7 @@ struct PlayerState {
     private var tokenFile: URL { directory.appendingPathComponent("token.txt") }
     var elapsed: Double { players[source]?.elapsed ?? 0 }
     var baseURL: URL { URL(string: "http://\(settings.host):\(settings.port)")! }
-    /// Whether a player is connected (the card says "재생 중인 곡이 없어요" then, not the connection state).
+    /// Whether a player is connected (the card says "재생 중인 곡이 없습니다" then, not the connection state).
     var isConnected: Bool { status == PearClient.connected || status.hasPrefix(PearClient.browserPrefix) }
     func start() {
         connection?.cancel(); socket?.cancel(with: .goingAway, reason: nil)
@@ -153,7 +153,7 @@ struct PlayerState {
                     // allow/deny dialog, and only then do we tell the user to click "허용".
                     let dialogHint = Task {
                         try? await Task.sleep(for: .milliseconds(800))
-                        if !Task.isCancelled { pearStatus = PearClient.authorizing; onLyricsNotice?("Pear Desktop에서 '허용'을 눌러주세요") }
+                        if !Task.isCancelled { pearStatus = PearClient.authorizing; onLyricsNotice?("Pear Desktop에서 '허용'을 눌러 주십시오") }
                     }
                     defer { dialogHint.cancel() }
                     let (data, response) = try await session.data(for: req)
@@ -162,7 +162,7 @@ struct PlayerState {
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                     if code == 403 {
                         pearStatus = PearClient.denied; Log.info("auth denied by Pear (403)")
-                        onLyricsNotice?("Pear Desktop에서 연결이 거부됐어요. 메뉴의 'Pear 연결 권한 다시 요청'으로 다시 시도할 수 있어요.")
+                        onLyricsNotice?("Pear Desktop에서 연결이 거부되었습니다. 메뉴의 'Pear 연결 권한 다시 요청'으로 다시 시도할 수 있습니다.")
                         return
                     }
                     guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any], let value = obj["accessToken"] as? String, !value.isEmpty else {
@@ -188,7 +188,7 @@ struct PlayerState {
                             pearStatus = PearClient.connected; handle(obj)
                             if firstMessage && !everConnected {
                                 everConnected = true
-                                if song.title.isEmpty && source == .pear { onLyricsNotice?("Pear Desktop에 연결됐어요") }
+                                if song.title.isEmpty && source == .pear { onLyricsNotice?("Pear Desktop에 연결되었습니다") }
                             }
                         }
                     }
@@ -277,15 +277,15 @@ struct PlayerState {
             return
         }
         lines = []; lyricsStatus = "가사: 찾는 중"; lyricsOutcome = nil; lyricsFailed = false
-        guard !track.title.isEmpty else { lyricsStatus = "가사: -"; if force { onLyricsNotice?("재생 중인 곡이 없어요") }; return }
+        guard !track.title.isEmpty else { lyricsStatus = "가사: -"; if force { onLyricsNotice?("재생 중인 곡이 없습니다") }; return }
         if !wantsLyrics(track) {
             // "앨범 곡만 가사 표시": not an album track, so no lookup at all
             lyricsStatus = "가사: 앨범 곡이 아니라 찾지 않음"
-            if force { onLyricsNotice?("앨범 곡이 아니라 가사를 표시하지 않아요") }
+            if force { onLyricsNotice?("앨범 곡이 아니어서 가사를 표시하지 않습니다") }
             prefetchNext(after: track)
             return
         }
-        if force { lyrics.forget(track); lyrics.ytm.resetPause(); lyrics.more?.resetPause(); onLyricsNotice?("가사를 다시 찾는 중이에요") }
+        if force { lyrics.forget(track); lyrics.ytm.resetPause(); lyrics.more?.resetPause(); onLyricsNotice?("가사를 다시 찾고 있습니다") }
         lookUp(track, force: force, shown: nil)
     }
 
@@ -336,7 +336,7 @@ struct PlayerState {
             guard shown == nil else { return }   // LRCLIB still busy: keep the stand-in
             guard song.identity == track.identity else { return }
             lyricsStatus = "가사: 가사 서버에 연결하지 못함"; lyricsFailed = true
-            if force { onLyricsNotice?("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요") }
+            if force { onLyricsNotice?("가사 서버에 연결하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오") }
         }
     }
 
@@ -454,8 +454,8 @@ enum LyricsNotice {
     static func message(for result: LyricsLookup) -> String? {
         switch result {
         case .synced: return nil
-        case .instrumental: return "연주곡이에요"
-        case .plainOnly, .notFound: return "이 곡은 싱크 가사를 찾지 못했어요"
+        case .instrumental: return "연주곡입니다"
+        case .plainOnly, .notFound: return "이 곡의 싱크 가사를 찾지 못했습니다"
         }
     }
 }

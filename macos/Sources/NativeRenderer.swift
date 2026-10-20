@@ -118,7 +118,7 @@ struct NativeCardLayout {
             NativeTheme.text(NativeTheme.time(client.elapsed) + " / " + NativeTheme.time(client.song.duration), font: NativeTheme.font(12), color: NativeTheme.dim, rect: CGRect(x: x, y: y, width: layout.textWidth, height: layout.headerH + 2), alignment: .right)
         }
         y += layout.headerH + 4
-        let title = kind == .info ? (infoText ?? (client.isConnected ? "재생 중인 곡이 없어요" : client.status)) : (client.song.title.isEmpty ? "알 수 없는 곡" : client.cardTitle)
+        let title = kind == .info ? (infoText ?? (client.isConnected ? "재생 중인 곡이 없습니다" : client.status)) : (client.song.title.isEmpty ? "알 수 없는 곡" : client.cardTitle)
         drawTitle(title, rect: CGRect(x: x, y: y, width: layout.textWidth, height: layout.titleH + 2), elapsed: marqueeTime)
         y += layout.titleH
         if layout.hasSubtitle {

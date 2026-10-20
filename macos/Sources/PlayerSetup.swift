@@ -10,7 +10,7 @@ struct PlayerSetup {
         case configNotFound, invalidConfig
         var errorDescription: String? {
             switch self {
-            case .configNotFound: return "YouTube Music/Pear Desktop 설정 파일을 찾지 못했습니다. 음악 앱을 한 번 실행한 뒤 다시 요청해 주세요."
+            case .configNotFound: return "YouTube Music/Pear Desktop 설정 파일을 찾지 못했습니다. 음악 앱을 한 번 실행한 뒤에 다시 요청해 주십시오."
             case .invalidConfig: return "음악 앱 설정 파일 형식을 확인할 수 없어 변경하지 않았습니다."
             }
         }

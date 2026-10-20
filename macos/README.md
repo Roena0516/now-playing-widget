@@ -59,7 +59,7 @@ macOS의 창 관리 정책 때문에, 일부 독점 전체 화면 앱 위에서�
 | `Control + Option + P` | 곡 정보 계속 표시 켜기/끄기 |
 | `Control + Option + L` | 가사 표시 켜기/끄기 |
 
-단축키는 Carbon 전역 단축키 API로 등록하므로 손쉬운 사용(접근성) 권한이 필요하지 않습니다. 단축키는 설정 파일의 `hotkeyShow`, `hotkeyToggle`, `hotkeyNext`, `hotkeyPrevious`, `hotkeyAlwaysShow`, `hotkeyLyrics`에서 바꿀 수 있고, 값을 비워 두면 그 단축키를 사용하지 않습니다. 형식은 Windows 버전과 같습니다(예: `Ctrl+Alt+Up`, `Ctrl+Shift+F9`). `Ctrl`은 Control, `Alt`는 Option, `Win`(또는 `Cmd`)은 Command 키입니다. 다른 앱이 이미 사용 중인 조합은 등록되지 않으며, 그때는 "단축키를 등록하지 못했어요" 안내가 표시되고 오류 기록에도 남습니다.
+단축키는 Carbon 전역 단축키 API로 등록하므로 손쉬운 사용(접근성) 권한이 필요하지 않습니다. 단축키는 설정 파일의 `hotkeyShow`, `hotkeyToggle`, `hotkeyNext`, `hotkeyPrevious`, `hotkeyAlwaysShow`, `hotkeyLyrics`에서 바꿀 수 있고, 값을 비워 두면 그 단축키를 사용하지 않습니다. 형식은 Windows 버전과 같습니다(예: `Ctrl+Alt+Up`, `Ctrl+Shift+F9`). `Ctrl`은 Control, `Alt`는 Option, `Win`(또는 `Cmd`)은 Command 키입니다. 다른 앱이 이미 사용 중인 조합은 등록되지 않으며, 그때는 "단축키를 등록하지 못했습니다" 안내가 표시되고 오류 기록에도 남습니다.
 
 ## 가사
 

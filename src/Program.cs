@@ -55,7 +55,7 @@ namespace PearNowPlaying
             {
                 if (!created)
                 {
-                    MessageBox.Show("Pear Now Playing이 이미 실행 중이에요.\n작업 표시줄 오른쪽의 트레이 아이콘을 확인해 주세요.",
+                    MessageBox.Show("Pear Now Playing이 이미 실행 중입니다.\n작업 표시줄 오른쪽의 트레이 아이콘을 확인해 주십시오.",
                         "Pear Now Playing", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }

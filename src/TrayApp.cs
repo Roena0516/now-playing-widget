@@ -194,17 +194,17 @@ namespace PearNowPlaying
             switch (s)
             {
                 case PearStatus.Authorizing:
-                    Balloon("Pear Desktop에서 연결 요청 창이 떴어요. '허용'을 눌러주세요.");
-                    ShowInfo("Pear Desktop에서 '허용'을 눌러주세요");
+                    Balloon("Pear Desktop에 연결 요청 창이 나타났습니다. '허용'을 눌러 주십시오.");
+                    ShowInfo("Pear Desktop에서 '허용'을 눌러 주십시오");
                     break;
                 case PearStatus.Denied:
-                    Balloon("Pear Desktop에서 연결이 거부됐어요. 트레이 메뉴의 '권한 다시 요청'으로 다시 시도할 수 있어요.");
+                    Balloon("Pear Desktop에서 연결이 거부되었습니다. 트레이 메뉴의 'Pear 연결 권한 다시 요청'으로 다시 시도할 수 있습니다.");
                     break;
                 case PearStatus.Connected:
                     if (!everConnected)
                     {
                         everConnected = true;
-                        if (!pear.Current.HasData) ShowInfo("Pear Desktop에 연결됐어요");
+                        if (!pear.Current.HasData) ShowInfo("Pear Desktop에 연결되었습니다");
                     }
                     break;
                 case PearStatus.Waiting:
@@ -293,7 +293,7 @@ namespace PearNowPlaying
             {
                 // "앨범 곡만 가사 표시": not an album track, so no lookup at all
                 lyricsInfoItem.Text = "가사: 앨범 곡이 아니라 찾지 않음";
-                if (announceKey == key) { announceKey = null; ShowInfo("앨범 곡이 아니라 가사를 표시하지 않아요"); }
+                if (announceKey == key) { announceKey = null; ShowInfo("앨범 곡이 아니어서 가사를 표시하지 않습니다"); }
                 PrefetchNext(key);
                 return;
             }
@@ -368,9 +368,9 @@ namespace PearNowPlaying
             if (announceKey == key)
             {
                 announceKey = null;
-                if (result.Failed) ShowInfo("가사 서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요");
-                else if (result.Instrumental) ShowInfo("연주곡이에요");
-                else if (!result.HasSynced) ShowInfo("이 곡은 싱크 가사를 찾지 못했어요");
+                if (result.Failed) ShowInfo("가사 서버에 연결하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오");
+                else if (result.Instrumental) ShowInfo("연주곡입니다");
+                else if (!result.HasSynced) ShowInfo("이 곡의 싱크 가사를 찾지 못했습니다");
                 else ShowNow(CurrentKind());   // lyrics card appears under the song card
             }
             TickLyrics(true);
@@ -495,13 +495,13 @@ namespace PearNowPlaying
         void RetryLyrics()
         {
             var song = pear.Current;
-            if (!song.HasData) { ShowInfo("재생 중인 곡이 없어요"); return; }
+            if (!song.HasData) { ShowInfo("재생 중인 곡이 없습니다"); return; }
             lyricsProvider.Forget(song);
             lyricsProvider.Ytm.ResetPause();
             lyricsProvider.More.ResetPause();
             lyricsKey = null;
             announceKey = song.VideoId + "|" + song.Title;
-            ShowInfo("가사를 다시 찾는 중이에요");
+            ShowInfo("가사를 다시 찾고 있습니다");
             EnsureLyrics(song);
         }
 
@@ -515,7 +515,7 @@ namespace PearNowPlaying
         {
             cfg.LyricsAlbumOnly = !cfg.LyricsAlbumOnly;
             cfg.Save();
-            ShowInfo(cfg.LyricsAlbumOnly ? "앨범 곡에서만 가사를 표시해요" : "모든 곡에서 가사를 표시해요");
+            ShowInfo(cfg.LyricsAlbumOnly ? "앨범 곡에서만 가사를 표시합니다" : "모든 곡에서 가사를 표시합니다");
             lyricsKey = null;   // decide again for the current song
             if (pear.Current.HasData) EnsureLyrics(pear.Current);
         }
@@ -525,9 +525,9 @@ namespace PearNowPlaying
             cfg.ShowLyrics = !cfg.ShowLyrics;
             cfg.Save();
             if (cfg.ShowLyrics) TickLyrics(true); else lyricsWin.Dismiss();
-            if (!cfg.ShowLyrics) ShowInfo("가사 표시를 껐어요");
-            else if (lyrics != null && lyrics.Failed) ShowInfo("가사 서버에 연결하지 못했어요");
-            else if (lyrics != null && !lyrics.HasSynced) ShowInfo("이 곡은 싱크 가사를 찾지 못했어요");
+            if (!cfg.ShowLyrics) ShowInfo("가사 표시를 껐습니다");
+            else if (lyrics != null && lyrics.Failed) ShowInfo("가사 서버에 연결하지 못했습니다");
+            else if (lyrics != null && !lyrics.HasSynced) ShowInfo("이 곡의 싱크 가사를 찾지 못했습니다");
         }
 
         void SetOffset(int ms)
@@ -568,27 +568,27 @@ namespace PearNowPlaying
                         if (manual || found.Version != announcedUpdate)
                         {
                             announcedUpdate = found.Version;
-                            ShowInfo("새 버전 " + found.Version + "이 있어요. 메뉴에서 업데이트할 수 있어요");
+                            ShowInfo("새 버전 " + found.Version + "이 나왔습니다. 메뉴에서 업데이트할 수 있습니다");
                         }
                     }
-                    else if (manual) ShowInfo("최신 버전이에요 (" + AppInfo.Version + ")");
+                    else if (manual) ShowInfo("최신 버전입니다 (" + AppInfo.Version + ")");
                 }, null);
             }
             catch (Exception ex)
             {
                 Log.Write("INFO update check failed: " + (ex is OperationCanceledException ? "timeout" : ex.Message));
-                if (manual) ui.Post(_ => ShowInfo("업데이트를 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요"), null);
+                if (manual) ui.Post(_ => ShowInfo("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오"), null);
             }
         }
 
         void UpdateClicked()
         {
-            if (update == null) { ShowInfo("업데이트를 확인하는 중이에요"); Task.Run(() => CheckForUpdate(true)); return; }
+            if (update == null) { ShowInfo("업데이트를 확인하고 있습니다"); Task.Run(() => CheckForUpdate(true)); return; }
             if (installing) return;
             installing = true;
             var target = update;
             var exe = Application.ExecutablePath;
-            ShowInfo("업데이트를 받는 중이에요 (" + target.Version + ")");
+            ShowInfo("업데이트를 받고 있습니다 (" + target.Version + ")");
             Task.Run(async () =>
             {
                 try
@@ -609,7 +609,7 @@ namespace PearNowPlaying
                     ui.Post(_ =>
                     {
                         installing = false;
-                        ShowInfo("업데이트하지 못했어요. 릴리스 페이지를 열게요");
+                        ShowInfo("업데이트하지 못했습니다. 릴리스 페이지를 엽니다");
                         try { Process.Start(target.PageUrl); } catch (Exception e2) { Log.Error("open release page", e2); }
                     }, null);
                 }
@@ -665,7 +665,7 @@ namespace PearNowPlaying
             var song = pear.Current;
             if (!song.HasData)
             {
-                ShowInfo(pear.IsConnected ? "재생 중인 곡이 없어요" : pear.StatusLine);
+                ShowInfo(pear.IsConnected ? "재생 중인 곡이 없습니다" : pear.StatusLine);
                 return;
             }
             lastKind = kind;
@@ -1102,7 +1102,7 @@ namespace PearNowPlaying
             lyricsWin.Interactive = on;
             if (on)
             {
-                Balloon("위젯을 끌어서 원하는 곳에 놓으세요. 다 옮겼으면 트레이 메뉴의 '위젯 끌어서 옮기기'를 다시 누르세요.");
+                Balloon("위젯을 끌어서 원하는 곳에 놓아 주십시오. 다 옮긴 뒤에는 트레이 메뉴의 '위젯 끌어서 옮기기'를 다시 눌러 주십시오.");
                 ShowNow(CurrentKind());
                 TickLyrics(true);
             }
@@ -1188,7 +1188,7 @@ namespace PearNowPlaying
                 hotkeys.Register(cfg.HotkeyAlwaysShow, TogglePin),
                 hotkeys.Register(cfg.HotkeyLyrics, ToggleLyrics),
             }.Where(e => e != null).ToArray();
-            if (errors.Length > 0) Balloon("단축키를 등록하지 못했어요: " + string.Join(", ", errors));
+            if (errors.Length > 0) Balloon("단축키를 등록하지 못했습니다: " + string.Join(", ", errors));
         }
 
         void SyncMenuChecks()
@@ -1226,7 +1226,7 @@ namespace PearNowPlaying
             cfg.Source = value;
             cfg.Save();
             pear.Reconnect(cfg);
-            ShowInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시해요" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시해요" : "브라우저와 Pear Desktop 중 재생 중인 곡을 표시해요");
+            ShowInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시합니다" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시합니다" : "브라우저와 Pear Desktop 중에서 재생 중인 곡을 표시합니다");
         }
 
         static string PositionName(OverlayPosition p)

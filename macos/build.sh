@@ -44,7 +44,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSAppleEventsUsageDescription</key><string>브라우저에서 재생 중인 YouTube Music 탭의 주소를 읽어서 곡을 알아내요. 다른 탭의 주소는 읽지 않아요.</string>
+<key>NSAppleEventsUsageDescription</key><string>브라우저에서 재생 중인 YouTube Music 탭의 주소를 읽어서 곡을 알아냅니다. 다른 탭의 주소는 읽지 않습니다.</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST

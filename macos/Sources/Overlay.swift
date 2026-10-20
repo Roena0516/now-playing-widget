@@ -129,7 +129,7 @@ final class OverlayPanel: NSPanel {
             w.card.ignoresMouseEvents = !on; w.lyrics.ignoresMouseEvents = !on
             w.cardCanvas.movable = on; w.lyricsCanvas.movable = on
         }
-        if on { showInfo("위젯을 끌어서 옮긴 뒤, 메뉴에서 '위젯 끌어서 옮기기'를 다시 눌러 끝내세요") }
+        if on { showInfo("위젯을 끌어서 옮긴 뒤에 메뉴에서 '위젯 끌어서 옮기기'를 다시 눌러 끝내 주십시오") }
         else {
             if dragging != nil { endDrag() }
             if client.song.title.isEmpty { hide() } else { show() }   // back to the normal show time

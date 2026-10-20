@@ -517,7 +517,7 @@ namespace PearNowPlaying
             }
         }
 
-        /// <summary>Whether a player is connected (the card says "재생 중인 곡이 없어요" then, not the connection state).</summary>
+        /// <summary>Whether a player is connected (the card says "재생 중인 곡이 없습니다" then, not the connection state).</summary>
         public bool IsConnected { get { return BrowserName != null || Status == PearStatus.Connected; } }
 
         void Post(Action a) { ui.Post(_ => a(), null); }
