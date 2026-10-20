@@ -258,6 +258,7 @@ namespace PearNowPlaying
                     if (msg.ContainsKey("isPlaying")) IsPlaying = Bool(msg, "isPlaying");
                     else if (songDict != null) IsPlaying = !Current.IsPaused;
                     if (msg.ContainsKey("position")) Current.Elapsed = Num(msg, "position");
+                    jumps.Reset();
                     var snapshot = Current;
                     Post(() => { var h = SongUpdated; if (h != null) h(snapshot, isNew); });
                     break;
@@ -268,6 +269,7 @@ namespace PearNowPlaying
                     bool changed = playing != IsPlaying;
                     IsPlaying = playing;
                     Current.IsPaused = !playing;
+                    jumps.Reset();
                     if (msg.ContainsKey("position")) Current.Elapsed = Num(msg, "position");
                     if (changed) Post(() => { var h = PlayStateChanged; if (h != null) h(playing); });
                     break;
@@ -275,11 +277,7 @@ namespace PearNowPlaying
                 case "POSITION_CHANGED":
                 {
                     double pos = Num(msg, "position");
-                    // When a song ends Pear reports position 0 about 0.3s before VIDEO_CHANGED names the next song, so
-                    // for a moment the old song looks rewound (its lyrics scrolled back to the top). Not only in its
-                    // last seconds: the length Pear gives can be off, or songs overlap (crossfade). VIDEO_CHANGED
-                    // brings the position itself; a seek to the start or a repeated song gets it from the next tick.
-                    if (IsJumpToStart(pos, Current.Elapsed)) break;
+                    if (!jumps.Accept(pos, Current.Elapsed, DateTime.UtcNow)) break;
                     Current.Elapsed = pos;
                     Post(() => { var h = PositionChanged; if (h != null) h(pos); });
                     break;
@@ -287,11 +285,7 @@ namespace PearNowPlaying
             }
         }
 
-        /// <summary>Back to 0 from well into the song: most likely the next song starting, so it waits a tick.</summary>
-        internal static bool IsJumpToStart(double pos, double last)
-        {
-            return pos < 1 && last >= 10;
-        }
+        readonly PositionFilter jumps = new PositionFilter();
 
         static SongInfo ParseSong(IDictionary<string, object> d)
         {
@@ -422,6 +416,36 @@ namespace PearNowPlaying
             try { if (cts != null) cts.Cancel(); } catch { }
             Abort();
             http.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// When a song ends Pear reports a position for the old song just before VIDEO_CHANGED names the next one: usually
+    /// 0 (about 0.3-0.7s before), sometimes first another value (2026-10-20: 115 after 190, the next song being 114s
+    /// long). Taken as is, the old song looks rewound: its lyrics scroll back, then the next song's start. So a
+    /// position that goes back is held for a tick and applied only when the next one carries on from it (a seek back,
+    /// a song on repeat); VIDEO_CHANGED brings the new song's position itself.
+    /// </summary>
+    internal sealed class PositionFilter
+    {
+        double? held;
+        DateTime heldAt;
+
+        public void Reset() { held = null; }
+
+        /// <summary>Whether to apply this position now.</summary>
+        /// <param name="last">the position shown so far</param>
+        public bool Accept(double pos, double last, DateTime now)
+        {
+            if (pos >= last - 2) { held = null; return true; }   // playing on, or a seek forward
+            if (held.HasValue && pos >= held.Value - 0.5 && pos <= held.Value + (now - heldAt).TotalSeconds + 2)
+            {
+                held = null;
+                return true;
+            }
+            held = pos;
+            heldAt = now;
+            return false;
         }
     }
 }

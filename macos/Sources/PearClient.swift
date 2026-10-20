@@ -150,27 +150,22 @@ import Combine
             if let value = message["isPlaying"] as? Bool { song.paused = !value }
             if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
             anchor = Date()
+            jumps.reset()
             if song.identity != previous && loadRemoteAssets { fetchArtwork(); findLyrics() }
         case "PLAYER_STATE_CHANGED":
+            jumps.reset()
             song.elapsed = elapsed
             song.paused = !(message["isPlaying"] as? Bool ?? false)
             if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
             anchor = Date()
         case "POSITION_CHANGED":
             let position = (message["position"] as? NSNumber)?.doubleValue ?? song.elapsed
-            // When a song ends Pear reports position 0 about 0.3s before VIDEO_CHANGED names the next song, so for a
-            // moment the old song looks rewound (its lyrics scrolled back to the top). Not only in its last seconds:
-            // the length Pear gives can be off, or songs overlap (crossfade). VIDEO_CHANGED brings the position itself;
-            // a seek to the start or a repeated song gets it from the next tick. Same as src/PearClient.cs.
-            if Self.isJumpToStart(position, last: elapsed) { break }
+            if !jumps.accept(position, last: elapsed, now: Date()) { break }
             song.elapsed = position; anchor = Date()
         default: break
         }
     }
-    /// Back to 0 from well into the song: most likely the next song starting, so it waits a tick.
-    nonisolated static func isJumpToStart(_ position: Double, last: Double) -> Bool {
-        position < 1 && last >= 10
-    }
+    private var jumps = BackwardJumps()
     func control(_ action: String) {
         Task {
             do {
@@ -388,5 +383,24 @@ enum LyricsNotice {
         case .instrumental: return "연주곡이에요"
         case .plainOnly, .notFound: return "이 곡은 싱크 가사를 찾지 못했어요"
         }
+    }
+}
+
+/// When a song ends Pear reports a position for the old song just before VIDEO_CHANGED names the next one: usually
+/// 0 (about 0.3-0.7s before), sometimes first another value (2026-10-20: 115 after 190, the next song being 114s
+/// long). Taken as is, the old song looks rewound: its lyrics scroll back, then the next song's start. So a position
+/// that goes back is held for a tick and applied only when the next one carries on from it (a seek back, a song on
+/// repeat); VIDEO_CHANGED brings the new song's position itself. Same as PositionFilter in src/PearClient.cs.
+struct BackwardJumps {
+    private var held: (position: Double, at: Date)?
+    mutating func reset() { held = nil }
+    /// Whether to apply this position now. `last`: the position shown so far.
+    mutating func accept(_ position: Double, last: Double, now: Date) -> Bool {
+        if position >= last - 2 { held = nil; return true }   // playing on, or a seek forward
+        if let held, position >= held.position - 0.5, position <= held.position + now.timeIntervalSince(held.at) + 2 {
+            self.held = nil; return true
+        }
+        held = (position, now)
+        return false
     }
 }
