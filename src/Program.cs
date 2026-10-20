@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Now Playing Widget")]
 [assembly: AssemblyProduct("Now Playing Widget")]
 [assembly: AssemblyDescription("브라우저나 Pear Desktop에서 재생하는 YouTube Music 곡과 가사를 화면 위에 표시")]
-[assembly: AssemblyVersion("1.9.4.0")]
-[assembly: AssemblyFileVersion("1.9.4.0")]
+[assembly: AssemblyVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
 
 namespace PearNowPlaying
 {
