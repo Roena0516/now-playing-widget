@@ -672,7 +672,7 @@ namespace PearNowPlaying
 namespace PearNowPlaying
 {
     /// <summary>
-    /// "PearNowPlaying.exe --browser-probe [seconds]": what the browser source sees and sends, once a second, for trying
+    /// "NowPlayingWidget.exe --browser-probe [seconds]": what the browser source sees and sends, once a second, for trying
     /// it against a real browser. Written to the console it was started from and to browser-probe.log next to the log.
     /// </summary>
     internal static class BrowserProbe

@@ -6,9 +6,9 @@ using System.Threading;
 using System.Windows.Forms;
 
 [assembly: TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
-[assembly: AssemblyTitle("Pear Now Playing")]
-[assembly: AssemblyProduct("Pear Now Playing")]
-[assembly: AssemblyDescription("Pear Desktop(YouTube Music) 재생 곡을 화면 위에 표시")]
+[assembly: AssemblyTitle("Now Playing Widget")]
+[assembly: AssemblyProduct("Now Playing Widget")]
+[assembly: AssemblyDescription("브라우저나 Pear Desktop에서 재생하는 YouTube Music 곡과 가사를 화면 위에 표시")]
 [assembly: AssemblyVersion("1.9.4.0")]
 [assembly: AssemblyFileVersion("1.9.4.0")]
 
@@ -51,12 +51,13 @@ namespace PearNowPlaying
                 try { System.Diagnostics.Process.GetProcessById(pid).WaitForExit(15000); } catch { }
             }
             bool created;
+            // the old name is kept so a running older version (Pear Now Playing) and this one still exclude each other
             using (var mutex = new Mutex(true, "Local\\PearNowPlaying_SingleInstance", out created))
             {
                 if (!created)
                 {
-                    MessageBox.Show("Pear Now Playing이 이미 실행 중입니다.\n작업 표시줄 오른쪽의 트레이 아이콘을 확인해 주십시오.",
-                        "Pear Now Playing", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("Now Playing Widget이 이미 실행 중입니다.\n작업 표시줄 오른쪽의 트레이 아이콘을 확인해 주십시오.",
+                        "Now Playing Widget", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 

@@ -28,7 +28,7 @@ import CoreText
         }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NativeTheme.trayIcon()
-        item.button?.setAccessibilityLabel("Pear Now Playing")
+        item.button?.setAccessibilityLabel("Now Playing Widget")
         client.$status.combineLatest(client.$lyricsStatus).sink { [weak self] _, _ in DispatchQueue.main.async { self?.updateMenu(); self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$song.map { $0.identity + "|" + String($0.paused) }.removeDuplicates().dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async {
@@ -47,7 +47,7 @@ import CoreText
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.overlay.rebuildWidgets(); self?.updateMenu() } }
         updateMenu()
         if preview {
-            client.handle(["type": "PLAYER_INFO", "isPlaying": true, "song": ["title": "Pear Now Playing · macOS", "artist": "오버레이 미리보기", "album": "한국어 · 日本語 · English", "songDuration": 240, "elapsedSeconds": 42, "isPaused": false]])
+            client.handle(["type": "PLAYER_INFO", "isPlaying": true, "song": ["title": "Now Playing Widget · macOS", "artist": "오버레이 미리보기", "album": "한국어 · 日本語 · English", "songDuration": 240, "elapsedSeconds": 42, "isPaused": false]])
             client.lines = parseLRC("[00:00.00]음악과 함께하는 시간\n[00:40.00]macOS에서도 만나는 싱크 가사\n[00:46.00]クリックを通すオーバーレイ\n[00:52.00]Your music, always nearby")
             overlay.show(temporary: false)
         } else { client.start(); overlay.show(); startUpdateChecks() }
@@ -94,12 +94,12 @@ import CoreText
         Task {
             var dmg: URL?
             do {
-                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("PearNowPlaying-update-\(target.version)")
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("NowPlayingWidget-update-\(target.version)")
                 dmg = try await updater.download(target, into: dir)
                 let app = Bundle.main.bundleURL, id = Bundle.main.bundleIdentifier ?? "", file = dmg!
-                try await Task.detached { try Updater.install(dmg: file, version: target.version, into: app, bundleId: id) }.value
+                let installed = try await Task.detached { try Updater.install(dmg: file, version: target.version, into: app, bundleId: id) }.value
                 Log.info("updated to \(target.version), restarting")
-                Updater.relaunch(app)
+                Updater.relaunch(installed)
             } catch {
                 // e.g. no permission to replace the app (another user's install, run from the DMG): install by hand
                 Log.write("WARN update to \(target.version) failed: \(error.localizedDescription)")
@@ -376,7 +376,7 @@ import CoreText
 MainActor.assumeIsolated {
 // test and audit runs log to a scratch file, not the user's error.log
 if CommandLine.arguments.dropFirst().contains(where: { $0.hasPrefix("--") && $0 != "--preview" }) {
-    Log.file = FileManager.default.temporaryDirectory.appendingPathComponent("pear-now-playing-test-\(ProcessInfo.processInfo.processIdentifier).log")
+    Log.file = FileManager.default.temporaryDirectory.appendingPathComponent("now-playing-widget-test-\(ProcessInfo.processInfo.processIdentifier).log")
 }
 if CommandLine.arguments.contains("--ytmusic-tests") {
     Task { await runYTMusicTests() }
@@ -402,8 +402,8 @@ if CommandLine.arguments.contains("--ytmusic-tests") {
         do {
             guard let info = try await updater.check(current: plist["CFBundleShortVersionString"] as? String ?? "0") else { print("UP TO DATE"); exit(0) }
             let dmg = try await updater.download(info, into: FileManager.default.temporaryDirectory.appendingPathComponent("pnp-update-test-\(UUID().uuidString)"))
-            try Updater.install(dmg: dmg, version: info.version, into: target, bundleId: plist["CFBundleIdentifier"] as? String ?? "")
-            print("UPDATED to \(info.version)"); exit(0)
+            let installed = try Updater.install(dmg: dmg, version: info.version, into: target, bundleId: plist["CFBundleIdentifier"] as? String ?? "")
+            print("UPDATED to \(info.version) at \(installed.lastPathComponent)"); exit(0)
         } catch { print("FAILED: \(error.localizedDescription)"); exit(1) }
     }
     RunLoop.main.run()

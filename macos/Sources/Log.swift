@@ -26,7 +26,7 @@ enum Log {
             if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
             let handle = try FileHandle(forWritingTo: file); defer { try? handle.close() }
             try handle.seekToEnd(); try handle.write(contentsOf: Data((stamp.string(from: Date()) + message + "\n").utf8))
-        } catch { NSLog("Pear Now Playing log: %@", error.localizedDescription) }
+        } catch { NSLog("Now Playing Widget log: %@", error.localizedDescription) }
     }
 
     /// " (built yyyy-MM-dd HH:mm)": when this executable was built (its modification time, kept by the DMG and

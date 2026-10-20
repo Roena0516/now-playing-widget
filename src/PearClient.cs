@@ -109,6 +109,8 @@ namespace PearNowPlaying
     /// </summary>
     internal sealed class PearClient : IDisposable
     {
+        // the name Pear shows in its allow dialog and keeps the permission under; kept from the app's old name so
+        // updating doesn't ask again
         const string ClientId = "pear-now-playing";
 
         readonly SynchronizationContext ui;

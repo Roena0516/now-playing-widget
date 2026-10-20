@@ -504,7 +504,7 @@ struct VideoDescription {
             request.httpMethod = "POST"; request.timeoutInterval = 12; request.httpShouldHandleCookies = false
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("PearNowPlaying-macOS/\(appVersion)", forHTTPHeaderField: "User-Agent")
+            request.setValue("NowPlayingWidget-macOS/\(appVersion)", forHTTPHeaderField: "User-Agent")
             request.httpBody = payload
             let data: Data, response: HTTPURLResponse
             if let transport { (data, response) = try await transport(request) }

@@ -14,11 +14,11 @@ jobs:
       - name: Build native app
         run: ./macos/build.sh --universal --dmg
       - name: Test LRC and player state
-        run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --self-test'
+        run: '"macos/build/Now Playing Widget.app/Contents/MacOS/NowPlayingWidget" --self-test'
       - name: Test original lyric search and matching
-        run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --lyrics-tests'
+        run: '"macos/build/Now Playing Widget.app/Contents/MacOS/NowPlayingWidget" --lyrics-tests'
       - name: Test YTMusic provider and credential isolation
-        run: '"macos/build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying" --ytmusic-tests'
+        run: '"macos/build/Now Playing Widget.app/Contents/MacOS/NowPlayingWidget" --ytmusic-tests'
       - name: Test Pear authentication, WebSocket and controls
         run: python3 macos/Tests/mock_pear.py
       - name: Test updating from GitHub releases
@@ -27,5 +27,5 @@ jobs:
         run: python3 macos/Tests/mock_discord.py
       - uses: actions/upload-artifact@v4
         with:
-          name: PearNowPlaying-macOS
-          path: macos/build/PearNowPlaying-macOS-*.dmg
+          name: NowPlayingWidget-macOS
+          path: macos/build/NowPlayingWidget-macOS-*.dmg

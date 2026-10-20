@@ -21,14 +21,14 @@ namespace PearNowPlaying
 
     /// <summary>
     /// Updates from this repository's GitHub releases (see VERSIONING.md for the file names it looks for):
-    /// the latest release's PearNowPlaying-Windows-a.b.c.zip is downloaded, checked against the SHA-256 GitHub
+    /// the latest release's NowPlayingWidget-Windows-a.b.c.zip is downloaded, checked against the SHA-256 GitHub
     /// lists for it, unpacked, and swapped in for the running exe (which Windows lets us rename but not overwrite).
     /// The new exe is started with --wait-for so it starts once this process has exited. Same flow as the macOS
     /// version (Updater.swift).
     /// </summary>
     internal sealed class Updater : IDisposable
     {
-        public const string ReleasesApi = "https://api.github.com/repos/Roena0516/pear-now-playing/releases/latest";
+        public const string ReleasesApi = "https://api.github.com/repos/Roena0516/now-playing-widget/releases/latest";
         public string ApiUrl = ReleasesApi;
         readonly HttpClient http;
         readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
@@ -36,7 +36,7 @@ namespace PearNowPlaying
         public Updater()
         {
             http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/" + AppInfo.Version + " (+https://github.com/Roena0516/pear-now-playing)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("NowPlayingWidget/" + AppInfo.Version + " (+https://github.com/Roena0516/now-playing-widget)");
             http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         }
 
@@ -47,13 +47,14 @@ namespace PearNowPlaying
             {
                 if (!resp.IsSuccessStatusCode) throw new HttpRequestException("GitHub releases " + (int)resp.StatusCode);
                 var release = json.DeserializeObject(await resp.Content.ReadAsStringAsync()) as IDictionary<string, object>;
-                return FromRelease(release, currentVersion, "PearNowPlaying-Windows-", ".zip");
+                // releases up to 1.9.4 were PearNowPlaying-Windows-a.b.c.zip (the app's old name)
+                return FromRelease(release, currentVersion, "NowPlayingWidget-Windows-", ".zip") ?? FromRelease(release, currentVersion, "PearNowPlaying-Windows-", ".zip");
             }
         }
 
         /// <summary>
         /// The update in a GitHub "latest release" answer: newer than <paramref name="current"/>, and with this
-        /// platform's file ("PearNowPlaying-Windows-1.6.0.zip") and its SHA-256 digest. Null otherwise.
+        /// platform's file ("NowPlayingWidget-Windows-2.0.0.zip") and its SHA-256 digest. Null otherwise.
         /// </summary>
         public static UpdateInfo FromRelease(IDictionary<string, object> release, string current, string prefix, string extension)
         {
@@ -134,8 +135,10 @@ namespace PearNowPlaying
             var work = Path.Combine(Path.GetDirectoryName(zipPath), "unpacked");
             if (Directory.Exists(work)) Directory.Delete(work, true);
             ZipFile.ExtractToDirectory(zipPath, work);
-            var newExe = Directory.GetFiles(work, "PearNowPlaying.exe", SearchOption.AllDirectories).FirstOrDefault();
-            if (newExe == null) throw new InvalidDataException("PearNowPlaying.exe not in the zip");
+            // the exe keeps the name it has here (shortcuts may point at it); the zip's is the new name, or the old one
+            var newExe = Directory.GetFiles(work, "NowPlayingWidget.exe", SearchOption.AllDirectories).FirstOrDefault()
+                         ?? Directory.GetFiles(work, "PearNowPlaying.exe", SearchOption.AllDirectories).FirstOrDefault();
+            if (newExe == null) throw new InvalidDataException("NowPlayingWidget.exe not in the zip");
             var newVersion = FileVersionInfo.GetVersionInfo(newExe).FileVersion ?? "";
             if (!newVersion.StartsWith(expectedVersion + ".", StringComparison.Ordinal) && newVersion != expectedVersion)
                 throw new InvalidDataException("the zip holds version " + newVersion + ", not " + expectedVersion);

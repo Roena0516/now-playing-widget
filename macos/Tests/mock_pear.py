@@ -87,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     root = Path(__file__).resolve().parents[1]
-    executable = root / 'build/Pear Now Playing.app/Contents/MacOS/PearNowPlaying'
+    executable = root / 'build/Now Playing Widget.app/Contents/MacOS/NowPlayingWidget'
     for MODE in ['3.12', '3.11']:
         controls.clear()
         server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)

@@ -35,7 +35,7 @@ namespace PearNowPlaying
     internal sealed class DiscordPresence : IDisposable
     {
         public const string ClientId = "1562020013953515553";
-        public const string ProjectUrl = "https://github.com/Roena0516/pear-now-playing";
+        public const string ProjectUrl = "https://github.com/Roena0516/now-playing-widget";
         // Discord takes about 5 activity updates per 20 seconds
         static readonly TimeSpan MinGap = TimeSpan.FromSeconds(4);
 

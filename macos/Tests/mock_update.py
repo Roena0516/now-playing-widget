@@ -17,8 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILT = ROOT / 'build/Pear Now Playing.app'
-EXE = BUILT / 'Contents/MacOS/PearNowPlaying'
+BUILT = ROOT / 'build/Now Playing Widget.app'
+EXE = BUILT / 'Contents/MacOS/NowPlayingWidget'
 release = {}
 files = {}
 
@@ -48,7 +48,7 @@ def version_of(app):
 def make_dmg(work, version, name):
     """A DMG holding the built app relabelled as `version`."""
     stage = work / f'stage-{version}'
-    app = stage / 'Pear Now Playing.app'
+    app = stage / 'Now Playing Widget.app'
     shutil.rmtree(stage, ignore_errors=True)
     subprocess.run(['ditto', str(BUILT), str(app)], check=True)
     plist = app / 'Contents/Info.plist'
@@ -57,7 +57,7 @@ def make_dmg(work, version, name):
     plist.write_bytes(plistlib.dumps(info))
     subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True, capture_output=True)
     dmg = work / name
-    subprocess.run(['hdiutil', 'create', '-quiet', '-volname', 'Pear Now Playing', '-srcfolder', str(stage),
+    subprocess.run(['hdiutil', 'create', '-quiet', '-volname', 'Now Playing Widget', '-srcfolder', str(stage),
                     '-format', 'UDZO', '-ov', str(dmg)], check=True)
     return dmg.read_bytes()
 
@@ -79,12 +79,12 @@ def main():
         subprocess.run(['ditto', str(BUILT), str(installed)], check=True)
         current = version_of(installed)
 
-        def offer(version, data, digest=None):
-            name = f'PearNowPlaying-macOS-{version}.dmg'
+        def offer(version, data, digest=None, prefix='NowPlayingWidget'):
+            name = f'{prefix}-macOS-{version}.dmg'
             files[name] = data
             release.clear()
             release.update({'tag_name': f'v{version}', 'html_url': f'http://127.0.0.1:{port}/page', 'assets': [
-                {'name': f'PearNowPlaying-Windows-{version}.zip', 'browser_download_url': 'x', 'digest': 'sha256:00'},
+                {'name': f'{prefix}-Windows-{version}.zip', 'browser_download_url': 'x', 'digest': 'sha256:00'},
                 {'name': name, 'browser_download_url': f'http://127.0.0.1:{port}/dl/{name}',
                  'digest': 'sha256:' + (digest or hashlib.sha256(data).hexdigest())}]})
 
@@ -98,17 +98,24 @@ def main():
         code, out = run_update(port, installed)
         assert code != 0 and version_of(installed) == current, f'a DMG with another version must be refused: {out}'
 
+        # installed under the old name (up to 1.9.4): updated and renamed to Now Playing Widget.app
         offer('9.9.9', new)
         code, out = run_update(port, installed)
-        assert code == 0 and out == 'UPDATED to 9.9.9', out
-        assert version_of(installed) == '9.9.9'
-        subprocess.run(['codesign', '--verify', '--deep', '--strict', str(installed)], check=True)
-        leftovers = [p.name for p in installed.parent.iterdir() if p.name != installed.name]
+        assert code == 0 and out == 'UPDATED to 9.9.9 at Now Playing Widget.app', out
+        renamed = installed.parent / 'Now Playing Widget.app'
+        assert version_of(renamed) == '9.9.9'
+        subprocess.run(['codesign', '--verify', '--deep', '--strict', str(renamed)], check=True)
+        leftovers = [p.name for p in renamed.parent.iterdir() if p.name != renamed.name]
         assert not leftovers, f'old app left behind: {leftovers}'
 
-        code, out = run_update(port, installed)
+        code, out = run_update(port, renamed)
         assert code == 0 and out == 'UP TO DATE', out
-        print('PASS: update from GitHub releases (download, SHA-256, DMG check, swap), wrong digest and wrong version refused, up to date')
+
+        # a release with only the old file names is still taken (and the app keeps its new name)
+        offer('9.9.10', make_dmg(work, '9.9.10', 'legacy.dmg'), prefix='PearNowPlaying')
+        code, out = run_update(port, renamed)
+        assert code == 0 and out == 'UPDATED to 9.9.10 at Now Playing Widget.app' and version_of(renamed) == '9.9.10', out
+        print('PASS: update from GitHub releases (download, SHA-256, DMG check, swap, rename from Pear Now Playing.app, old file names), wrong digest and wrong version refused, up to date')
     finally:
         server.shutdown()
         shutil.rmtree(work, ignore_errors=True)

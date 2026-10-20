@@ -1,6 +1,6 @@
 # 버전 규칙
 
-Pear Now Playing의 버전은 `a.b.c` 세 자리로 씁니다(예: `1.5.2`). 이 문서는 각 자리를 언제 올리는지와, 버전을 올릴 때 고쳐야 하는 곳을 정리합니다.
+Now Playing Widget(1.9.4까지는 Pear Now Playing)의 버전은 `a.b.c` 세 자리로 씁니다(예: `1.5.2`). 이 문서는 각 자리를 언제 올리는지와, 버전을 올릴 때 고쳐야 하는 곳을 정리합니다.
 
 ## 공통 원칙
 
@@ -58,8 +58,8 @@ Pear Now Playing의 버전은 `a.b.c` 세 자리로 씁니다(예: `1.5.2`). 이
 ## 태그와 릴리스
 
 - Git 태그는 `v` 뒤에 버전을 붙여서 만듭니다(예: `v1.6.0`).
-- 릴리스 제목은 `Pear Now Playing a.b.c`로 씁니다.
-- 릴리스 파일 이름에는 버전을 넣습니다: `PearNowPlaying-Windows-a.b.c.zip`, `PearNowPlaying-macOS-a.b.c.dmg`.
-- 1.6.0부터 앱의 자동 업데이트가 이 파일 이름으로 릴리스 파일을 찾고, GitHub가 파일마다 알려주는 SHA-256 값으로 받은 파일을 확인합니다. 파일 이름 형식을 바꾸면 이전 버전의 앱이 업데이트를 찾지 못하므로 바꾸지 않습니다. 앱 안의 버전 번호와 파일 이름의 버전이 다르면 설치를 거부합니다.
+- 릴리스 제목은 `Now Playing Widget a.b.c`로 씁니다(1.9.4까지는 `Pear Now Playing a.b.c`).
+- 릴리스 파일 이름에는 버전을 넣습니다: `NowPlayingWidget-Windows-a.b.c.zip`, `NowPlayingWidget-macOS-a.b.c.dmg`.
+- 1.6.0부터 앱의 자동 업데이트가 이 파일 이름으로 릴리스 파일을 찾고, GitHub가 파일마다 알려주는 SHA-256 값으로 받은 파일을 확인합니다. 1.9.4 이하의 앱은 이전 이름(`PearNowPlaying-Windows-a.b.c.zip`, 그 안의 `PearNowPlaying.exe`, `PearNowPlaying-macOS-a.b.c.dmg`)만 찾으므로, 이름을 바꾼 뒤의 릴리스에는 이전 이름의 파일도 함께 올립니다(만드는 방법은 `CLAUDE.md`의 "작업 방식"에 있습니다). 새 앱은 새 이름을 먼저 찾고, 없으면 이전 이름도 받습니다. 앱 안의 버전 번호와 파일 이름의 버전이 다르면 설치를 거부합니다.
 - 최신 릴리스(`releases/latest`)가 곧 업데이트 대상입니다. 초안(draft)이나 사전 릴리스(pre-release)는 업데이트로 배포되지 않습니다.
 - 릴리스 본문은 합니다체로 쓰고, 변경 내용을 "새 기능", "수정"처럼 종류별로 나누어 적습니다.

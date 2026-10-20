@@ -6,7 +6,7 @@ import Foundation
 /// Socket work runs on its own queue. Same as src/DiscordPresence.cs.
 final class DiscordPresence: @unchecked Sendable {
     static let clientId = "1562020013953515553"
-    static let projectURL = "https://github.com/Roena0516/pear-now-playing"
+    static let projectURL = "https://github.com/Roena0516/now-playing-widget"
     /// Discord takes about 5 activity updates per 20 seconds.
     static let minGap: TimeInterval = 4
 

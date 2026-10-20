@@ -3,7 +3,7 @@
 sent for a song, that a near-identical update isn't sent again, the rate gap, and the clearing at the end."""
 import json, os, socket, struct, subprocess, sys, tempfile, threading, time
 
-APP = os.path.join(os.path.dirname(__file__), "..", "build", "Pear Now Playing.app", "Contents", "MacOS", "PearNowPlaying")
+APP = os.path.join(os.path.dirname(__file__), "..", "build", "Now Playing Widget.app", "Contents", "MacOS", "NowPlayingWidget")
 folder = tempfile.mkdtemp(prefix="discord-")
 path = os.path.join(folder, "discord-ipc-0")
 server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -49,7 +49,7 @@ if song["type"] != 2 or song["details"] != "アイドル - Idol" or song["state"
 if song["timestamps"] != {"start": 1800000000000, "end": 1800000226000}: fail("timestamps")
 if song["assets"]["large_image"] != "https://i.ytimg.com/vi/ZRtdQ81jPUQ/hq720.jpg": fail("cover")
 if song.get("details_url") != "https://music.youtube.com/watch?v=ZRtdQ81jPUQ" or song["assets"].get("large_url") != song["details_url"]: fail("title link to YouTube Music")
-if song["buttons"] != [{"label": "Now Playing Widget", "url": "https://github.com/Roena0516/pear-now-playing"}]: fail("button")
+if song["buttons"] != [{"label": "Now Playing Widget", "url": "https://github.com/Roena0516/now-playing-widget"}]: fail("button")
 seek = sets[1][0]["args"]["activity"]
 if seek["timestamps"]["start"] != 1799999940000 or "buttons" in seek: fail("seek / button off")
 if sets[1][1] - sets[0][1] < 3.9: fail("updates closer than Discord's rate allows")

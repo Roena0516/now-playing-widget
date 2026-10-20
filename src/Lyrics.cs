@@ -134,7 +134,7 @@ namespace PearNowPlaying
         {
             BaseUrl = (baseUrl ?? "https://lrclib.net").TrimEnd('/');
             http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/" + AppInfo.Version + " (+https://github.com/Roena0516/pear-now-playing)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("NowPlayingWidget/" + AppInfo.Version + " (+https://github.com/Roena0516/now-playing-widget)");
         }
 
         /// <summary>YouTube Music lyrics (tried first when UseYtm is on); null = LRCLIB only.</summary>

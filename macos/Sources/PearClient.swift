@@ -149,6 +149,7 @@ struct PlayerState {
             var closeInfo = ""
             do {
                 if token == nil {
+                    // the name Pear shows in its allow dialog; kept from the app's old name so updating doesn't ask again
                     var req = URLRequest(url: baseURL.appendingPathComponent("auth/pear-now-playing-macos"))
                     req.httpMethod = "POST"; req.httpBody = Data()
                     // A refused connection fails at once. If Pear holds the request open, it is showing its

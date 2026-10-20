@@ -37,7 +37,7 @@ struct PlayerSetup {
         api["useHttps"] = false
         plugins["api-server"] = api; config["plugins"] = plugins
         let updated = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
-        let backup = url.deletingLastPathComponent().appendingPathComponent("config.before-pear-now-playing-\(UUID().uuidString).json")
+        let backup = url.deletingLastPathComponent().appendingPathComponent("config.before-now-playing-widget-\(UUID().uuidString).json")
         try FileManager.default.copyItem(at: url, to: backup)
         try updated.write(to: url, options: .atomic)
         return Result(changed: true, backup: backup)

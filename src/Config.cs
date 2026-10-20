@@ -65,7 +65,7 @@ namespace PearNowPlaying
     internal sealed class Config
     {
         public static readonly string Dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PearNowPlaying");
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PearNowPlaying");   // the old name: settings carry over
         public static string FilePath { get { return Path.Combine(Dir, "config.ini"); } }
         public static string TokenPath { get { return Path.Combine(Dir, "token.txt"); } }
         public static string LogPath { get { return Path.Combine(Dir, "error.log"); } }
@@ -217,7 +217,7 @@ namespace PearNowPlaying
                 Directory.CreateDirectory(Dir);
                 var inv = CultureInfo.InvariantCulture;
                 var sb = new StringBuilder();
-                sb.AppendLine("# Pear Now Playing 설정 파일");
+                sb.AppendLine("# Now Playing Widget 설정 파일");
                 sb.AppendLine("# 수정한 뒤 트레이 메뉴의 '설정 다시 불러오기'를 누르면 적용됩니다.");
                 sb.AppendLine();
                 sb.AppendLine("# 곡을 가져올 곳: auto(브라우저와 Pear Desktop 중 나중에 재생을 시작한 쪽), browser(브라우저의 YouTube Music만), pear(Pear Desktop만)");
@@ -323,7 +323,7 @@ namespace PearNowPlaying
                 var old = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                     "ETS2NowPlaying", "config.ini");
                 if (!File.Exists(old)) return;
-                var text = File.ReadAllText(old, Encoding.UTF8).Replace("ETS2 Now Playing", "Pear Now Playing");
+                var text = File.ReadAllText(old, Encoding.UTF8).Replace("ETS2 Now Playing", "Now Playing Widget");
                 File.WriteAllText(FilePath, text, new UTF8Encoding(true));
                 Log.Info("migrated config from " + old);
             }

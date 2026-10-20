@@ -6,11 +6,11 @@ struct UpdateInfo: Equatable {
 }
 
 /// Updates from this repository's GitHub releases, like the Windows version (src/Updater.cs): the latest
-/// release's PearNowPlaying-macOS-a.b.c.dmg is downloaded, checked against the SHA-256 GitHub lists for it, mounted
+/// release's NowPlayingWidget-macOS-a.b.c.dmg is downloaded, checked against the SHA-256 GitHub lists for it, mounted
 /// out of sight, its app checked (signature, bundle ID, version) and swapped in for the running one, which then
 /// relaunches. Files the app downloads itself carry no quarantine flag, so Gatekeeper doesn't ask again.
 @MainActor final class Updater {
-    static let releasesAPI = URL(string: "https://api.github.com/repos/Roena0516/pear-now-playing/releases/latest")!
+    static let releasesAPI = URL(string: "https://api.github.com/repos/Roena0516/now-playing-widget/releases/latest")!
     var apiURL = releasesAPI
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -20,7 +20,7 @@ struct UpdateInfo: Equatable {
 
     private func request(_ url: URL) -> URLRequest {
         var request = URLRequest(url: url)
-        request.setValue("PearNowPlaying-macOS/\(appVersion) (+https://github.com/Roena0516/pear-now-playing)", forHTTPHeaderField: "User-Agent")
+        request.setValue("NowPlayingWidget-macOS/\(appVersion) (+https://github.com/Roena0516/now-playing-widget)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         return request
     }
@@ -31,12 +31,14 @@ struct UpdateInfo: Equatable {
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw NSError(domain: "Updater", code: (response as? HTTPURLResponse)?.statusCode ?? 0, userInfo: [NSLocalizedDescriptionKey: "GitHub releases \((response as? HTTPURLResponse)?.statusCode ?? 0)"])
         }
-        return Self.info(from: try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:], current: current)
+        let release = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        // releases up to 1.9.4 were PearNowPlaying-macOS-a.b.c.dmg (the app's old name)
+        return Self.info(from: release, current: current) ?? Self.info(from: release, current: current, prefix: "PearNowPlaying-macOS-")
     }
 
     /// The update in a GitHub "latest release" answer: newer than `current`, with this platform's file
-    /// ("PearNowPlaying-macOS-1.6.0.dmg") and its SHA-256 digest. Nil otherwise.
-    nonisolated static func info(from release: [String: Any], current: String, prefix: String = "PearNowPlaying-macOS-", ext: String = ".dmg") -> UpdateInfo? {
+    /// ("NowPlayingWidget-macOS-2.0.0.dmg") and its SHA-256 digest. Nil otherwise.
+    nonisolated static func info(from release: [String: Any], current: String, prefix: String = "NowPlayingWidget-macOS-", ext: String = ".dmg") -> UpdateInfo? {
         let version = (release["tag_name"] as? String ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
         guard isNewer(version, than: current) else { return nil }
         let wanted = (prefix + version + ext).lowercased()
@@ -78,7 +80,9 @@ struct UpdateInfo: Equatable {
 
     /// Mount the DMG (no Finder window), check its app — valid signature, same bundle ID, the expected version —
     /// and swap it in for `target`. The running app is moved aside first and put back if anything fails.
-    nonisolated static func install(dmg: URL, version: String, into target: URL, bundleId: String) throws {
+    /// Returns where the app now is: the same place, except that an app still named "Pear Now Playing.app" (up to
+    /// 1.9.4) is renamed to "Now Playing Widget.app" next to it.
+    @discardableResult nonisolated static func install(dmg: URL, version: String, into target: URL, bundleId: String) throws -> URL {
         let work = dmg.deletingLastPathComponent()
         let mount = work.appendingPathComponent("mount")
         try? FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
@@ -96,16 +100,20 @@ struct UpdateInfo: Equatable {
         try? FileManager.default.removeItem(at: staged)
         try run("/usr/bin/ditto", ["--norsrc", app.path, staged.path])
 
+        var destination = target
+        let renamed = target.deletingLastPathComponent().appendingPathComponent("Now Playing Widget.app")
+        if target.lastPathComponent == "Pear Now Playing.app" && !FileManager.default.fileExists(atPath: renamed.path) { destination = renamed }
         let aside = target.deletingLastPathComponent().appendingPathComponent(".\(target.deletingPathExtension().lastPathComponent)-old.app")
         try? FileManager.default.removeItem(at: aside)
         try FileManager.default.moveItem(at: target, to: aside)
-        do { try FileManager.default.moveItem(at: staged, to: target) }
+        do { try FileManager.default.moveItem(at: staged, to: destination) }
         catch {
-            try? FileManager.default.removeItem(at: target)
+            try? FileManager.default.removeItem(at: destination)
             try? FileManager.default.moveItem(at: aside, to: target)
             throw error
         }
         try? FileManager.default.removeItem(at: aside)
+        return destination
     }
 
     /// Open the app at `target` again once this process has exited, then quit.

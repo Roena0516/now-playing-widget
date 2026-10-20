@@ -53,14 +53,14 @@ enum NativeTheme {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "Pear Now Playing"
+        image.accessibilityDescription = "Now Playing Widget"
         return image
     }
 }
 enum NativeCardKind {
     case nowPlaying, paused, resumed, info
     var label: String {
-        switch self { case .nowPlaying, .resumed: return "재생중"; case .paused: return "일시정지됨"; case .info: return "Pear Now Playing" }
+        switch self { case .nowPlaying, .resumed: return "재생중"; case .paused: return "일시정지됨"; case .info: return "Now Playing Widget" }
     }
 }
 struct NativeCardLayout {

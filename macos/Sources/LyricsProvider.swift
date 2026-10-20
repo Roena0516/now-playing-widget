@@ -103,7 +103,7 @@ struct LyricRecord: Decodable {
         var url = URLComponents(string: baseURL.trimmed("/") + "/api/\(path)")!
         url.queryItems = query
         var request = URLRequest(url: url.url!); request.timeoutInterval = 20
-        request.setValue("PearNowPlaying-macOS/\(appVersion) (+https://github.com/Roena0516/pear-now-playing)", forHTTPHeaderField: "User-Agent")
+        request.setValue("NowPlayingWidget-macOS/\(appVersion) (+https://github.com/Roena0516/now-playing-widget)", forHTTPHeaderField: "User-Agent")
         var waited = false
         for attempt in 1...Self.attempts {
             try await waitTurn(waited: waited)

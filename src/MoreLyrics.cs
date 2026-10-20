@@ -46,7 +46,7 @@ namespace PearNowPlaying
         public MoreLyrics()
         {
             http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PearNowPlaying/" + AppInfo.Version + " (+https://github.com/Roena0516/pear-now-playing)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("NowPlayingWidget/" + AppInfo.Version + " (+https://github.com/Roena0516/now-playing-widget)");
         }
 
         /// <summary>"Find lyrics again": ask the sources even if they were failing.</summary>

@@ -116,6 +116,7 @@ struct Settings: Codable {
         }
         if !widgets.contains(where: \.isOn) { widgets[0].hidden = nil }   // at least one widget stays on
     }
+    /// the app's old name (Pear Now Playing), kept so settings, the token and the log carry over
     static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/PearNowPlaying-macOS")
     static let file = directory.appendingPathComponent("config.json")
     static func load() -> Settings {

@@ -162,7 +162,7 @@ namespace PearNowPlaying
             tray = new NotifyIcon
             {
                 Icon = CardRenderer.MakeTrayIcon(32),
-                Text = "Pear Now Playing",
+                Text = "Now Playing Widget",
                 ContextMenuStrip = menu,
                 Visible = true
             };
@@ -194,7 +194,7 @@ namespace PearNowPlaying
         void OnStatusLine()
         {
             statusItem.Text = pear.StatusLine;
-            tray.Text = Truncate("Pear Now Playing - " + pear.StatusLine, 63);
+            tray.Text = Truncate("Now Playing Widget - " + pear.StatusLine, 63);
             SyncDiscord();
         }
 
@@ -626,7 +626,7 @@ namespace PearNowPlaying
             {
                 try
                 {
-                    var dir = Path.Combine(Path.GetTempPath(), "PearNowPlaying-update-" + target.Version);
+                    var dir = Path.Combine(Path.GetTempPath(), "NowPlayingWidget-update-" + target.Version);
                     var zip = await updater.Download(target, dir, CancellationToken.None);
                     Updater.Install(zip, exe, target.Version);
                     Log.Info("updated to " + target.Version + ", restarting");
@@ -1254,7 +1254,7 @@ namespace PearNowPlaying
 
         void Balloon(string text)
         {
-            try { tray.ShowBalloonTip(4000, "Pear Now Playing", text, ToolTipIcon.Info); } catch { }
+            try { tray.ShowBalloonTip(4000, "Now Playing Widget", text, ToolTipIcon.Info); } catch { }
         }
 
         void SetSource(string value)

@@ -129,7 +129,7 @@ import Foundation
         var url = URLComponents(string: base)!
         url.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         var request = URLRequest(url: url.url!); request.timeoutInterval = 10
-        request.setValue("PearNowPlaying-macOS/\(appVersion) (+https://github.com/Roena0516/pear-now-playing)", forHTTPHeaderField: "User-Agent")
+        request.setValue("NowPlayingWidget-macOS/\(appVersion) (+https://github.com/Roena0516/now-playing-widget)", forHTTPHeaderField: "User-Agent")
         let data: Data, response: HTTPURLResponse
         if let transport { (data, response) = try await transport(request) }
         else {

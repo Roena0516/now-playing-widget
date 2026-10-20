@@ -1,4 +1,4 @@
-# dmgbuild settings for PearNowPlaying-macOS.dmg (used by `./macos/build.sh --dmg`).
+# dmgbuild settings for NowPlayingWidget-macOS.dmg (used by `./macos/build.sh --dmg`).
 # The background (Resources/dmg-background.tiff, made by Tools/make-art.swift) is drawn for a 640 x 400 window
 # with the app at (160, 200) and the Applications link at (480, 200).
 import os

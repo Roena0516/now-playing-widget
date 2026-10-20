@@ -93,7 +93,7 @@ namespace PearNowPlaying
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
-            Text = "Pear Now Playing";
+            Text = "Now Playing Widget";
             anim.Tick += OnAnim;
             keepOnTop.Tick += (s, e) => BringToTop();
         }

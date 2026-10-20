@@ -19,7 +19,7 @@ namespace PearNowPlaying
     internal sealed class LyricsDiskCache
     {
         public static readonly string DefaultDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PearNowPlaying", "lyrics-cache");
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PearNowPlaying", "lyrics-cache");   // the old name: the cache carries over
         public static readonly TimeSpan MaxAge = TimeSpan.FromDays(90);
         /// <summary>
         /// Entries of older formats are dropped. 2 (1.7.1): 1.6–1.7 could save a same-name song's lyrics for a cover
