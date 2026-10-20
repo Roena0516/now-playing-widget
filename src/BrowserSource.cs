@@ -168,6 +168,17 @@ namespace PearNowPlaying
             return info;
         }
 
+        /// <summary>Every session Windows lists ("app id: status"), the current one first: for the probe.</summary>
+        public async Task<List<string>> Describe()
+        {
+            var m = await Manager();
+            var list = new List<string>();
+            var current = WinRt.Call(managerType, m, "GetCurrentSession");
+            list.Add("current: " + (current != null ? App(current) + " (" + Status(current) + ")" : "none"));
+            foreach (var s in (IEnumerable)WinRt.Call(managerType, m, "GetSessions")) list.Add("session: " + App(s) + " (" + Status(s) + ")" + (BrowserNames.Of(App(s)) != null ? " = browser" : ""));
+            return list;
+        }
+
         /// <summary>Play / pause, next, previous for the browser session.</summary>
         public async Task Control(string action)
         {
@@ -365,7 +376,13 @@ namespace PearNowPlaying
             info = await smtc.Read();
             if (info == null || info.Title.Length == 0) { NotYouTubeMusic(); return; }
             var tab = FindTab(info);
-            if (tab == null) { NotYouTubeMusic(); return; }   // a browser plays something, but not YouTube Music
+            if (tab == null)
+            {
+                // the tab can't be seen right now (behind another, its tab strip not read yet) while Windows still names
+                // the song shown: carry on with it rather than calling it stopped
+                if (Shown()) { SetBrowser(info.Browser.Name); TickPosition(); return; }
+                NotYouTubeMusic(); return;   // a browser plays something, but not YouTube Music
+            }
             SetBrowser(info.Browser.Name);
             var p = WatchParameters(tab.Url);
             await Follow(p.Item1, p.Item2, TabSongTitle(tab.Title), ct);
@@ -468,6 +485,9 @@ namespace PearNowPlaying
         /// </summary>
         async Task Follow(string urlId, string list, string tabSong, CancellationToken ct)
         {
+            // only the tab's title (it went behind another tab): the song shown goes on while Windows names it, instead
+            // of being looked up again by title
+            if (urlId.Length == 0 && Shown()) { mismatchSince = null; TickPosition(); return; }
             var id = urlId;
             // The tab's title and Windows' should name the same song. They don't for a moment while a song changes;
             // and a tab can keep another song's address and title while it plays this one (seen on macOS 2026-10-20).
@@ -501,6 +521,9 @@ namespace PearNowPlaying
             Log.Info("browser (" + Browser + ") plays " + (found.Length > 0 ? found : "a song without a known video") + ": " + song["artist"] + " - " + title);
             Send(new Dictionary<string, object> { { "type", "VIDEO_CHANGED" }, { "song", song }, { "isPlaying", info.Playing }, { "position", position } });
         }
+
+        /// <summary>Whether a song was sent and Windows still names it.</summary>
+        bool Shown() { return songKey.Length > 0 && SameSong(info.Title, title, tabTitle); }
 
         /// <summary>Whether titles have disagreed for 3 seconds now (started on the first call).</summary>
         bool Mismatched()
@@ -710,7 +733,11 @@ namespace PearNowPlaying
                 try
                 {
                     var info = smtc.Read().GetAwaiter().GetResult();
-                    if (info == null) line("smtc: no browser session");
+                    if (info == null)
+                    {
+                        line("smtc: no browser session");
+                        foreach (var d in smtc.Describe().GetAwaiter().GetResult()) line("  " + d);
+                    }
                     else
                     {
                         line("smtc: " + info.App + " " + (info.Playing ? "playing" : "paused") + " " + info.PositionAt(DateTime.UtcNow).ToString("0.0")

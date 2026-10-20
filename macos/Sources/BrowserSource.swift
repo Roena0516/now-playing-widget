@@ -268,6 +268,8 @@ struct NowPlayingInfo: Equatable {
             case .success(let found):
                 readable.insert(app)
                 guard let tab = Self.playingTab(found, title: self.info?.title ?? "") else {
+                    // no tab to tell by while macOS still names the song shown: carry on with it rather than calling it stopped
+                    if shown() { setBrowser(name); tick(); return }
                     notYouTubeMusic()   // a browser plays something, but not YouTube Music (another tab, another site)
                     return
                 }
@@ -324,6 +326,8 @@ struct NowPlayingInfo: Equatable {
     /// src/BrowserSource.cs.
     private func follow(videoId urlId: String, list: String, tabTitle: String) {
         guard let info else { return }
+        // no address (only titles): the song shown goes on while macOS names it, instead of being looked up again by title
+        if urlId.isEmpty && shown() { mismatchSince = nil; tick(); return }
         var id = urlId, tabSong = tabTitle
         // The tab's title and macOS's should name the same song. They don't for a moment while a song changes, and
         // a tab can keep the address and title of another song while it plays this one (seen 2026-10-20 after
@@ -366,6 +370,12 @@ struct NowPlayingInfo: Equatable {
     private var mismatchSince: Date?
     /// The song fields sent last.
     private var sent: [String: Any] = [:]
+
+    /// Whether a song was sent and macOS still names it.
+    private func shown() -> Bool {
+        guard let info else { return false }
+        return !songKey.isEmpty && Self.sameSong(info.title, title: title, tabTitle: tabTitle)
+    }
 
     /// Whether titles have disagreed for 3 seconds now (started on the first call).
     private func mismatched() -> Bool {
