@@ -87,11 +87,11 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 
 ### Discord 상태
 
-메뉴의 **Discord → 듣는 중 표시**를 켜면, 브라우저에서 듣는 곡을 Discord 프로필에 "듣는 중"으로 표시합니다. 처음에는 꺼져 있습니다.
+메뉴의 **Discord → 듣는 중 표시**를 켜면, 듣는 곡을 Discord 프로필에 "듣는 중"으로 표시합니다. 처음에는 꺼져 있습니다.
 
 - 곡 제목, 아티스트, 앨범 아트, 진행 바를 표시합니다. 제목이나 앨범 아트를 누르면 그 곡이 YouTube Music에서 열립니다.
 - 이 앱의 GitHub 페이지로 가는 **Now Playing Widget** 버튼을 함께 표시합니다. **GitHub 버튼 표시**로 끌 수 있습니다.
-- 일시정지하면 표시를 지웁니다. Pear Desktop에서 재생하는 곡은 표시하지 않습니다(Pear Desktop에 자체 Discord 플러그인이 있습니다).
+- 브라우저와 Pear Desktop의 곡을 모두 표시하며, 일시정지하면 표시를 지웁니다.
 - Discord **데스크톱 앱**이 실행 중이어야 합니다. 브라우저에서 여는 Discord(웹)에는 표시할 수 없습니다.
 
 ### 위치, 크기, 여러 모니터
@@ -160,7 +160,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 | `showOnPause` | `true` | 일시정지하거나 다시 재생할 때도 곡 카드를 잠시 표시할지 정합니다. |
 | `showAlbumArt` | `true` | 앨범 아트를 표시할지 정합니다. |
 | `videoTitle` | `false` | `true`이면 앨범 곡이 아닌 영상에 영상 제목을, `false`이면 곡 제목을 표시합니다. |
-| `discordPresence` | `false` | 브라우저에서 듣는 곡을 Discord에 "듣는 중"으로 표시할지 정합니다. |
+| `discordPresence` | `false` | 듣는 곡을 Discord에 "듣는 중"으로 표시할지 정합니다. |
 | `discordButton` | `true` | Discord 상태에 이 앱의 GitHub 페이지로 가는 버튼을 붙일지 정합니다. |
 | `showLyrics` | `true` | 가사 카드를 표시할지 정합니다. |
 | `lyricsAlbumOnly` | `false` | `true`이면 앨범 곡(공식 음원)에서만 가사를 찾아 표시합니다. |

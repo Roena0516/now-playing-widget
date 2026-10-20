@@ -41,7 +41,7 @@ open 'macos/build/Now Playing Widget.app' --args --preview
 - **재생 앱**: 메뉴의 **재생 앱**에서 자동(기본값), 브라우저, Pear Desktop 중에서 고릅니다. 자동이면 나중에 재생을 시작한 쪽의 곡을 표시합니다.
 - **다음 곡 가사 미리 찾기**: 탭이 재생 중인 앨범이나 재생목록의 순서로 다음 곡을 추정합니다. 셔플이나 라디오에서 추정이 틀리면, 그 목록은 다시 맞을 때까지 미리 찾지 않습니다.
 - **재생 제어**: 메뉴와 단축키의 재생/일시정지, 다음 곡, 이전 곡은 macOS의 미디어 명령으로 브라우저에 보냅니다.
-- **Discord**: 메뉴의 **Discord → 듣는 중 표시**를 켜면 브라우저에서 듣는 곡을 Discord 프로필에 "듣는 중"으로 표시합니다(처음에는 꺼져 있음). Discord 앱의 로컬 소켓(`$TMPDIR/discord-ipc-N`)으로 보내며, Pear Desktop의 곡은 표시하지 않습니다. 제목과 앨범 아트를 누르면 YouTube Music에서 그 곡이 열리고, **GitHub 버튼 표시**로 이 앱의 GitHub 페이지 버튼을 붙이거나 뗄 수 있습니다.
+- **Discord**: 메뉴의 **Discord → 듣는 중 표시**를 켜면 듣는 곡(브라우저와 Pear Desktop)을 Discord 프로필에 "듣는 중"으로 표시합니다(처음에는 꺼져 있음). Discord 앱의 로컬 소켓(`$TMPDIR/discord-ipc-N`)으로 보냅니다. 제목과 앨범 아트를 누르면 YouTube Music에서 그 곡이 열리고, **GitHub 버튼 표시**로 이 앱의 GitHub 페이지 버튼을 붙이거나 뗄 수 있습니다.
 
 ## 기능
 
@@ -124,7 +124,7 @@ Windows 버전의 `src/Theme.cs`, `src/CardRenderer.cs`, `src/LyricsView.cs`에 
 | 설정 | 기본값 | 설명 |
 |---|---|---|
 | `source` | `auto` | 곡을 가져올 곳입니다. `auto`(브라우저와 Pear Desktop 중 나중에 재생을 시작한 쪽), `browser`, `pear` 중 하나입니다. |
-| `discordPresence`, `discordButton` | `false`, `true` | 브라우저에서 듣는 곡을 Discord에 "듣는 중"으로 표시할지, 거기에 GitHub 페이지 버튼을 붙일지 정합니다. |
+| `discordPresence`, `discordButton` | `false`, `true` | 듣는 곡을 Discord에 "듣는 중"으로 표시할지, 거기에 GitHub 페이지 버튼을 붙일지 정합니다. |
 | `host`, `port` | `127.0.0.1`, `26538` | 로컬 Pear API의 주소입니다. 호스트는 `127.0.0.1` 또는 `localhost`만 사용할 수 있습니다. |
 | `widgets` | 주 화면 왼쪽 아래 하나 | 위젯 목록입니다. 항목마다 `monitor`(화면 번호, 0부터), `position`(`TopLeft` … `BottomRight` 또는 `Custom`), `customX`, `customY`, `customFromBottom`(끌어서 옮겨 둔 위치, pt), `scale`(그 위젯의 배율, 없으면 아래의 `scale`), `transparency`(위젯 전체의 투명도, 0–0.8), `hidden`(**표시**에서 끈 위젯이면 `true`, 설정은 보관됨)이 있습니다. 1.6까지의 `position`, `monitor`, `custom…` 값은 처음 실행할 때 이 목록으로 옮겨집니다. |
 | `marginX`, `marginY` | `24`, `24` | Dock과 메뉴 막대를 제외한 화면 영역으로부터 떨어진 여백(pt)입니다. |

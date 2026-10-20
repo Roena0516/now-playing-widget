@@ -45,7 +45,7 @@ struct Settings: Codable {
     /// title shown for videos (not album tracks): "song" = Pear's title, "video" = the video's own title
     /// (Pear's alternativeTitle, what Pear's Discord status shows)
     var videoTitle = "song"
-    /// show the browser's song as "Listening to" on Discord (off unless the user turns it on)
+    /// show the song playing as "Listening to" on Discord (off unless the user turns it on)
     var discordPresence = false
     /// a button to the project's GitHub page in that Discord status
     var discordButton = true

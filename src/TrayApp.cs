@@ -127,7 +127,7 @@ namespace PearNowPlaying
             }
             // Discord's "Listening to" for the browser's songs (same items as the macOS version)
             discordItem = new ToolStripMenuItem("듣는 중 표시", null, (s, e) => { cfg.DiscordPresence = !cfg.DiscordPresence; cfg.Save(); SyncDiscord();
-                ShowInfo(cfg.DiscordPresence ? "브라우저에서 듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다"); });
+                ShowInfo(cfg.DiscordPresence ? "듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다"); });
             discordButtonItem = new ToolStripMenuItem("GitHub 버튼 표시", null, (s, e) => { cfg.DiscordButton = !cfg.DiscordButton; cfg.Save(); SyncDiscord(); });
             discordMenu = new ToolStripMenuItem("Discord");
             discordMenu.DropDownItems.AddRange(new ToolStripItem[] { discordItem, discordButtonItem });
@@ -200,14 +200,14 @@ namespace PearNowPlaying
         }
 
         /// <summary>
-        /// Discord's "Listening to": the browser's song while it plays (Pear Desktop has its own Discord plugin, so its
-        /// songs are left out), nothing otherwise. DiscordPresence sends only real changes (a new song, play / pause,
-        /// a seek), so this can be called on every position.
+        /// Discord's "Listening to": the song shown while it plays (from the browser or Pear Desktop; with Pear's own Discord
+        /// plugin on too, Discord gets two and picks one), nothing otherwise. DiscordPresence sends only real changes (a
+        /// new song, play / pause, a seek), so this can be called on every position.
         /// </summary>
         void SyncDiscord()
         {
             var song = pear.Current;
-            if (!cfg.DiscordPresence || pear.Source != SongSource.Browser || !song.HasData || !pear.IsPlaying || song.Duration <= 0)
+            if (!cfg.DiscordPresence || !song.HasData || !pear.IsPlaying || song.Duration <= 0)
             {
                 discord.Show(null);
                 return;

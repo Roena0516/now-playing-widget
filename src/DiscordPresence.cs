@@ -28,9 +28,8 @@ namespace PearNowPlaying
 
     /// <summary>
     /// "Listening to" on the user's Discord profile (Rich Presence), through the Discord app's local IPC pipe
-    /// (\\.\pipe\discord-ipc-N): no server of ours, and nothing when Discord isn't running. Only songs from the
-    /// browser are shown (Pear Desktop has its own Discord plugin), and only when the user turns it on (config
-    /// discordPresence). Same as macos/Sources/DiscordPresence.swift.
+    /// (\\.\pipe\discord-ipc-N): no server of ours, and nothing when Discord isn't running. Songs from the browser
+    /// and from Pear Desktop are shown, only when the user turns it on (config discordPresence). Same as macos/Sources/DiscordPresence.swift.
     /// </summary>
     internal sealed class DiscordPresence : IDisposable
     {

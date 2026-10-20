@@ -302,7 +302,7 @@ import CoreText
     }
     @objc func toggleDiscord() {
         client.settings.discordPresence.toggle(); client.settings.save(); client.syncDiscord(); updateMenu()
-        overlay.showInfo(client.settings.discordPresence ? "브라우저에서 듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다")
+        overlay.showInfo(client.settings.discordPresence ? "듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다")
     }
     @objc func toggleDiscordButton() { client.settings.discordButton.toggle(); client.settings.save(); client.syncDiscord(); updateMenu() }
     @objc func previous() { client.control("previous") }

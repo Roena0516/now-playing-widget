@@ -1,8 +1,8 @@
 import Foundation
 
 /// "Listening to" on the user's Discord profile (Rich Presence), through the Discord app's local IPC socket
-/// ($TMPDIR/discord-ipc-N): no server of ours, and nothing when Discord isn't running. Only songs from the browser
-/// are shown (Pear Desktop has its own Discord plugin), and only when the user turns it on (discordPresence).
+/// ($TMPDIR/discord-ipc-N): no server of ours, and nothing when Discord isn't running. Songs from the browser and
+/// from Pear Desktop are shown, only when the user turns it on (discordPresence).
 /// Socket work runs on its own queue. Same as src/DiscordPresence.cs.
 final class DiscordPresence: @unchecked Sendable {
     static let clientId = "1562020013953515553"

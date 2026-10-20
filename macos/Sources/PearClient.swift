@@ -262,11 +262,11 @@ struct PlayerState {
         syncDiscord()
     }
 
-    /// Discord's "Listening to": the browser's song while it plays (Pear Desktop has its own Discord plugin, so its
-    /// songs are left out), nothing otherwise. DiscordPresence sends only real changes (a new song, play / pause, a
+    /// Discord's "Listening to": the song shown while it plays (from the browser or Pear Desktop; with Pear's own
+    /// Discord plugin on too, Discord gets two and picks one), nothing otherwise. DiscordPresence sends only real changes (a new song, play / pause, a
     /// seek), so this runs on every message. Same as TrayApp.SyncDiscord in src/TrayApp.cs.
     func syncDiscord() {
-        guard loadRemoteAssets, settings.discordPresence, source == .browser, !song.title.isEmpty, !song.paused, song.duration > 0 else {
+        guard loadRemoteAssets, settings.discordPresence, !song.title.isEmpty, !song.paused, song.duration > 0 else {
             discord.show(nil); return
         }
         let start = Date().addingTimeInterval(-elapsed)

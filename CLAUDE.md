@@ -78,9 +78,9 @@ Windows:
 
 ## Discord "듣는 중" 표시 (`DiscordPresence`)
 
-- 브라우저에서 듣는 곡을 Discord 프로필에 "듣는 중"(Rich Presence, 활동 종류 2)으로 표시합니다(2026-10-20 사용자 요청). Pear에서 오는 곡은 설정과 관계없이 표시하지 않습니다. Pear에는 자체 Discord 플러그인이 있기 때문입니다. 기본값은 꺼짐이며(`discordPresence`), 메뉴의 "Discord" 하위 메뉴에서 켭니다. GitHub 페이지로 가는 "Now Playing Widget" 버튼은 `discordButton`(기본 켜짐)으로 끄고 켭니다.
+- 듣는 곡을 Discord 프로필에 "듣는 중"(Rich Presence, 활동 종류 2)으로 표시합니다(2026-10-20 사용자 요청). 브라우저의 곡과 Pear의 곡을 모두 표시합니다(사용자 방침, 2026-10-20: 처음에는 Pear 곡을 뺐지만 위젯의 설정이 켜져 있으면 Pear 곡도 표시하기로 바꿈). 기본값은 꺼짐이며(`discordPresence`), 메뉴의 "Discord" 하위 메뉴에서 켭니다. GitHub 페이지로 가는 "Now Playing Widget" 버튼은 `discordButton`(기본 켜짐)으로 끄고 켭니다.
 - Discord 앱의 로컬 IPC로 보냅니다: Windows는 파이프 `\\.\pipe\discord-ipc-N`, 맥은 `$TMPDIR/discord-ipc-N` 소켓입니다. 프레임은 opcode와 길이(각각 리틀 엔디언 4바이트) 뒤에 JSON이 오는 형식이고, 핸드셰이크(opcode 0, `client_id`)를 한 뒤 `SET_ACTIVITY`를 보냅니다. 애플리케이션 ID는 `1562020013953515553`(사용자가 Developer Portal에서 만든 앱)입니다. Discord가 돌려주는 응답은 읽어서 버립니다. 읽지 않으면 버퍼가 차서 쓰기가 멈추기 때문입니다.
-- 내용: 곡 제목(카드에 보이는 제목, `details`), 아티스트(`state`), 앨범아트 주소(`large_image`, Discord가 직접 받아 갑니다), 시작·끝 시각(진행 막대), 버튼입니다. `status_display_type` 2로 멤버 목록에도 곡 제목이 보입니다. 문자열은 2–128자여야 해서 짧으면 U+2800으로 채웁니다. 일시정지하거나 Pear 곡으로 바뀌면 활동을 지웁니다(`activity: null`).
+- 내용: 곡 제목(카드에 보이는 제목, `details`), 아티스트(`state`), 앨범아트 주소(`large_image`, Discord가 직접 받아 갑니다), 시작·끝 시각(진행 막대), 버튼입니다. `status_display_type` 2로 멤버 목록에도 곡 제목이 보입니다. 문자열은 2–128자여야 해서 짧으면 U+2800으로 채웁니다. 일시정지하면 활동을 지웁니다(`activity: null`).
 - Discord의 요청 제한(20초에 5번 정도) 때문에, 곡이 바뀌거나 재생 상태가 바뀌거나 탐색해서 시작 시각이 3초 넘게 달라질 때만 보내고, 보내는 사이에 4초를 둡니다. 위치는 1초마다 다시 계산하지만 같은 내용이면 보내지 않습니다. Discord가 꺼져 있으면 15초마다 다시 연결해 봅니다.
 - Discord 데스크톱 앱이 있어야 합니다. 브라우저에서 여는 Discord(웹)에는 로컬 IPC가 없어서 표시할 방법이 없습니다(Pear의 Discord 플러그인도 같습니다).
 - 테스트: 맥은 `macos/Tests/mock_discord.py`(가짜 Discord 소켓, 앱의 `--discord-test <폴더>`)입니다. Windows는 Mono 테스트로 JSON만 확인했고, 파이프 연결은 Windows에서 확인해야 합니다.
