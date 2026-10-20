@@ -96,7 +96,7 @@ Windows를 시작할 때 자동으로 실행하려면 `Win + R`로 `shell:startu
 - 곡 제목, 아티스트, 앨범 아트, 진행 바를 표시합니다. 다른 사람이 제목이나 앨범 아트를 누르면 그 곡이 YouTube Music에서 열립니다.
 - **GitHub 버튼 표시**를 켜 두면(기본값) 이 앱의 GitHub 페이지로 가는 **Now Playing Widget** 버튼이 함께 표시됩니다.
 - Pear Desktop에서 재생하는 곡은 표시하지 않습니다. Pear Desktop에는 자체 Discord 플러그인이 있기 때문입니다. 일시정지하면 표시를 지웁니다.
-- PC에서 실행 중인 Discord 앱에 로컬로 연결해서 보냅니다. Discord 앱이 꺼져 있으면 아무것도 하지 않고, Discord 앱이 켜지면 표시합니다.
+- PC에서 실행 중인 Discord 데스크톱 앱에 로컬로 연결해서 보냅니다. Discord 앱이 꺼져 있으면 아무것도 하지 않고, Discord 앱이 켜지면 표시합니다. 브라우저에서 여는 Discord(웹)에는 이런 연결 통로가 없어서 표시할 수 없습니다.
 
 ## 단축키
 
