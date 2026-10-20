@@ -13,7 +13,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / 'macos/build/Now Playing Widget.app/Contents/MacOS/NowPlayingWidget'
-SCENES = {'hero': 'lyrics-scroll.gif', 'marquee': 'title-marquee.gif', 'pause': 'pause-resume.gif'}
+SCENES = {'hero': 'demo-lyrics.gif', 'marquee': 'demo-title.gif', 'pause': 'demo-pause.gif'}
 VIDEO = 'iAoU1UGPoXc'   # 코가네 랑 - 호랑풍류가 [나와 호랑이님 OST] (Cover), the README's example song
 FPS = 20
 SCALE = 1.5   # of the 1x layout: crisp on high-density screens, small enough for a README

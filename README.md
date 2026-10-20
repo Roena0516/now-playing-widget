@@ -5,7 +5,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 가사가 있는 곡이라면 부드럽게 스크롤되는 가사 카드도 함께 표시합니다.
 
 <p align="center">
-  <img src="docs/lyrics-scroll.gif" alt="곡 카드와 가사 카드" width="500">
+  <img src="docs/demo-lyrics.gif" alt="곡 카드와 가사 카드" width="500">
 </p>
 
 - 브라우저 확장 프로그램을 설치하지 않아도 됩니다. 앱을 실행한 뒤 브라우저에서 YouTube Music을 재생하면 바로 표시됩니다.
@@ -52,7 +52,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 앨범 아트, 제목, 아티스트·앨범, 진행 바를 표시합니다. 곡이 바뀌거나 재생 상태가 바뀌면 잠시 나타났다가 사라지며, 메뉴의 **곡 정보 계속 표시**로 계속 띄워 둘 수 있습니다(기본값). 일시정지하면 표시가 회색으로 바뀝니다.
 
 <p align="center">
-  <img src="docs/pause-resume.gif" alt="일시정지와 다시 재생" width="500">
+  <img src="docs/demo-pause.gif" alt="일시정지와 다시 재생" width="500">
 </p>
 
 ### 싱크 가사
@@ -70,7 +70,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 제목이 카드보다 길면 전광판처럼 옆으로 흘러갑니다. 처음 1.8초는 앞부분을 보여 주고, 끝이 지나가면 앞부분이 다시 이어서 들어옵니다.
 
 <p align="center">
-  <img src="docs/title-marquee.gif" alt="긴 제목 스크롤" width="500">
+  <img src="docs/demo-title.gif" alt="긴 제목 스크롤" width="500">
 </p>
 
 ### 브라우저와 Pear Desktop
