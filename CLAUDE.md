@@ -46,6 +46,7 @@ Windows:
 |---|---|
 | `src/Program.cs` | 진입점, 단일 인스턴스 확인, 버전 정보 |
 | `src/BrowserSource.cs` | 브라우저의 YouTube Music에서 곡을 가져옵니다(아래 "브라우저 연동"). SMTC와 UI Automation을 리플렉션으로 부르는 래퍼(`WinRt`, `Smtc`, `BrowserWindows`), `--browser-probe` 모드(`BrowserProbe`)도 이 파일에 있습니다. 맥은 `BrowserSource.swift`와 `macos/Helper/NowPlaying.m`입니다. |
+| `src/DiscordPresence.cs` | Discord "듣는 중" 표시(아래 "Discord" 항목). 맥은 `DiscordPresence.swift`입니다. |
 | `src/PearClient.cs` | 보여 줄 곡의 소스(Pear 또는 브라우저)를 고르고(`HandleMessage`, `PlayerState`), Pear API 서버 플러그인과 통신합니다: `POST /auth/{id}`로 토큰 발급(처음 한 번은 Pear가 허용 창을 띄웁니다), WebSocket `/api/v1/ws`, `POST /api/v1/next`·`previous`·`toggle-play`, `GET /api/v1/queue/next`(다음 곡). `SongInfo.MediaType`은 AUDIO / ORIGINAL_MUSIC_VIDEO / USER_GENERATED_CONTENT / PODCAST_EPISODE / OTHER_VIDEO 중 하나이며, 재생목록(큐)에서 가져온 곡은 UNKNOWN입니다. |
 | `src/OverlayWindow.cs` | 클릭이 통과하는 항상 위 레이어드 창(`UpdateLayeredWindow`), 페이드·이동 애니메이션. `Interactive`를 켜면 클릭 통과(`WS_EX_TRANSPARENT`)를 끄고 끌기 이벤트를 보냅니다 |
 | `src/Placement.cs` | 끌어서 놓은 위젯의 모니터와 위치(`Custom`) 계산(순수 함수). 맥은 `NativePlacement.fromDrop` |
@@ -70,6 +71,14 @@ Windows:
 - 다른 사이트와 구분: 브라우저에 YouTube Music 탭이 없으면 다른 사이트의 영상으로 보고 무시합니다. 탭 제목과 브라우저가 알려 주는 제목이 3초 넘게 다르면, 앨범 정보가 있는 곡은 YouTube Music 곡으로 보고 제목으로 찾고, 앨범 정보가 없으면 다른 사이트로 봅니다. 탭이 다른 곡의 주소와 제목을 그대로 둔 채 이 곡을 재생한 적이 있습니다(2026-10-20 맥, 앨범 링크로 연 탭의 주소창은 "Epilogue", 재생은 「ハルジオン」). 주소의 영상을 조회한 제목이 재생 중인 곡과 다를 때도(주소를 곡이 바뀌기 전에 읽은 경우) 3초 동안 기다린 뒤 제목으로 찾습니다.
 - 제목으로 찾기(`videoByTitle`/`VideoByTitle`): 탭의 재생목록에서 제목과 길이(±3초)가 맞는 항목을 찾고, 없으면 YouTube 검색(`www.youtube.com/youtubei/v1/search`, WEB, `hl=ja`)의 결과를 `PickVideo`/`pickVideo`로 고릅니다. 길이가 ±2초 안이고 제목이 똑같은 결과(커버 영상 자체), 아티스트 채널이거나 공식 아티스트 배지(`BADGE_STYLE_TYPE_VERIFIED_ARTIST`) 또는 "- Topic" 채널이면서 제목에 곡 이름(`TitleNames`)이 들어 있는 결과를 차례로 받습니다. 그것도 없으면 길이가 ±1초인 공식 채널 결과가 하나뿐일 때만 받습니다(현지화된 "요아소비 Idol"만 알 때). 같은 길이의 팬 업로드는 받지 않습니다(실제 사례: 3:46인 「アイドル」 영상이 공식 MV 말고도 있었음). 익명 YouTube Music 검색은 한국에서 팟캐스트만 돌려줘서 쓰지 않습니다. 끝내 못 찾으면 videoId 없이(미디어 타입 UNKNOWN) 제목과 아티스트로만 가사를 찾습니다.
 - 다음 곡(`NextSong`/`nextSong`): 탭 주소의 `list`(앨범, 재생목록)로 YouTube Music `next`를 불러 재생목록 순서에서 다음 곡을 고릅니다(`QueueAfter`, 목록은 메모). 익명 응답에서는 앨범 항목이 뮤직비디오 ID로 오고(이 지역에서는 "Video blocked in country", 제목 없음) 실제로 재생되는 공식 음원 ID는 항목의 `watchEndpoint.params`(base64 protobuf) 안에 있어서 `Counterpart`로 꺼냅니다. 브라우저의 실제 재생 대기열은 읽을 수 없으므로, 셔플이나 라디오에서는 추정이 틀립니다. 한 번 틀린 목록은 다시 맞을 때까지 추정만 하고 미리 받기는 하지 않습니다(사용자는 셔플을 자주 씁니다). 라디오(`RDAMVM…`)는 익명으로 부르면 곡 하나만 옵니다.
+
+## Discord "듣는 중" 표시 (`DiscordPresence`)
+
+- 브라우저에서 듣는 곡을 Discord 프로필에 "듣는 중"(Rich Presence, 활동 종류 2)으로 표시합니다(2026-10-20 사용자 요청). Pear에서 오는 곡은 설정과 관계없이 표시하지 않습니다. Pear에는 자체 Discord 플러그인이 있기 때문입니다. 기본값은 꺼짐이며(`discordPresence`), 메뉴의 "Discord" 하위 메뉴에서 켭니다. GitHub 페이지로 가는 "Now Playing Widget" 버튼은 `discordButton`(기본 켜짐)으로 끄고 켭니다.
+- Discord 앱의 로컬 IPC로 보냅니다: Windows는 파이프 `\\.\pipe\discord-ipc-N`, 맥은 `$TMPDIR/discord-ipc-N` 소켓입니다. 프레임은 opcode와 길이(각각 리틀 엔디언 4바이트) 뒤에 JSON이 오는 형식이고, 핸드셰이크(opcode 0, `client_id`)를 한 뒤 `SET_ACTIVITY`를 보냅니다. 애플리케이션 ID는 `1562020013953515553`(사용자가 Developer Portal에서 만든 앱)입니다. Discord가 돌려주는 응답은 읽어서 버립니다. 읽지 않으면 버퍼가 차서 쓰기가 멈추기 때문입니다.
+- 내용: 곡 제목(카드에 보이는 제목, `details`), 아티스트(`state`), 앨범아트 주소(`large_image`, Discord가 직접 받아 갑니다), 시작·끝 시각(진행 막대), 버튼입니다. `status_display_type` 2로 멤버 목록에도 곡 제목이 보입니다. 문자열은 2–128자여야 해서 짧으면 U+2800으로 채웁니다. 일시정지하거나 Pear 곡으로 바뀌면 활동을 지웁니다(`activity: null`).
+- Discord의 요청 제한(20초에 5번 정도) 때문에, 곡이 바뀌거나 재생 상태가 바뀌거나 탐색해서 시작 시각이 3초 넘게 달라질 때만 보내고, 보내는 사이에 4초를 둡니다. 위치는 1초마다 다시 계산하지만 같은 내용이면 보내지 않습니다. Discord가 꺼져 있으면 15초마다 다시 연결해 봅니다.
+- 테스트: 맥은 `macos/Tests/mock_discord.py`(가짜 Discord 소켓, 앱의 `--discord-test <폴더>`)입니다. Windows는 Mono 테스트로 JSON만 확인했고, 파이프 연결은 Windows에서 확인해야 합니다.
 
 ## 가사를 찾는 순서 (`LyricsProvider.Find`)
 

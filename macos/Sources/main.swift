@@ -219,6 +219,10 @@ import CoreText
             add(sources, label, #selector(songSource(_:)), state: client.settings.source == value, represented: value)
         }
         submenu(menu, "재생 앱", sources)
+        let discord = NSMenu()
+        add(discord, "듣는 중 표시", #selector(toggleDiscord), state: client.settings.discordPresence)
+        add(discord, "GitHub 버튼 표시", client.settings.discordPresence ? #selector(toggleDiscordButton) : nil, state: client.settings.discordButton)
+        submenu(menu, "Discord", discord)
         menu.addItem(.separator())
         if client.settings.source != "browser" { add(menu, "Pear 연결 권한 다시 요청", #selector(retry)) }
         add(menu, "설정 파일 열기", #selector(openConfig))
@@ -296,6 +300,11 @@ import CoreText
         client.settings.source = value; client.settings.save(); client.start(); updateMenu()
         overlay.showInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시합니다" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시합니다" : "브라우저와 Pear Desktop 중에서 재생 중인 곡을 표시합니다")
     }
+    @objc func toggleDiscord() {
+        client.settings.discordPresence.toggle(); client.settings.save(); client.syncDiscord(); updateMenu()
+        overlay.showInfo(client.settings.discordPresence ? "브라우저에서 듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다")
+    }
+    @objc func toggleDiscordButton() { client.settings.discordButton.toggle(); client.settings.save(); client.syncDiscord(); updateMenu() }
     @objc func previous() { client.control("previous") }
     @objc func togglePlay() { client.control("toggle-play") }
     @objc func next() { client.control("next") }
@@ -449,6 +458,18 @@ if CommandLine.arguments.contains("--ytmusic-tests") {
             exit(0)
         } catch { print("FAILED: \(error.localizedDescription)"); exit(1) }
     }
+    RunLoop.main.run()
+} else if let index = CommandLine.arguments.firstIndex(of: "--discord-test"), CommandLine.arguments.count > index + 1 {
+    // macos/Tests/mock_discord.py: a song, the same song again (not sent), a seek, then nothing
+    let presence = DiscordPresence(); presence.directory = CommandLine.arguments[index + 1]
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    let song = DiscordPresence.Activity(title: "アイドル - Idol", artist: "YOASOBI", album: "", imageURL: "https://i.ytimg.com/vi/ZRtdQ81jPUQ/hq720.jpg",
+                                        start: start, end: start.addingTimeInterval(226), button: true)
+    presence.show(song)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { var same = song; same.start += 1; same.end += 1; presence.show(same) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { var seek = song; seek.start -= 60; seek.end -= 60; seek.button = false; presence.show(seek) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5) { presence.show(nil) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 10) { exit(0) }
     RunLoop.main.run()
 } else if CommandLine.arguments.contains("--self-test") {
     runSelfTests()

@@ -26,7 +26,8 @@ namespace PearNowPlaying
         readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, albumOnlyItem, retryLyricsItem, lyricsInfoItem, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
-        readonly ToolStripMenuItem updateItem, sourceMenu, retryAuthItem;
+        readonly ToolStripMenuItem updateItem, sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem;
+        readonly DiscordPresence discord = new DiscordPresence();
         UpdateInfo update;          // a newer release found on GitHub
         string announcedUpdate;     // told the user about this version already
         bool installing;
@@ -124,6 +125,12 @@ namespace PearNowPlaying
                 var v = pair.Item1;
                 sourceMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item2, null, (s, e) => SetSource(v)) { Tag = v });
             }
+            // Discord's "Listening to" for the browser's songs (same items as the macOS version)
+            discordItem = new ToolStripMenuItem("듣는 중 표시", null, (s, e) => { cfg.DiscordPresence = !cfg.DiscordPresence; cfg.Save(); SyncDiscord();
+                ShowInfo(cfg.DiscordPresence ? "브라우저에서 듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다"); });
+            discordButtonItem = new ToolStripMenuItem("GitHub 버튼 표시", null, (s, e) => { cfg.DiscordButton = !cfg.DiscordButton; cfg.Save(); SyncDiscord(); });
+            discordMenu = new ToolStripMenuItem("Discord");
+            discordMenu.DropDownItems.AddRange(new ToolStripItem[] { discordItem, discordButtonItem });
             retryAuthItem = new ToolStripMenuItem("Pear 연결 권한 다시 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); });
 
             // at the top, so a new version ("업데이트 설치 (x.y.z)") is seen first
@@ -142,6 +149,7 @@ namespace PearNowPlaying
             menu.Items.Add(widgetMenu);
             menu.Items.Add(lyricsMenu);
             menu.Items.Add(sourceMenu);
+            menu.Items.Add(discordMenu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(retryAuthItem);
             menu.Items.Add(new ToolStripMenuItem("설정 파일 열기", null, (s, e) => OpenFile(Config.FilePath)));
@@ -187,6 +195,28 @@ namespace PearNowPlaying
         {
             statusItem.Text = pear.StatusLine;
             tray.Text = Truncate("Pear Now Playing - " + pear.StatusLine, 63);
+            SyncDiscord();
+        }
+
+        /// <summary>
+        /// Discord's "Listening to": the browser's song while it plays (Pear Desktop has its own Discord plugin, so its
+        /// songs are left out), nothing otherwise. DiscordPresence sends only real changes (a new song, play / pause,
+        /// a seek), so this can be called on every position.
+        /// </summary>
+        void SyncDiscord()
+        {
+            var song = pear.Current;
+            if (!cfg.DiscordPresence || pear.Source != SongSource.Browser || !song.HasData || !pear.IsPlaying || song.Duration <= 0)
+            {
+                discord.Show(null);
+                return;
+            }
+            var start = DateTime.UtcNow.AddSeconds(-PlaybackPosition);
+            discord.Show(new DiscordActivity
+            {
+                Title = ForCard(song).Title, Artist = song.Artist, Album = song.Album, ImageUrl = song.ImageSrc ?? "",
+                Start = start, End = start.AddSeconds(song.Duration), Button = cfg.DiscordButton,
+            });
         }
 
         void OnStatus(PearStatus s)
@@ -233,6 +263,7 @@ namespace PearNowPlaying
             }
             else if (cardWin.IsShowing) Rerender();
             EnsureLyrics(song);
+            SyncDiscord();
         }
 
         void OnPlayState(bool playing)
@@ -245,6 +276,7 @@ namespace PearNowPlaying
             }
             else lastKind = playing ? CardKind.NowPlaying : CardKind.Paused;
             TickLyrics(true);
+            SyncDiscord();
         }
 
         void OnPosition(double pos)
@@ -252,6 +284,7 @@ namespace PearNowPlaying
             // Pear sends the player's whole-second value right as it ticks over, so it is close to exact;
             // a fractional value comes from a seek.
             SyncClock(pos + (pos == Math.Floor(pos) ? 0.05 : 0), pear.IsPlaying);
+            SyncDiscord();
             int sec = (int)pos;
             if (sec == lastShownSecond) return;
             lastShownSecond = sec;
@@ -1174,6 +1207,7 @@ namespace PearNowPlaying
             RebuildWidgets();
             TickLyrics(true);
             ShowNow(CurrentKind());
+            SyncDiscord();
         }
 
         void RegisterHotkeys()
@@ -1202,6 +1236,9 @@ namespace PearNowPlaying
             BuildWidgetMenus();
             foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
             foreach (ToolStripMenuItem it in sourceMenu.DropDownItems) it.Checked = (string)it.Tag == cfg.Source;
+            discordItem.Checked = cfg.DiscordPresence;
+            discordButtonItem.Checked = cfg.DiscordButton;
+            discordButtonItem.Enabled = cfg.DiscordPresence;
             retryAuthItem.Visible = cfg.Source != "browser";
         }
 
@@ -1250,6 +1287,7 @@ namespace PearNowPlaying
             try { tray.Visible = false; } catch { }
             try { lyricsTimer.Stop(); frameTimer.Stop(); cardFrameTimer.Stop(); infoTimer.Stop(); if (lyricsCts != null) lyricsCts.Cancel(); if (prefetchCts != null) prefetchCts.Cancel(); } catch { }
             try { pear.Dispose(); } catch { }
+            try { discord.Dispose(); } catch { }
             try { hotkeys.Dispose(); } catch { }
             try { SystemEvents.DisplaySettingsChanged -= OnDisplaysChanged; cardWin.Dispose(); lyricsWin.Dispose(); } catch { }
             try { tray.Dispose(); menu.Dispose(); artHttp.Dispose(); lyricsProvider.Dispose(); updater.Dispose(); } catch { }

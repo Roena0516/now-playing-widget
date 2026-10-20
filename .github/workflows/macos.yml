@@ -23,6 +23,8 @@ jobs:
         run: python3 macos/Tests/mock_pear.py
       - name: Test updating from GitHub releases
         run: python3 macos/Tests/mock_update.py
+      - name: Test the Discord listening status
+        run: python3 macos/Tests/mock_discord.py
       - uses: actions/upload-artifact@v4
         with:
           name: PearNowPlaying-macOS

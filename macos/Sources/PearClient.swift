@@ -51,6 +51,7 @@ struct PlayerState {
     @Published private(set) var source = SongSource.pear
     private var players: [SongSource: PlayerState] = [.pear: PlayerState(), .browser: PlayerState()]
     private(set) lazy var browser = BrowserSource(ytm: lyrics.ytm)
+    let discord = DiscordPresence()
     private var browserRunning = false
     @Published var lines: [LyricLine] = []
     /// The next song's lyrics (fetched ahead), shown below this song's last line.
@@ -104,6 +105,7 @@ struct PlayerState {
         else { players[.pear]!.pause(); if source == .pear { show() } }
         if settings.source != "pear" { startBrowser() } else { stopBrowser() }
         updateStatus()
+        syncDiscord()
     }
     private func startBrowser() {
         guard !browserRunning, loadRemoteAssets else { return }
@@ -129,7 +131,7 @@ struct PlayerState {
         if status != next { status = next }
     }
     func retryAuth() { token = nil; try? FileManager.default.removeItem(at: tokenFile); start() }
-    func stop() { connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); stopBrowser() }
+    func stop() { discord.show(nil); connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); stopBrowser() }
     func reload() { settings = Settings.load(); settings.save(); applyLyricsSources(); start() }
     private func persistToken(_ value: String) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -231,6 +233,19 @@ struct PlayerState {
             updateStatus()
         }
         if origin == source { show() }
+        syncDiscord()
+    }
+
+    /// Discord's "Listening to": the browser's song while it plays (Pear Desktop has its own Discord plugin, so its
+    /// songs are left out), nothing otherwise. DiscordPresence sends only real changes (a new song, play / pause, a
+    /// seek), so this runs on every message. Same as TrayApp.SyncDiscord in src/TrayApp.cs.
+    func syncDiscord() {
+        guard loadRemoteAssets, settings.discordPresence, source == .browser, !song.title.isEmpty, !song.paused, song.duration > 0 else {
+            discord.show(nil); return
+        }
+        let start = Date().addingTimeInterval(-elapsed)
+        discord.show(DiscordPresence.Activity(title: cardTitle, artist: song.artist, album: song.album, imageURL: song.imageSrc,
+                                              start: start, end: start.addingTimeInterval(song.duration), button: settings.discordButton))
     }
     /// The shown source's song; a new one gets its cover and lyrics.
     private func show() {

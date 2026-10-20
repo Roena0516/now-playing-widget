@@ -98,6 +98,11 @@ namespace PearNowPlaying
         /// true = the video's own title (Pear's alternativeTitle, what Pear's Discord status shows).</summary>
         public bool VideoTitle = false;
 
+        /// <summary>Show the browser's song as "Listening to" on Discord (off unless the user turns it on).</summary>
+        public bool DiscordPresence = false;
+        /// <summary>Put a button to the project's GitHub page in that Discord status.</summary>
+        public bool DiscordButton = true;
+
         // Lyrics
         public bool ShowLyrics = true;
         /// <summary>Lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up.</summary>
@@ -183,6 +188,8 @@ namespace PearNowPlaying
                 c.ShowOnPause = GetBool(map, "showOnPause", c.ShowOnPause);
                 c.ShowAlbumArt = GetBool(map, "showAlbumArt", c.ShowAlbumArt);
                 c.VideoTitle = GetBool(map, "videoTitle", c.VideoTitle);
+                c.DiscordPresence = GetBool(map, "discordPresence", c.DiscordPresence);
+                c.DiscordButton = GetBool(map, "discordButton", c.DiscordButton);
                 c.ShowLyrics = GetBool(map, "showLyrics", c.ShowLyrics);
                 c.LyricsAlbumOnly = GetBool(map, "lyricsAlbumOnly", c.LyricsAlbumOnly);
                 c.CheckUpdates = GetBool(map, "checkUpdates", c.CheckUpdates);
@@ -251,6 +258,10 @@ namespace PearNowPlaying
                 sb.AppendLine("showAlbumArt=" + B(ShowAlbumArt));
                 sb.AppendLine("# 영상(MV·커버 등, 앨범 곡 제외)에 영상 제목을 표시 (false면 곡 제목, true면 Pear의 Discord 상태와 같은 영상 제목)");
                 sb.AppendLine("videoTitle=" + B(VideoTitle));
+                sb.AppendLine("# 브라우저에서 듣는 곡을 Discord 프로필에 '듣는 중'으로 표시 (Pear Desktop의 곡은 표시하지 않습니다)");
+                sb.AppendLine("discordPresence=" + B(DiscordPresence));
+                sb.AppendLine("# Discord의 '듣는 중'에 이 앱의 GitHub 페이지로 가는 버튼을 붙임");
+                sb.AppendLine("discordButton=" + B(DiscordButton));
                 sb.AppendLine();
                 sb.AppendLine("# 가사 (LRCLIB 싱크 가사가 있는 곡만 표시)");
                 sb.AppendLine("showLyrics=" + B(ShowLyrics));

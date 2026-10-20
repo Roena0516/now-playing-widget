@@ -45,6 +45,10 @@ struct Settings: Codable {
     /// title shown for videos (not album tracks): "song" = Pear's title, "video" = the video's own title
     /// (Pear's alternativeTitle, what Pear's Discord status shows)
     var videoTitle = "song"
+    /// show the browser's song as "Listening to" on Discord (off unless the user turns it on)
+    var discordPresence = false
+    /// a button to the project's GitHub page in that Discord status
+    var discordButton = true
     var showLyrics = true
     /// lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up
     var lyricsAlbumOnly = false
@@ -90,6 +94,7 @@ struct Settings: Codable {
         showSeconds = try value(.showSeconds, showSeconds); opacity = try value(.opacity, opacity)
         alwaysShow = try value(.alwaysShow, alwaysShow); showLyrics = try value(.showLyrics, showLyrics)
         videoTitle = try value(.videoTitle, videoTitle)
+        discordPresence = try value(.discordPresence, discordPresence); discordButton = try value(.discordButton, discordButton)
         showOnPause = try value(.showOnPause, showOnPause); showAlbumArt = try value(.showAlbumArt, showAlbumArt)
         hotkeyShow = try value(.hotkeyShow, hotkeyShow); hotkeyToggle = try value(.hotkeyToggle, hotkeyToggle)
         hotkeyNext = try value(.hotkeyNext, hotkeyNext); hotkeyPrevious = try value(.hotkeyPrevious, hotkeyPrevious)
