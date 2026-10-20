@@ -248,7 +248,7 @@ struct NowPlayingInfo: Equatable {
         self.info = info
         let app = NSRunningApplication(processIdentifier: info.pid)?.bundleIdentifier ?? ""
         guard let name = BrowserTabs.name(of: app), !info.title.isEmpty else {
-            notYouTubeMusic()   // something else is playing (or nothing)
+            missing()   // something else is playing (or nothing)
             return
         }
         bundleId = app
@@ -269,10 +269,11 @@ struct NowPlayingInfo: Equatable {
                 readable.insert(app)
                 guard let tab = Self.playingTab(found, title: self.info?.title ?? "") else {
                     // no tab to tell by while macOS still names the song shown: carry on with it rather than calling it stopped
-                    if shown() { setBrowser(name); tick(); return }
-                    notYouTubeMusic()   // a browser plays something, but not YouTube Music (another tab, another site)
+                    if shown() { missingSince = nil; setBrowser(name); tick(); return }
+                    missing()   // a browser plays something, but not YouTube Music (another tab, another site)
                     return
                 }
+                missingSince = nil
                 setBrowser(name)
                 let (id, list) = Self.watchParameters(tab.url)
                 follow(videoId: id, list: list, tabTitle: Self.tabSongTitle(tab.title))
@@ -417,6 +418,22 @@ struct NowPlayingInfo: Equatable {
             if !c.isEmpty && (c == r || c.contains(r) || r.contains(c)) { return true }
         }
         return false
+    }
+
+    private var missingSince: Date?
+
+    /// No YouTube Music playing in sight. Taken as stopped only after 3 seconds: when a song ends, the browser clears
+    /// its media information for about a second before naming the next song (seen on Windows 2026-10-20), which showed
+    /// "paused" between every two songs. A pause by the user comes as paused from macOS and is shown at once.
+    /// Same as Missing in src/BrowserSource.cs.
+    private func missing() {
+        if playing {
+            let since = missingSince ?? Date()
+            missingSince = since
+            if Date().timeIntervalSince(since) < 3 { return }
+        }
+        missingSince = nil
+        notYouTubeMusic()
     }
 
     /// Something else plays (or nothing): the browser's song, if any, stopped.

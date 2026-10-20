@@ -374,18 +374,37 @@ namespace PearNowPlaying
         async Task Tick(CancellationToken ct)
         {
             info = await smtc.Read();
-            if (info == null || info.Title.Length == 0) { NotYouTubeMusic(); return; }
+            if (info == null || info.Title.Length == 0) { Missing(); return; }
             var tab = FindTab(info);
             if (tab == null)
             {
                 // the tab can't be seen right now (behind another, its tab strip not read yet) while Windows still names
                 // the song shown: carry on with it rather than calling it stopped
-                if (Shown()) { SetBrowser(info.Browser.Name); TickPosition(); return; }
-                NotYouTubeMusic(); return;   // a browser plays something, but not YouTube Music
+                if (Shown()) { missingSince = null; SetBrowser(info.Browser.Name); TickPosition(); return; }
+                Missing(); return;   // a browser plays something, but not YouTube Music
             }
+            missingSince = null;
             SetBrowser(info.Browser.Name);
             var p = WatchParameters(tab.Url);
             await Follow(p.Item1, p.Item2, TabSongTitle(tab.Title), ct);
+        }
+
+        DateTime? missingSince;
+
+        /// <summary>
+        /// No YouTube Music playing in sight. Taken as stopped only after 3 seconds: when a song ends, Chrome clears its
+        /// media information for about a second before naming the next song (seen 2026-10-20), which showed "paused"
+        /// between every two songs. A pause by the user comes as "Paused" from Windows and is shown at once.
+        /// </summary>
+        void Missing()
+        {
+            if (playing)
+            {
+                if (missingSince == null) missingSince = DateTime.UtcNow;
+                if ((DateTime.UtcNow - missingSince.Value).TotalSeconds < 3) return;
+            }
+            missingSince = null;
+            NotYouTubeMusic();
         }
 
         /// <summary>Something else plays (or nothing): the browser's song, if any, stopped.</summary>
