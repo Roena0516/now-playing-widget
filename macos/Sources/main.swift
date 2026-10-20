@@ -472,7 +472,8 @@ if CommandLine.arguments.contains("--ytmusic-tests") {
     DispatchQueue.main.asyncAfter(deadline: .now() + 10) { exit(0) }
     RunLoop.main.run()
 } else if let index = CommandLine.arguments.firstIndex(of: "--render-demo"), CommandLine.arguments.count > index + 1 {
-    do { try renderDemo(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
+    let cover = CommandLine.arguments.count > index + 2 ? URL(fileURLWithPath: CommandLine.arguments[index + 2]) : nil
+    do { try renderDemo(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]), cover: cover) }
     catch { fputs("Demo failed: \(error)\n", stderr); exit(1) }
 } else if CommandLine.arguments.contains("--self-test") {
     runSelfTests()

@@ -300,6 +300,6 @@ Windows 버전은 C# 7.3, .NET Framework 4.8, WinForms로 만들었으며, 외�
 앱 안에 Pretendard JP 폰트(Regular, Medium)를 포함했습니다. 이 폰트는 SIL Open Font License 1.1로 배포되며, 라이선스 전문은 [`assets/fonts/PretendardJP-OFL.txt`](assets/fonts/PretendardJP-OFL.txt)에서 확인할 수 있습니다.
 Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard), with Reserved Font Name Pretendard JP.
 
-README의 예시 화면에는 코가네 랑의 「호랑풍류가」 커버 영상의 제목을 썼습니다. 화면 속 가사 줄은 위젯을 설명하는 예시 문장이며 실제 가사가 아닙니다.
+README의 예시 화면에는 코가네 랑의 「호랑풍류가」 커버 영상의 제목과 썸네일을 썼습니다. 화면 속 가사 줄은 위젯을 설명하는 예시 문장이며 실제 가사가 아닙니다.
 
 이 프로젝트는 YouTube Music, Pear Desktop과 관계없는 개인 프로젝트입니다. YouTube Music은 Google LLC의 상표입니다.

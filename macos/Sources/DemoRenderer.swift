@@ -1,14 +1,14 @@
 import AppKit
 
-/// "--render-demo <folder>": the README's animations as numbered PNG frames, drawn by the app's own renderer (one
-/// folder per scene; macos/Tools/make-gifs.py turns them into docs/*.gif). The example song is the README's
-/// (코가네 랑's cover of 호랑풍류가); the lyric lines are sample sentences about the widget, not the song's lyrics, and
-/// the cover is a plain gradient, not the video's thumbnail.
-@MainActor func renderDemo(to folder: URL) throws {
+/// "--render-demo <folder> [cover]": the README's animations as numbered PNG frames, drawn by the app's own renderer
+/// (one folder per scene; macos/Tools/make-gifs.py turns them into docs/*.gif). The example song is the README's
+/// (코가네 랑's cover of 호랑풍류가), with its video's thumbnail as the cover when given (cropped to a square, as the app
+/// does); the lyric lines are sample sentences about the widget, not the song's lyrics.
+@MainActor func renderDemo(to folder: URL, cover: URL? = nil) throws {
     NativeTheme.registerFonts()
     let client = PearClient(loadRemoteAssets: false)
     client.settings.panelWidth = 420; client.settings.opacity = 0.92
-    client.artwork = demoCover()
+    client.artwork = cover.flatMap { try? Data(contentsOf: $0) } ?? demoCover()
     let song: [String: Any] = ["title": "호랑풍류가 [나와 호랑이님 OST] / 코가네 랑 (Cogane Rang) Cover", "artist": "코가네 랑 COGANE RANG",
                                "videoId": "iAoU1UGPoXc", "songDuration": 253, "mediaType": "USER_GENERATED_CONTENT"]
     client.handle(["type": "PLAYER_INFO", "isPlaying": false, "position": 0, "song": song])
@@ -106,7 +106,7 @@ import AppKit
     }
 }
 
-/// A plain cover: a warm gradient with a record's label in the middle.
+/// A plain cover when no thumbnail is given: a warm gradient with a record's label in the middle.
 @MainActor private func demoCover() -> Data? {
     let side: CGFloat = 240
     let image = NSImage(size: CGSize(width: side, height: side))

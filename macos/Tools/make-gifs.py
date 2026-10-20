@@ -3,7 +3,8 @@
 
     ./macos/build.sh && python3 macos/Tools/make-gifs.py
 
-Runs the app with --render-demo (PNG frames drawn at 2x, see macos/Sources/DemoRenderer.swift), scales them to
+Downloads the example video's thumbnail (the cover the app would show for it), runs the app with --render-demo
+(PNG frames drawn at 2x, see macos/Sources/DemoRenderer.swift), scales them to
 `scale` and writes one looping GIF per scene with a palette shared by all of its frames. Needs Pillow.
 """
 import shutil, subprocess, sys, tempfile
@@ -13,12 +14,16 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / 'macos/build/Now Playing Widget.app/Contents/MacOS/NowPlayingWidget'
 SCENES = {'hero': 'lyrics-scroll.gif', 'marquee': 'title-marquee.gif', 'pause': 'pause-resume.gif'}
+VIDEO = 'iAoU1UGPoXc'   # 코가네 랑 - 호랑풍류가 [나와 호랑이님 OST] (Cover), the README's example song
 FPS = 20
 SCALE = 1.5   # of the 1x layout: crisp on high-density screens, small enough for a README
 
 def main():
     work = Path(tempfile.mkdtemp(prefix='nowplaying-demo-'))
-    subprocess.run([str(APP), '--render-demo', str(work)], check=True)
+    cover = work / 'cover.jpg'
+    # curl: the system's certificates (python.org's Python may have none installed)
+    subprocess.run(['curl', '-fsSL', '-o', str(cover), f'https://i.ytimg.com/vi/{VIDEO}/hq720.jpg'], check=True)
+    subprocess.run([str(APP), '--render-demo', str(work), str(cover)], check=True)
     for scene, name in SCENES.items():
         files = sorted((work / scene).glob('*.png'))
         frames = []
