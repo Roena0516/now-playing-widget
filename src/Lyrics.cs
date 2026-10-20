@@ -184,7 +184,8 @@ namespace PearNowPlaying
 
             // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
             // the usual case for covers: ask for it alongside the first lookups instead of after them.
-            bool coverCandidate = Ytm != null && !Ytm.Paused && !string.IsNullOrEmpty(song.VideoId) && song.Duration > 0
+            // (not tied to the lyrics relay: the description and the original's title/length come from YouTube directly)
+            bool coverCandidate = Ytm != null && !string.IsNullOrEmpty(song.VideoId) && song.Duration > 0
                                   && CoverLyrics.MayBeCover(song);
             Task<VideoDescription> description = coverCandidate && !CoverLyrics.LooksArranged(song.Title) && !CoverLyrics.LooksArranged(song.AltTitle)
                 ? DescriptionOrNull(song.VideoId, ct) : null;
@@ -228,7 +229,7 @@ namespace PearNowPlaying
 
             // 2) covers: the original song linked in the description, if the music wasn't changed
             // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics=false)
-            if (coverCandidate && !Ytm.Paused)
+            if (coverCandidate)
             {
                 var original = await FromOriginal(song, description, ct);
                 if (original != null && original.Failed) return original;   // LRCLIB busy: retried later, not cached
@@ -269,9 +270,20 @@ namespace PearNowPlaying
                 HashSet<string> hinted;
                 var ids = CoverLyrics.OriginalCandidates(desc, song.VideoId, out hinted);
                 if (ids.Count == 0) Log.Info("cover: no YouTube links in the description of " + song.VideoId);
+                // the original's YouTube Music lyrics need the relay; while it is down (paused or failing) the
+                // original is still identified (music.youtube.com) and looked up on LRCLIB
+                bool ytmLyrics = UseYtm && !Ytm.Paused;
                 foreach (var id in ids)
                 {
-                    var orig = await Ytm.Lookup(id, ct, UseYtm);
+                    TrackInfo orig;
+                    try { orig = await Ytm.Lookup(id, ct, ytmLyrics); }
+                    catch (Exception ex) when (ytmLyrics && !ct.IsCancellationRequested)
+                    {
+                        Log.Write("WARN cover: original's YouTube Music lyrics failed (" + (ex is OperationCanceledException ? "timeout" : ex.Message)
+                                  + "), looking the original up without them");
+                        ytmLyrics = false;
+                        orig = await Ytm.Lookup(id, ct, false);
+                    }
                     var label = id + " (" + orig.Artist + " - " + orig.Title + ", " + (int)orig.Duration + "s)";
                     if (orig.Duration <= 0) { Log.Info("cover: original candidate " + id + " has no known length, skipped"); continue; }
                     if (CoverLyrics.LooksArranged(orig.Title)) { Log.Info("cover: candidate " + label + " is an arrangement, skipped"); continue; }
@@ -294,7 +306,7 @@ namespace PearNowPlaying
                         Log.Info("lyrics found via original " + label + " on YouTube Music: " + song.Artist + " - " + song.Title);
                         return orig.Lyrics;
                     }
-                    if (UseYtm)
+                    if (ytmLyrics)
                     {
                         // the link is usually the original's music video; its official audio track has the timed lyrics
                         // the cover may call it differently ("帝国少女" for "Imperial Girl")

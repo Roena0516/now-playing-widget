@@ -252,6 +252,25 @@ import Foundation
         guard case .synced(let coverLines, "YouTube Music · 원곡") = try await covers.find(cover), coverLines.first?.text == "From the original" else {
             preconditionFailure("A cover must use the original's lyrics")
         }
+        // the lyrics relay down (502): the original is still identified and looked up on LRCLIB
+        let relayDown = LyricsFinder(lrclib: lrclib { url in
+            if url.path.hasSuffix("/get") { return (404, "") }
+            return (200, #"[{"trackName":"ヴァンパイア","artistName":"DECO*27","duration":202,"syncedLyrics":"[00:01.00]From LRCLIB\n[00:05.00]two"}]"#)
+        }, ytm: YTMusicProvider(transport: { request in
+            if request.url!.host?.contains("ytmbrowseproxy") == true { return (Data("error code: 502".utf8), HTTPURLResponse(url: request.url!, statusCode: 502, httpVersion: nil, headerFields: nil)!) }
+            let body = FakeYouTube.body(request)
+            if request.url!.path.hasSuffix("/player") {
+                return try FakeYouTube.ok(request, ["videoDetails": ["shortDescription": "原曲\nhttps://youtu.be/origVideo01"]])
+            }
+            switch body["videoId"] as? String ?? "" {
+            case "coverVideo1": return try FakeYouTube.ok(request, FakeYouTube.next("coverVideo1"))
+            case "origVideo01": return try FakeYouTube.ok(request, FakeYouTube.next("origVideo01", title: "ヴァンパイア", artist: "DECO*27", length: "3:22", type: "MUSIC_VIDEO_TYPE_ATV", lyricsId: "lyrOrig"))
+            case let other: preconditionFailure("unexpected request \(other)")
+            }
+        }))
+        guard case .synced(let relayLines, "LRCLIB · 원곡") = try await relayDown.find(cover), relayLines.first?.text == "From LRCLIB" else {
+            preconditionFailure("relay down: the cover's original must still be looked up on LRCLIB")
+        }
 
         // cover without links: song name read from the title, looked up on LRCLIB with a 10s length tolerance
         var queries: [String] = []

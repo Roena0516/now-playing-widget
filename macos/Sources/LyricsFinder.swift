@@ -74,7 +74,8 @@ enum LrclibRecheck { @TaskLocal static var only = false }
 
         // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
         // the usual case for covers: ask for it alongside the first lookups instead of after them.
-        let coverCandidate = !ytm.paused && !song.videoId.isEmpty && song.duration > 0 && CoverLyrics.mayBeCover(song)
+        // (not tied to the lyrics relay: the description and the original's title/length come from YouTube directly)
+        let coverCandidate = !song.videoId.isEmpty && song.duration > 0 && CoverLyrics.mayBeCover(song)
         let description = coverCandidate && !CoverLyrics.looksArranged(song.title) && !CoverLyrics.looksArranged(song.alternativeTitle)
             ? descriptionTask(song.videoId) : nil
         defer { description?.cancel() }
@@ -106,7 +107,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
 
         // 2) covers: the original song linked in the description, if the music wasn't changed
         // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics off)
-        if coverCandidate && !ytm.paused, let original = try await fromOriginal(song, description) {
+        if coverCandidate, let original = try await fromOriginal(song, description) {
             if original.standIn { standIns.insert(Self.id(song)) }
             return original.standIn ? remember(key, original.lookup) : keep(key, song, original.lookup)
         }
@@ -229,8 +230,17 @@ enum LrclibRecheck { @TaskLocal static var only = false }
             let (ids, hinted) = CoverLyrics.originalCandidates(desc, ownId: song.videoId)
             var originalTooLong = false
             if ids.isEmpty { log("INFO cover: no YouTube links in the description of \(song.videoId)") }
+            // the original's YouTube Music lyrics need the relay; while it is down (paused or failing) the original
+            // is still identified (music.youtube.com) and looked up on LRCLIB
+            var ytmLyrics = useYtm && !ytm.paused
             for id in ids {
-                let orig = try await ytm.lookup(id, withLyrics: useYtm)
+                let orig: TrackInfo
+                do { orig = try await ytm.lookup(id, withLyrics: ytmLyrics) }
+                catch where ytmLyrics && !Task.isCancelled {
+                    log("WARN cover: original's YouTube Music lyrics failed (\(error.localizedDescription)), looking the original up without them")
+                    ytmLyrics = false
+                    orig = try await ytm.lookup(id, withLyrics: false)
+                }
                 let label = "\(id) (\(orig.artist) - \(orig.title), \(Int(orig.duration))s)"
                 if orig.duration <= 0 { log("INFO cover: original candidate \(id) has no known length, skipped"); continue }
                 if CoverLyrics.looksArranged(orig.title) { log("INFO cover: candidate \(label) is an arrangement, skipped"); continue }
@@ -242,7 +252,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
                     log("INFO lyrics found via original \(label) on YouTube Music: \(song.artist) - \(song.title)")
                     return Synced(lookup: .synced(orig.lines, source: "YouTube Music · 원곡"))
                 }
-                if useYtm {
+                if ytmLyrics {
                     // the link is usually the original's music video; its official audio track has the timed lyrics
                     // the cover may call it differently ("帝国少女" for "Imperial Girl")
                     let coverName = CoverLyrics.guessOriginal(song, description: desc?.text).title
@@ -267,8 +277,6 @@ enum LrclibRecheck { @TaskLocal static var only = false }
                 break   // the first usable link decides; don't wander through unrelated links
             }
 
-            // The original is known but its length doesn't fit: guessing from the title would only find that
-            // original again (out of sync) or another song with the same name. No lyrics beats wrong lyrics.
             // The original's video is known but its length doesn't fit (it often has an intro or outro the recording
             // doesn't). A title guess alone would find that video's song out of sync or another song of the same name,
             // so only an artist the description names may look it up: same artist, and a length within the cover's
