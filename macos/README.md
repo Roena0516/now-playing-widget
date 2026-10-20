@@ -171,7 +171,7 @@ python3 macos/Tests/mock_update.py
 python3 macos/Tests/mock_discord.py
 ```
 
-실제 브라우저와 곡으로 확인할 때는 실행 파일에 `--browser-probe [초]`(브라우저 연동이 읽는 값과 보내는 메시지 출력)나 `--lookup <영상 ID>`(한 곡의 가사 찾기 과정을 로그와 함께 출력)를 붙여 실행합니다.
+README의 GIF는 `--render-demo <폴더>`가 그린 프레임을 `python3 macos/Tools/make-gifs.py`가 묶어서 만듭니다. 실제 브라우저와 곡으로 확인할 때는 실행 파일에 `--browser-probe [초]`(브라우저 연동이 읽는 값과 보내는 메시지 출력)나 `--lookup <영상 ID>`(한 곡의 가사 찾기 과정을 로그와 함께 출력)를 붙여 실행합니다.
 
 `--lyrics-tests`는 커버곡의 제목과 설명란을 해석한 결과가 Windows 버전(C#)과 같은지 확인하고, YouTube Music, 공식 음원, 원곡, LRCLIB로 이어지는 검색 순서와 캐시 규칙을 모의 응답으로 검증합니다. `--self-test`는 LRC 파서의 다중 타임스탬프, 오프셋, 빈 줄, 현재 가사 위치를 계산하는 기능과 플레이어 상태 및 탐색 처리를 검증합니다. `mock_discord.py`는 가짜 Discord 소켓으로 "듣는 중" 표시의 내용과 보내는 간격을 확인합니다. `mock_update.py`는 이전 이름(`Pear Now Playing.app`)으로 설치된 앱이 새 이름으로 바뀌는지와 이전 이름의 릴리스 파일도 받는지 확인합니다. `mock_pear.py`는 Python 표준 라이브러리로 만든 모의 Pear 서버를 띄웁니다. 이 서버는 WebSocket 토큰을 연결 요청의 헤더로 확인하는 Pear 3.11 방식과, 쿼리 파라미터로 확인하는 Pear 3.12 방식을 차례로 흉내 내며, 만료된 토큰으로 WebSocket 연결이 거절되는 상황, 재인증, 첫 곡·위치·재생 이벤트, Bearer 토큰을 사용하는 재생 제어, 다음 곡 조회, 토큰 파일 권한을 검증합니다. 이 테스트들은 외부 서비스나 로그인된 음악 계정을 사용하지 않습니다. 다만 모의 서버 테스트를 실행하려면 로컬 TCP 포트를 열 수 있는 권한이 필요합니다.
 

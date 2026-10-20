@@ -47,6 +47,7 @@ Windows:
 | 파일 | 내용 |
 |---|---|
 | `src/Program.cs` | 진입점, 단일 인스턴스 확인, 버전 정보 |
+| `docs/*.gif` | README의 예시 화면입니다. 맥 앱의 `--render-demo <폴더>`(`macos/Sources/DemoRenderer.swift`)가 앱의 렌더러로 프레임을 그리고, `python3 macos/Tools/make-gifs.py`(Pillow 필요)가 GIF로 묶습니다. 예시 곡은 코가네 랑의 「호랑풍류가」 커버(iAoU1UGPoXc, 사용자 선택)이고, 가사 줄은 위젯을 설명하는 예시 문장이며 앨범 아트는 그라데이션 그림입니다. 실제 가사와 영상 썸네일은 저작권 때문에 넣지 않습니다. |
 | `src/BrowserSource.cs` | 브라우저의 YouTube Music에서 곡을 가져옵니다(아래 "브라우저 연동"). SMTC와 UI Automation을 리플렉션으로 부르는 래퍼(`WinRt`, `Smtc`, `BrowserWindows`), `--browser-probe` 모드(`BrowserProbe`)도 이 파일에 있습니다. 맥은 `BrowserSource.swift`와 `macos/Helper/NowPlaying.m`입니다. |
 | `src/DiscordPresence.cs` | Discord "듣는 중" 표시(아래 "Discord" 항목). 맥은 `DiscordPresence.swift`입니다. |
 | `src/PearClient.cs` | 보여 줄 곡의 소스(Pear 또는 브라우저)를 고르고(`HandleMessage`, `PlayerState`), Pear API 서버 플러그인과 통신합니다: `POST /auth/{id}`로 토큰 발급(처음 한 번은 Pear가 허용 창을 띄웁니다), WebSocket `/api/v1/ws`, `POST /api/v1/next`·`previous`·`toggle-play`, `GET /api/v1/queue/next`(다음 곡). `SongInfo.MediaType`은 AUDIO / ORIGINAL_MUSIC_VIDEO / USER_GENERATED_CONTENT / PODCAST_EPISODE / OTHER_VIDEO 중 하나이며, 재생목록(큐)에서 가져온 곡은 UNKNOWN입니다. |
