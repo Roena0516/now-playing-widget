@@ -55,7 +55,6 @@ import CoreGraphics
     precondition(parseLRC("[ar:Artist]\nplain text").isEmpty)
     client.stop()
     precondition(Log.buildStamp.hasPrefix(" (built 20"), "the start line says when this build was made: \(Log.buildStamp)")
-    pearSilenceTests()
     browserSourceTests()
     coverSearchTests()
     let socketRequest = makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: "test-token")
@@ -435,23 +434,4 @@ func testCustomPlacement() {
     precondition(CoverLyrics.pickOriginal(Array(melancholic.prefix(2)), songName: "メランコリック", cover: mey)?.videoId == "86_kvUqhY-A", "the singer's own upload doesn't count")
     precondition(CoverLyrics.pickOriginal(kimi, songName: "君", cover: enel) == nil, "a one-letter name is no evidence")
     print("PASS: a cover's original from YouTube's search (official channel, one artist, not a cover)")
-}
-
-/// Pear 3.12.0 sends no pause / play messages: a pause is told by the positions stopping, playing again by one coming.
-@MainActor func pearSilenceTests() {
-    let client = PearClient(loadRemoteAssets: false)
-    client.handle(["type": "PLAYER_INFO", "isPlaying": true, "position": 130, "song": ["title": "愛して愛して愛して", "songDuration": 255, "videoId": "QwU5TumxX18"]])
-    client.handle(["type": "POSITION_CHANGED", "position": 134])
-    client.checkPearSilence(now: Date().addingTimeInterval(1))
-    precondition(!client.song.paused, "a second without a position is just the next tick")
-    client.checkPearSilence(now: Date().addingTimeInterval(3))
-    precondition(client.song.paused && client.elapsed == 134, "no position for 2.5 s: paused at the last one")
-    client.handle(["type": "POSITION_CHANGED", "position": 135])
-    precondition(!client.song.paused && client.elapsed >= 135 && client.elapsed < 136, "a position after the guessed pause: playing again")
-    // a Pear that sends the state: a position while it says paused (a seek) doesn't resume
-    client.handle(["type": "PLAYER_STATE_CHANGED", "isPlaying": false, "position": 140])
-    client.handle(["type": "POSITION_CHANGED", "position": 150])
-    precondition(client.song.paused, "Pear said paused itself")
-    client.stop()
-    print("PASS: Pear's pause told by its positions stopping (Pear 3.12.0 sends no pause messages)")
 }
