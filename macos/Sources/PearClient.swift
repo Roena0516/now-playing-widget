@@ -244,7 +244,7 @@ struct PlayerState {
             discord.show(nil); return
         }
         let start = Date().addingTimeInterval(-elapsed)
-        discord.show(DiscordPresence.Activity(title: cardTitle, artist: song.artist, album: song.album, imageURL: song.imageSrc,
+        discord.show(DiscordPresence.Activity(title: cardTitle, artist: song.artist, album: song.album, imageURL: song.imageSrc, videoId: song.videoId,
                                               start: start, end: start.addingTimeInterval(song.duration), button: settings.discordButton))
     }
     /// The shown source's song; a new one gets its cover and lyrics.

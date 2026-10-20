@@ -463,7 +463,7 @@ if CommandLine.arguments.contains("--ytmusic-tests") {
     // macos/Tests/mock_discord.py: a song, the same song again (not sent), a seek, then nothing
     let presence = DiscordPresence(); presence.directory = CommandLine.arguments[index + 1]
     let start = Date(timeIntervalSince1970: 1_800_000_000)
-    let song = DiscordPresence.Activity(title: "アイドル - Idol", artist: "YOASOBI", album: "", imageURL: "https://i.ytimg.com/vi/ZRtdQ81jPUQ/hq720.jpg",
+    let song = DiscordPresence.Activity(title: "アイドル - Idol", artist: "YOASOBI", album: "", imageURL: "https://i.ytimg.com/vi/ZRtdQ81jPUQ/hq720.jpg", videoId: "ZRtdQ81jPUQ",
                                         start: start, end: start.addingTimeInterval(226), button: true)
     presence.show(song)
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { var same = song; same.start += 1; same.end += 1; presence.show(same) }

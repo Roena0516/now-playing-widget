@@ -315,7 +315,7 @@ struct NowPlayingInfo: Equatable {
         let list = c.queryItems?.first { $0.name == "list" }?.value ?? ""
         return (isVideoId(v) ? v : "", list)
     }
-    static func isVideoId(_ id: String) -> Bool {
+    nonisolated static func isVideoId(_ id: String) -> Bool {
         id.count == 11 && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
     }
 

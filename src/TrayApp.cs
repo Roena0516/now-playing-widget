@@ -214,7 +214,7 @@ namespace PearNowPlaying
             var start = DateTime.UtcNow.AddSeconds(-PlaybackPosition);
             discord.Show(new DiscordActivity
             {
-                Title = ForCard(song).Title, Artist = song.Artist, Album = song.Album, ImageUrl = song.ImageSrc ?? "",
+                Title = ForCard(song).Title, Artist = song.Artist, Album = song.Album, ImageUrl = song.ImageSrc ?? "", VideoId = song.VideoId ?? "",
                 Start = start, End = start.AddSeconds(song.Duration), Button = cfg.DiscordButton,
             });
         }

@@ -11,7 +11,7 @@ final class DiscordPresence: @unchecked Sendable {
     static let minGap: TimeInterval = 4
 
     struct Activity: Equatable {
-        var title = "", artist = "", album = "", imageURL = ""
+        var title = "", artist = "", album = "", imageURL = "", videoId = ""
         /// When the song started and ends, for Discord's progress bar.
         var start = Date(), end = Date()
         var button = true
@@ -19,7 +19,7 @@ final class DiscordPresence: @unchecked Sendable {
         /// clock; a seek moves the start by more than 3 seconds).
         func same(_ other: Activity?) -> Bool {
             guard let other else { return false }
-            return title == other.title && artist == other.artist && album == other.album && imageURL == other.imageURL
+            return title == other.title && artist == other.artist && album == other.album && imageURL == other.imageURL && videoId == other.videoId
                 && button == other.button && abs(start.timeIntervalSince(other.start)) < 3 && abs(end.timeIntervalSince(other.end)) < 3
         }
     }
@@ -66,7 +66,14 @@ final class DiscordPresence: @unchecked Sendable {
             "details": field(a.title), "state": field(a.artist),
             "timestamps": ["start": Int64(a.start.timeIntervalSince1970 * 1000), "end": Int64(a.end.timeIntervalSince1970 * 1000)],
         ]
-        if a.imageURL.hasPrefix("https://") { activity["assets"] = ["large_image": a.imageURL, "large_text": field(a.album.isEmpty ? a.title : a.album)] }
+        // the title (and the cover) open the song on YouTube Music
+        let link = BrowserSource.isVideoId(a.videoId) ? "https://music.youtube.com/watch?v=" + a.videoId : nil
+        if let link { activity["details_url"] = link }
+        if a.imageURL.hasPrefix("https://") {
+            var assets: [String: Any] = ["large_image": a.imageURL, "large_text": field(a.album.isEmpty ? a.title : a.album)]
+            if let link { assets["large_url"] = link }
+            activity["assets"] = assets
+        }
         if a.button { activity["buttons"] = [["label": "Now Playing Widget", "url": projectURL]] }
         return activity
     }

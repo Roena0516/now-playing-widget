@@ -12,7 +12,7 @@ namespace PearNowPlaying
     /// <summary>What Discord shows: a song being listened to, or nothing.</summary>
     internal sealed class DiscordActivity
     {
-        public string Title = "", Artist = "", Album = "", ImageUrl = "";
+        public string Title = "", Artist = "", Album = "", ImageUrl = "", VideoId = "";
         /// <summary>When the song started and ends (UTC), for Discord's progress bar.</summary>
         public DateTime Start, End;
         public bool Button;
@@ -21,7 +21,7 @@ namespace PearNowPlaying
         /// the clock; a seek moves the start by more than 3 seconds).</summary>
         public bool Same(DiscordActivity other)
         {
-            return other != null && Title == other.Title && Artist == other.Artist && Album == other.Album && ImageUrl == other.ImageUrl
+            return other != null && Title == other.Title && Artist == other.Artist && Album == other.Album && ImageUrl == other.ImageUrl && VideoId == other.VideoId
                 && Button == other.Button && Math.Abs((Start - other.Start).TotalSeconds) < 3 && Math.Abs((End - other.End).TotalSeconds) < 3;
         }
     }
@@ -102,8 +102,15 @@ namespace PearNowPlaying
                 { "state", Field(a.Artist) },
                 { "timestamps", new Dictionary<string, object> { { "start", Millis(a.Start) }, { "end", Millis(a.End) } } },
             };
+            // the title (and the cover) open the song on YouTube Music
+            var link = YtmLyrics.IsVideoId(a.VideoId) ? "https://music.youtube.com/watch?v=" + a.VideoId : null;
+            if (link != null) activity["details_url"] = link;
             if (a.ImageUrl.StartsWith("https://", StringComparison.Ordinal))
-                activity["assets"] = new Dictionary<string, object> { { "large_image", a.ImageUrl }, { "large_text", Field(a.Album.Length > 0 ? a.Album : a.Title) } };
+            {
+                var assets = new Dictionary<string, object> { { "large_image", a.ImageUrl }, { "large_text", Field(a.Album.Length > 0 ? a.Album : a.Title) } };
+                if (link != null) assets["large_url"] = link;
+                activity["assets"] = assets;
+            }
             if (a.Button)
                 activity["buttons"] = new object[] { new Dictionary<string, object> { { "label", "Now Playing Widget" }, { "url", ProjectUrl } } };
             return activity;
