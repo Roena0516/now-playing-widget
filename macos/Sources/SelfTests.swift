@@ -54,6 +54,7 @@ import CoreGraphics
     precondition(client.elapsed < 1, "near the start, 0 is taken at once")
     precondition(parseLRC("[ar:Artist]\nplain text").isEmpty)
     client.stop()
+    browserSourceTests()
     let socketRequest = makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: "test-token")
     precondition(socketRequest.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
     precondition(socketRequest.url?.query == "token=test-token", "Pear 3.12 reads the WebSocket token from the query only")
@@ -300,4 +301,87 @@ func testCustomPlacement() {
     var away = old; away.widgets = [old.widgets[1]]
     precondition(away.savedWidgetIndex(monitor: 0, screenCount: 1) == 0, "the widget standing in on the main screen is the saved first one")
     print("PASS: dragged position (screen choice, top/bottom anchor, clamping), custom placement, new defaults, one widget per screen with its own position, size and transparency")
+}
+
+/// The browser source: which source is shown, and reading tabs, addresses and YouTube's answers.
+@MainActor func browserSourceTests() {
+    // the song shown is the one whose source started playing last
+    let both = PearClient(loadRemoteAssets: false)
+    both.handle(["type": "PLAYER_INFO", "isPlaying": true, "position": 10, "song": ["title": "pear song", "songDuration": 200, "videoId": "pearVideo01"]])
+    precondition(both.source == .pear && both.song.title == "pear song")
+    both.handle(["type": "VIDEO_CHANGED", "isPlaying": false, "position": 0, "song": ["title": "browser song", "songDuration": 180, "videoId": "browserVid1"]], from: .browser)
+    precondition(both.source == .pear && both.song.title == "pear song", "a paused browser song doesn't take over a playing one")
+    both.handle(["type": "PLAYER_STATE_CHANGED", "isPlaying": true, "position": 5], from: .browser)
+    precondition(both.source == .browser && both.song.title == "browser song" && both.elapsed >= 5 && both.elapsed < 6, "the browser started playing")
+    both.handle(["type": "POSITION_CHANGED", "position": 30])
+    precondition(both.source == .browser && both.song.title == "browser song", "Pear playing on doesn't take it back")
+    both.handle(["type": "PLAYER_STATE_CHANGED", "isPlaying": false, "position": 6], from: .browser)
+    precondition(both.source == .browser && both.song.paused)
+    both.handle(["type": "POSITION_CHANGED", "position": 31])
+    precondition(both.source == .pear && both.song.title == "pear song" && both.elapsed >= 31, "a playing source takes over from a paused one")
+    both.handle(["type": "VIDEO_CHANGED", "isPlaying": true, "position": 0, "song": ["title": "browser next", "songDuration": 180, "videoId": "browserVid2"]], from: .browser)
+    precondition(both.source == .browser && both.song.title == "browser next", "a new song playing takes over")
+    both.stop()
+
+    // addresses and tab titles
+    precondition(BrowserSource.watchParameters("https://music.youtube.com/watch?v=qFeKKGDoF2E&list=OLAK5uy_k4cm") == ("qFeKKGDoF2E", "OLAK5uy_k4cm"))
+    precondition(BrowserSource.watchParameters("https://music.youtube.com/watch?v=short").videoId.isEmpty)
+    precondition(BrowserSource.watchParameters("https://music.youtube.com/playlist?list=OLAK5uy_k4cm").videoId.isEmpty)
+    precondition(BrowserSource.watchParameters("https://www.youtube.com/watch?v=qFeKKGDoF2E").videoId.isEmpty, "YouTube Music tabs only")
+    precondition(BrowserSource.tabSongTitle("アイドル - Idol | YouTube Music") == "アイドル - Idol" && BrowserSource.tabSongTitle("YouTube Music") == "")
+    let tabs = [BrowserTabs.Tab(url: "https://music.youtube.com/", title: "YouTube Music"),
+                BrowserTabs.Tab(url: "https://music.youtube.com/watch?v=ZRtdQ81jPUQ", title: "アイドル - Idol | YouTube Music"),
+                BrowserTabs.Tab(url: "https://music.youtube.com/watch?v=8GfDq1osBLM&list=OLAK5uy_k4cm", title: "ハルジオン | YouTube Music")]
+    precondition(BrowserSource.playingTab(tabs, title: "Idol")?.url.contains("ZRtdQ81jPUQ") == true, "the tab named like what macOS reports")
+    precondition(BrowserSource.playingTab(tabs, title: "ハルジオン (Halzion)")?.url.contains("8GfDq1osBLM") == true, "a tab named with part of the title")
+    precondition(BrowserSource.playingTab(tabs, title: "群青") == nil, "two video tabs, neither named like it")
+    precondition(BrowserSource.playingTab(Array(tabs.prefix(2)), title: "something else")?.url.contains("ZRtdQ81jPUQ") == true, "the only video tab")
+    precondition(BrowserSource.sameSong("Idol", title: "アイドル - Idol", tabTitle: "") && !BrowserSource.sameSong("ハルジオン (Halzion)", title: "Epilogue", tabTitle: ""))
+    precondition(BrowserSource.mediaType("MUSIC_VIDEO_TYPE_ATV") == "AUDIO" && BrowserSource.mediaType("MUSIC_VIDEO_TYPE_OMV") == "ORIGINAL_MUSIC_VIDEO"
+                 && BrowserSource.mediaType("MUSIC_VIDEO_TYPE_UGC") == "USER_GENERATED_CONTENT" && BrowserSource.mediaType("MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC") == "OTHER_VIDEO")
+    // osascript's output: url<TAB>title lines; the separators are set outside the tell block ("tab" is Chrome's class there)
+    precondition(BrowserTabs.parse("https://music.youtube.com/watch?v=ZRtdQ81jPUQ\tアイドル - Idol | YouTube Music\nhttps://music.youtube.com/\tYouTube Music\n")
+                 == [BrowserTabs.Tab(url: "https://music.youtube.com/watch?v=ZRtdQ81jPUQ", title: "アイドル - Idol | YouTube Music"), BrowserTabs.Tab(url: "https://music.youtube.com/", title: "YouTube Music")])
+    let script = BrowserTabs.script(for: "com.google.Chrome") ?? ""
+    precondition(script.contains("set sep to character id 9") && script.contains("whose URL starts with \"https://music.youtube.com/\"") && !script.contains("& tab &"))
+    precondition(BrowserTabs.script(for: "com.apple.Safari")?.contains("name of t") == true && BrowserTabs.script(for: "org.mozilla.firefox") == nil)
+
+    // an album entry that is a music video names its official audio in its watch parameters (recorded 2026-10-20)
+    precondition(YTMusicProvider.counterpart("OAHyAQIIAaIDC3FGZUtLR0RvRjJF") == "qFeKKGDoF2E" && YTMusicProvider.counterpart("OAHKAQRNVsw%3D") == nil)
+    func entry(_ id: String, params: String = "", title: String = "", length: String = "") -> [String: Any] {
+        ["playlistPanelVideoRenderer": ["videoId": id, "title": ["runs": [["text": title]]], "lengthText": ["runs": [["text": length]]],
+                                        "navigationEndpoint": ["watchEndpoint": ["videoId": id, "params": params]]]]
+    }
+    let queue = YTMusicProvider.queueEntries(["contents": ["playlistPanelRenderer": ["contents": [
+        entry("k_Z-mAvkCbM"), entry("vcGbefQBvJ4", params: "OAHyAQIIAaIDC3FGZUtLR0RvRjJF"),
+        ["playlistPanelVideoWrapperRenderer": ["primaryRenderer": entry("kzdJkT4kp-A", title: "ハルジオン", length: "3:22")]],
+        ["automixPreviewVideoRenderer": [:]]]]]])
+    precondition(queue.map(\.videoId) == ["k_Z-mAvkCbM", "vcGbefQBvJ4", "kzdJkT4kp-A"] && queue[1].counterpartId == "qFeKKGDoF2E"
+                 && queue[2].title == "ハルジオン" && queue[2].duration == 202, "queue order, counterparts, wrapped entries")
+    precondition(YTMusicProvider.coverURL([["url": "https://lh3.googleusercontent.com/abc=w60-h60-l90-rj", "width": 60]]) == "https://lh3.googleusercontent.com/abc=w544-h544-l90-rj")
+    precondition(YTMusicProvider.coverURL([["url": "https://i.ytimg.com/vi/a/sd.jpg", "width": 400], ["url": "https://i.ytimg.com/vi/a/hq720.jpg", "width": 800]]) == "https://i.ytimg.com/vi/a/hq720.jpg")
+
+    // YouTube's search for a song known by title only: the same length, and its own title or the artist's channel
+    func result(_ id: String, _ title: String, _ owner: String, _ length: String, official: Bool = false) -> [String: Any] {
+        ["videoRenderer": ["videoId": id, "title": ["runs": [["text": title]]], "ownerText": ["runs": [["text": owner]]], "lengthText": ["simpleText": length],
+                           "ownerBadges": official ? [["metadataBadgeRenderer": ["style": "BADGE_STYLE_TYPE_VERIFIED_ARTIST"]]] : [] as [Any]]]
+    }
+    let search: [String: Any] = ["contents": ["sectionListRenderer": ["contents": [["itemSectionRenderer": ["contents": [
+        result("tyW4QFqUasU", "YOASOBI「ハルジオン」(Halzion) [日本語 | Romaji | Eng ] 歌詞", "YoshYoshYosh", "3:19"),
+        result("Pv9BgqukAb4", "YOASOBI Halzion / ハルジオン Live Compilation", "YoAdoBy", "3:22"),
+        result("kzdJkT4kp-A", "YOASOBI「ハルジオン」Official Music Video", "YOASOBI", "3:23"),
+        result("M5FqUyIVaVo", "ドラマツルギー / Eve(covered by 犬山たまき)", "Tamaki Ch. 犬山たまき / 佃煮のりお", "4:02")]]]]]]]
+    precondition(YTMusicProvider.pickVideo(search, title: "ハルジオン (Halzion)", artist: "YOASOBI", duration: 202) == "kzdJkT4kp-A",
+                 "the artist's video of that length, not a fan upload of the same length")
+    precondition(YTMusicProvider.pickVideo(search, title: "ドラマツルギー / Eve(covered by 犬山たまき)", artist: "Tamaki Ch. 犬山たまき / 佃煮のりお", duration: 242) == "M5FqUyIVaVo")
+    precondition(YTMusicProvider.pickVideo(search, title: "ハルジオン (Halzion)", artist: "YOASOBI", duration: 230) == nil, "no video of that length")
+    // the browser names the song and artist in the player's language (recorded 2026-10-20, "요아소비 Idol", hl=ko)
+    let localized: [String: Any] = ["contents": ["sectionListRenderer": ["contents": [["itemSectionRenderer": ["contents": [
+        result("mEZqJ65ra08", "🔥해외 차트 점령 중인 화제의 애니 OST : YOASOBI - 아이돌(アイドル)", "쏘플 soso playlist", "3:34"),
+        result("IvMFMA89Yi8", "YOASOBI「アイドル」from『劇場版YOASOBI 5th ANNIVERSARY", "YOASOBI 및 Echoes", "5:36", official: true),
+        result("ZRtdQ81jPUQ", "YOASOBI「アイドル」 Official Music Video", "YOASOBI 및 Echoes", "3:46", official: true),
+        result("qxB7mbtu7Rw", "스타데이즈 Stardays", "스타데이즈 Stardays", "3:46")]]]]]]]
+    precondition(YTMusicProvider.pickVideo(localized, title: "Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "the one official video of that length")
+    precondition(YTMusicProvider.pickVideo(localized, title: "アイドル - Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "an official channel naming the song")
+    precondition(YTMusicProvider.pickVideo(localized, title: "Idol", artist: "요아소비", duration: 230) == nil)
 }

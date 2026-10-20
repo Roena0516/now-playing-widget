@@ -1,12 +1,57 @@
 import Foundation
 import Combine
 
+/// Where songs come from: Pear Desktop's API server, or YouTube Music in a web browser (BrowserSource).
+enum SongSource { case pear, browser }
+
+/// One source's player: its song, and when its position was last set.
+struct PlayerState {
+    var song = Song()
+    var anchor = Date()
+    var jumps = BackwardJumps()
+    var elapsed: Double { min(max(0, song.elapsed + (song.paused ? 0 : Date().timeIntervalSince(anchor))), max(0, song.duration)) }
+
+    /// One message in Pear's WebSocket format (the browser source speaks it too).
+    mutating func apply(_ message: [String: Any]) {
+        switch message["type"] as? String ?? "" {
+        case "PLAYER_INFO", "VIDEO_CHANGED":
+            if let value = message["song"] as? [String: Any] { song = Song(value) }
+            if let value = message["isPlaying"] as? Bool { song.paused = !value }
+            if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
+            anchor = Date()
+            jumps.reset()
+        case "PLAYER_STATE_CHANGED":
+            jumps.reset()
+            song.elapsed = elapsed
+            song.paused = !(message["isPlaying"] as? Bool ?? false)
+            if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
+            anchor = Date()
+        case "POSITION_CHANGED":
+            let position = (message["position"] as? NSNumber)?.doubleValue ?? song.elapsed
+            if !jumps.accept(position, last: elapsed, now: Date()) { break }
+            song.elapsed = position; anchor = Date()
+        default: break
+        }
+    }
+    mutating func pause() { if !song.paused { song.elapsed = elapsed; song.paused = true; anchor = Date() } }
+}
+
 @MainActor final class PearClient: ObservableObject {
     @Published var song = Song()
     // status lines, worded as the Windows version's tray (TrayApp.StatusText and the lyrics line)
     static let starting = "연결 준비 중", waiting = "Pear Desktop 기다리는 중 (API 서버 확인)",
-               authorizing = "Pear Desktop에서 허용 대기 중", denied = "Pear Desktop에서 연결 거부됨", connected = "Pear Desktop에 연결됨"
+               authorizing = "Pear Desktop에서 허용 대기 중", denied = "Pear Desktop에서 연결 거부됨", connected = "Pear Desktop에 연결됨",
+               waitingAny = "YouTube Music 기다리는 중 (브라우저, Pear Desktop)", waitingBrowser = "브라우저의 YouTube Music 기다리는 중",
+               browserPrefix = "브라우저 YouTube Music에 연결됨"
+    static func browserConnected(_ name: String) -> String { browserPrefix + " (\(name))" }
     @Published var status = PearClient.starting
+    /// Pear's connection state (one of the lines above); `status` is this or the browser's.
+    private var pearStatus = PearClient.starting { didSet { updateStatus() } }
+    /// The source of the song shown: the one that started playing last.
+    @Published private(set) var source = SongSource.pear
+    private var players: [SongSource: PlayerState] = [.pear: PlayerState(), .browser: PlayerState()]
+    private(set) lazy var browser = BrowserSource(ytm: lyrics.ytm)
+    private var browserRunning = false
     @Published var lines: [LyricLine] = []
     /// The next song's lyrics (fetched ahead), shown below this song's last line.
     @Published var nextLines: [LyricLine] = []
@@ -26,7 +71,6 @@ import Combine
     private var prefetchTask: Task<Void, Never>?
     private var artTask: Task<Void, Never>?
     private var socket: URLSessionWebSocketTask?
-    private var anchor = Date()
     private var token: String?
     let lyrics = LyricsFinder(lrclib: LyricsProvider(log: Log.write), ytm: YTMusicProvider(log: Log.write), more: MoreLyrics(log: Log.write),
                               disk: LyricsDiskCache(log: Log.write), log: Log.write)
@@ -49,14 +93,43 @@ import Combine
         lyrics.lrclib.baseURL = settings.lyricsServer
     }
     private var tokenFile: URL { directory.appendingPathComponent("token.txt") }
-    var elapsed: Double { min(max(0, song.elapsed + (song.paused ? 0 : Date().timeIntervalSince(anchor))), max(0, song.duration)) }
+    var elapsed: Double { players[source]?.elapsed ?? 0 }
     var baseURL: URL { URL(string: "http://\(settings.host):\(settings.port)")! }
+    /// Whether a player is connected (the card says "재생 중인 곡이 없어요" then, not the connection state).
+    var isConnected: Bool { status == PearClient.connected || status.hasPrefix(PearClient.browserPrefix) }
     func start() {
         connection?.cancel(); socket?.cancel(with: .goingAway, reason: nil)
-        connection = Task { await run() }
+        pearStatus = PearClient.starting
+        if settings.source != "browser" { connection = Task { await run() } }
+        else { players[.pear]!.pause(); if source == .pear { show() } }
+        if settings.source != "pear" { startBrowser() } else { stopBrowser() }
+        updateStatus()
+    }
+    private func startBrowser() {
+        guard !browserRunning, loadRemoteAssets else { return }
+        browserRunning = true
+        browser.onMessage = { [weak self] message in self?.handle(message, from: .browser) }
+        browser.onBrowser = { [weak self] _ in self?.updateStatus() }
+        browser.onNotice = { [weak self] text in self?.onLyricsNotice?(text) }
+        browser.start()
+    }
+    private func stopBrowser() {
+        guard browserRunning else { return }
+        browserRunning = false; browser.stop()
+        players[.browser]!.pause()
+        if source == .browser { show() }
+    }
+    /// The status line: the browser while its song is shown (or Pear isn't connected), else Pear's state.
+    private func updateStatus() {
+        let next: String
+        if browserRunning, let name = browser.browser, source == .browser || pearStatus != PearClient.connected { next = PearClient.browserConnected(name) }
+        else if settings.source == "browser" { next = PearClient.waitingBrowser }
+        else if settings.source == "auto" && pearStatus == PearClient.waiting { next = PearClient.waitingAny }
+        else { next = pearStatus }
+        if status != next { status = next }
     }
     func retryAuth() { token = nil; try? FileManager.default.removeItem(at: tokenFile); start() }
-    func stop() { connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+    func stop() { connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); stopBrowser() }
     func reload() { settings = Settings.load(); settings.save(); applyLyricsSources(); start() }
     private func persistToken(_ value: String) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -80,7 +153,7 @@ import Combine
                     // allow/deny dialog, and only then do we tell the user to click "허용".
                     let dialogHint = Task {
                         try? await Task.sleep(for: .milliseconds(800))
-                        if !Task.isCancelled { status = PearClient.authorizing; onLyricsNotice?("Pear Desktop에서 '허용'을 눌러주세요") }
+                        if !Task.isCancelled { pearStatus = PearClient.authorizing; onLyricsNotice?("Pear Desktop에서 '허용'을 눌러주세요") }
                     }
                     defer { dialogHint.cancel() }
                     let (data, response) = try await session.data(for: req)
@@ -88,7 +161,7 @@ import Combine
                     try Task.checkCancellation()
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                     if code == 403 {
-                        status = PearClient.denied; Log.info("auth denied by Pear (403)")
+                        pearStatus = PearClient.denied; Log.info("auth denied by Pear (403)")
                         onLyricsNotice?("Pear Desktop에서 연결이 거부됐어요. 메뉴의 'Pear 연결 권한 다시 요청'으로 다시 시도할 수 있어요.")
                         return
                     }
@@ -110,12 +183,12 @@ import Combine
                         let data: Data
                         switch message { case .string(let text): data = Data(text.utf8); case .data(let bytes): data = bytes; @unknown default: continue }
                         if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                            let firstMessage = status != PearClient.connected
+                            let firstMessage = pearStatus != PearClient.connected
                             if firstMessage { Log.info("connected to Pear at \(baseURL.absoluteString)"); lastFailure = "" }
-                            status = PearClient.connected; handle(obj)
+                            pearStatus = PearClient.connected; handle(obj)
                             if firstMessage && !everConnected {
                                 everConnected = true
-                                if song.title.isEmpty { onLyricsNotice?("Pear Desktop에 연결됐어요") }
+                                if song.title.isEmpty && source == .pear { onLyricsNotice?("Pear Desktop에 연결됐어요") }
                             }
                         }
                     }
@@ -135,38 +208,38 @@ import Combine
                 if Task.isCancelled { return }
                 let e = error as NSError
                 noteFailure("WARN Pear connection failed: \(e.domain) \(e.code) \(e.localizedDescription)\(closeInfo)")
-                status = PearClient.waiting
-                if !song.paused { song.elapsed = elapsed; song.paused = true; anchor = Date() }
+                pearStatus = PearClient.waiting
+                players[.pear]!.pause()
+                if source == .pear { show() }
             }
             try? await Task.sleep(for: .seconds(3))
         }
     }
-    func handle(_ message: [String: Any]) {
-        let type = message["type"] as? String ?? ""
-        switch type {
-        case "PLAYER_INFO", "VIDEO_CHANGED":
-            let previous = song.identity
-            if let value = message["song"] as? [String: Any] { song = Song(value) }
-            if let value = message["isPlaying"] as? Bool { song.paused = !value }
-            if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
-            anchor = Date()
-            jumps.reset()
-            if song.identity != previous && loadRemoteAssets { fetchArtwork(); findLyrics() }
-        case "PLAYER_STATE_CHANGED":
-            jumps.reset()
-            song.elapsed = elapsed
-            song.paused = !(message["isPlaying"] as? Bool ?? false)
-            if let value = message["position"] as? NSNumber { song.elapsed = value.doubleValue }
-            anchor = Date()
-        case "POSITION_CHANGED":
-            let position = (message["position"] as? NSNumber)?.doubleValue ?? song.elapsed
-            if !jumps.accept(position, last: elapsed, now: Date()) { break }
-            song.elapsed = position; anchor = Date()
-        default: break
+    /// A message from Pear (or, in the same format, from the browser source). The song shown is the source's that
+    /// started playing last: a source that starts playing (or plays a new song) takes over, and one that plays
+    /// takes over from a paused one.
+    func handle(_ message: [String: Any], from origin: SongSource = .pear) {
+        var state = players[origin]!
+        let wasPlaying = !state.song.paused, before = state.song.identity
+        state.apply(message)
+        players[origin] = state
+        let current = players[source]!
+        let started = !state.song.paused && (!wasPlaying || state.song.identity != before)
+        if origin != source, !state.song.title.isEmpty, started || current.song.title.isEmpty || (current.song.paused && !state.song.paused) {
+            Log.info(origin == .browser ? "showing the song playing in \(browser.browser ?? "the browser")" : "showing the song playing in Pear")
+            source = origin
+            updateStatus()
         }
+        if origin == source { show() }
     }
-    private var jumps = BackwardJumps()
+    /// The shown source's song; a new one gets its cover and lyrics.
+    private func show() {
+        let previous = song.identity
+        song = players[source]!.song
+        if song.identity != previous && loadRemoteAssets { fetchArtwork(); findLyrics() }
+    }
     func control(_ action: String) {
+        if source == .browser && browserRunning { browser.control(action); return }
         Task {
             do {
                 var req = URLRequest(url: baseURL.appendingPathComponent("api/v1/\(action)"))
@@ -342,6 +415,7 @@ import Combine
     /// The next song in Pear's queue (GET /api/v1/queue/next): title, artist, video ID and length only.
     /// Nil when there is no next song or Pear can't be asked.
     func nextSong() async throws -> Song? {
+        if source == .browser { return try await browser.nextSong() }
         guard let token else { return nil }
         var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/queue/next"))
         request.timeoutInterval = 10

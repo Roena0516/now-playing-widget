@@ -21,6 +21,9 @@ struct WidgetSetting: Codable, Equatable {
 }
 
 struct Settings: Codable {
+    /// where songs come from: "auto" (a web browser and Pear Desktop, whichever started playing last),
+    /// "browser" (YouTube Music in a web browser only) or "pear" (Pear Desktop only)
+    var source = "auto"
     var host = "127.0.0.1"
     var port = 26538
     var position = "BottomLeft"
@@ -78,6 +81,8 @@ struct Settings: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) throws -> T { try c.decodeIfPresent(T.self, forKey: key) ?? fallback }
+        source = try value(.source, source)
+        if !["auto", "browser", "pear"].contains(source) { source = "auto" }
         host = try value(.host, host); port = try value(.port, port); position = try value(.position, position)
         marginX = try value(.marginX, marginX); marginY = try value(.marginY, marginY)
         scale = try value(.scale, scale); panelWidth = try value(.panelWidth, panelWidth); monitor = try value(.monitor, monitor)

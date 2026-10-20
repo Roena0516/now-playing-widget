@@ -31,6 +31,10 @@ namespace PearNowPlaying
         /// <summary>MUSIC_VIDEO_TYPE_ATV (official audio), _OMV (official video), _UGC …</summary>
         public string VideoType = "";
         public double Duration;
+        /// <summary>The largest cover / thumbnail of the queue entry (the browser source's album art).</summary>
+        public string Thumbnail = "";
+        /// <summary>A playlist entry's other version (the official audio of a music video entry), from its watch parameters.</summary>
+        public string CounterpartId = "";
         public LyricsResult Lyrics;
     }
 
@@ -103,6 +107,7 @@ namespace PearNowPlaying
             return new TrackInfo
             {
                 VideoId = t.VideoId, Title = t.Title, Artist = t.Artist, ArtistId = t.ArtistId, VideoType = t.VideoType, Duration = t.Duration,
+                Thumbnail = t.Thumbnail, CounterpartId = t.CounterpartId,
                 Lyrics = t.Lyrics == null ? null : new LyricsResult { Lines = t.Lyrics.Lines, Instrumental = t.Lyrics.Instrumental, Source = t.Lyrics.Source },
             };
         }
@@ -215,9 +220,180 @@ namespace PearNowPlaying
             if (runs != null) foreach (var run in runs) { var t = Path(run, "text") as string; if (!string.IsNullOrWhiteSpace(t)) { info.Artist = t.Trim(); break; } }
             info.Duration = ParseClock(Runs(Path(r, "lengthText")));
             info.VideoType = Find(r, "musicVideoType", 0) as string ?? "";
+            info.Thumbnail = CoverUrl(Path(r, "thumbnail", "thumbnails") as IEnumerable);
             var artist = FindWhere(next, "browseEndpoint", v =>
                 Path(v, "browseEndpointContextSupportedConfigs", "browseEndpointContextMusicConfig", "pageType") as string == "MUSIC_PAGE_TYPE_ARTIST", 0);
             info.ArtistId = Path(artist, "browseId") as string ?? "";
+        }
+
+        // ---- the browser source: playlists, covers, finding a video by title --------------------------------
+
+        /// <summary>
+        /// The song after <paramref name="videoId"/> in a playlist (an album, a playlist; the browser source's guess at
+        /// the next song, as the browser's own queue can't be read). Null when it is the last one or not in the list.
+        /// The list is remembered for this session, so going through an album asks once.
+        /// </summary>
+        public async Task<TrackInfo> QueueAfter(string videoId, string playlist, CancellationToken ct)
+        {
+            var entries = await PlaylistEntries(videoId, playlist, ct, true);
+            int index = entries.FindIndex(e => e.VideoId == videoId || e.CounterpartId == videoId);
+            if (index < 0 || index + 1 >= entries.Count) return null;
+            // the web player plays an album's official audio where the list names its music video: the next song in
+            // the same kind (its details from the queue entry YouTube Music gives for it, as for the song playing)
+            var next = entries[index + 1];
+            var nextId = entries[index].CounterpartId == videoId && next.CounterpartId.Length > 0 ? next.CounterpartId : next.VideoId;
+            return await Lookup(nextId, ct, false);
+        }
+
+        readonly Dictionary<string, List<TrackInfo>> queues = new Dictionary<string, List<TrackInfo>>();
+
+        /// <summary>
+        /// The songs of a playlist as YouTube Music's queue panel lists them around <paramref name="videoId"/>. Asked again
+        /// when the video isn't in the remembered list (or, with <paramref name="ending"/>, is its last entry: the panel
+        /// shows a window of it).
+        /// </summary>
+        public async Task<List<TrackInfo>> PlaylistEntries(string videoId, string playlist, CancellationToken ct, bool ending = false)
+        {
+            List<TrackInfo> known;
+            if (Recall(queues, playlist, out known))
+            {
+                int at = known.FindIndex(e => e.VideoId == videoId || e.CounterpartId == videoId);
+                if (at >= 0 && (!ending || at < known.Count - 1)) return known;
+            }
+            var next = await Post(MusicBase.TrimEnd('/') + "/youtubei/v1/next?prettyPrint=false", new Dictionary<string, object>
+            {
+                { "videoId", videoId }, { "playlistId", playlist },
+                { "context", new Dictionary<string, object> { { "client", new Dictionary<string, object> {
+                    { "clientName", "WEB_REMIX" }, { "clientVersion", WebClientVersion } } } } },
+            }, ct, "queue");
+            return Remember(queues, playlist, QueueEntries(next));
+        }
+
+        /// <summary>The queue panel's songs in order (the album version of each, not its music video counterpart).</summary>
+        internal static List<TrackInfo> QueueEntries(object next)
+        {
+            var found = new List<TrackInfo>();
+            var contents = Path(Find(next, "playlistPanelRenderer", 0), "contents") as IEnumerable;
+            if (contents == null) return found;
+            foreach (var item in contents)
+            {
+                var r = Path(item, "playlistPanelVideoRenderer") ?? Path(item, "playlistPanelVideoWrapperRenderer", "primaryRenderer", "playlistPanelVideoRenderer");
+                var id = Path(r, "videoId") as string;
+                if (string.IsNullOrEmpty(id)) continue;
+                var info = new TrackInfo { VideoId = id };
+                ReadQueueEntry(new Dictionary<string, object> { { "r", new Dictionary<string, object> { { "playlistPanelVideoRenderer", r } } } }, id, info);
+                info.CounterpartId = Counterpart(Path(r, "navigationEndpoint", "watchEndpoint", "params") as string ?? "") ?? "";
+                found.Add(info);
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// The video ID inside a playlist entry's watch parameters (base64 protobuf; a length byte 11 and the ID): an
+        /// album entry that is a music video carries its official audio this way.
+        /// </summary>
+        internal static string Counterpart(string param)
+        {
+            if (string.IsNullOrEmpty(param)) return null;
+            var b64 = Uri.UnescapeDataString(param).Replace('-', '+').Replace('_', '/');
+            b64 += new string('=', (4 - b64.Length % 4) % 4);
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(b64); } catch (FormatException) { return null; }
+            for (int i = 0; i + 11 < bytes.Length; i++)
+            {
+                if (bytes[i] != 11) continue;
+                var id = Encoding.ASCII.GetString(bytes, i + 1, 11);
+                if (IsVideoId(id)) return id;
+            }
+            return null;
+        }
+
+        internal static bool IsVideoId(string id)
+        {
+            return id != null && id.Length == 11 && id.All(c => c < 128 && (char.IsLetterOrDigit(c) || c == '_' || c == '-'));
+        }
+
+        /// <summary>
+        /// The largest of a renderer's thumbnails; album covers (lh3 / yt3.googleusercontent.com, "=w60-h60-…") are asked
+        /// for at 544 px, the size Pear's album art comes in.
+        /// </summary>
+        internal static string CoverUrl(IEnumerable thumbnails)
+        {
+            string best = null; double width = -1;
+            if (thumbnails != null)
+                foreach (var t in thumbnails)
+                {
+                    double w = 0;
+                    try { w = Convert.ToDouble(Path(t, "width") ?? 0, CultureInfo.InvariantCulture); } catch { }
+                    var url = Path(t, "url") as string;
+                    if (url != null && w > width) { width = w; best = url; }
+                }
+            if (best == null || !best.StartsWith("https://", StringComparison.Ordinal)) return "";
+            if (best.Contains("googleusercontent.com/")) best = System.Text.RegularExpressions.Regex.Replace(best, @"=w\d+-h\d+", "=w544-h544");
+            return best;
+        }
+
+        readonly Dictionary<string, string> searches = new Dictionary<string, string>();
+
+        /// <summary>
+        /// A video for a song known only by its title, artist and length (the browser source when the tab's address
+        /// can't be read): YouTube's search for "artist title", picked by PickVideo. Null when none is that sure.
+        /// </summary>
+        public async Task<string> FindVideo(string title, string artist, double duration, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(title) || duration <= 0) return null;
+            var key = title + "|" + artist + "|" + Math.Round(duration).ToString(CultureInfo.InvariantCulture);
+            string known;
+            if (Recall(searches, key, out known)) return known;
+            var body = new Dictionary<string, object>
+            {
+                { "query", (string.IsNullOrWhiteSpace(artist) ? "" : artist + " ") + title },
+                { "context", new Dictionary<string, object> { { "client", new Dictionary<string, object> {
+                    { "clientName", "WEB" }, { "clientVersion", WebVersion }, { "hl", "ja" } } } } },
+            };
+            var found = PickVideo(await Post(YoutubeBase.TrimEnd('/') + "/youtubei/v1/search?prettyPrint=false", body, ct, "search"), title, artist, duration);
+            Log.Info("YouTube search for " + artist + " - " + title + " (" + (int)duration + "s): " + (found ?? "no video of that length and title"));
+            return Remember(searches, key, found);
+        }
+
+        /// <summary>
+        /// The search result that is this song, in order: as long as the song (±2 s) and titled exactly like it (a
+        /// cover's own upload); or from the artist's channel, or an official artist / "- Topic" channel, and naming the
+        /// song ("YOASOBI「ハルジオン」Official Music Video" for "ハルジオン (Halzion)"). Failing those, the one official
+        /// result within a second of the length: the browser may name the artist and song in the player's language
+        /// ("요아소비", "Idol"), which the video's title doesn't use. Fan uploads of the same length are never taken.
+        /// </summary>
+        internal static string PickVideo(object response, string title, string artist, double duration)
+        {
+            var wanted = CoverLyrics.Norm(title);
+            var names = CoverLyrics.TitleNames(title, artist).Select(CoverLyrics.Norm).Where(n => n.Length >= 2).ToList();
+            var singer = CoverLyrics.Norm(artist);
+            var official = new List<string>();
+            foreach (var section in Path(Find(response, "sectionListRenderer", 0), "contents") as IEnumerable ?? new object[0])
+                foreach (var item in Path(section, "itemSectionRenderer", "contents") as IEnumerable ?? new object[0])
+                {
+                    var r = Path(item, "videoRenderer");
+                    var id = Path(r, "videoId") as string;
+                    if (id == null) continue;
+                    double length = ParseClock(Runs(Path(r, "lengthText")));
+                    if (length <= 0 || Math.Abs(length - duration) > 2) continue;
+                    var t = CoverLyrics.Norm(Runs(Path(r, "title")));
+                    if (wanted.Length > 0 && t == wanted) return id;
+                    var owner = Runs(Path(r, "ownerText"));
+                    var ownerName = CoverLyrics.Norm(owner.Replace(" - Topic", ""));
+                    bool byArtist = singer.Length > 0 && ownerName.Length > 0 && (ownerName.Contains(singer) || singer.Contains(ownerName));
+                    bool isOfficial = owner.EndsWith(" - Topic", StringComparison.Ordinal) || OfficialArtist(r);
+                    if ((byArtist || isOfficial) && names.Any(n => t.Contains(n))) return id;
+                    if (isOfficial && Math.Abs(length - duration) <= 1) official.Add(id);
+                }
+            return official.Count == 1 ? official[0] : null;
+        }
+
+        static bool OfficialArtist(object videoRenderer)
+        {
+            foreach (var badge in Path(videoRenderer, "ownerBadges") as IEnumerable ?? new object[0])
+                if (Path(badge, "metadataBadgeRenderer", "style") as string == "BADGE_STYLE_TYPE_VERIFIED_ARTIST") return true;
+            return false;
         }
 
         // ---- official audio track for a music video (MV -> artist page -> single/album -> track) -------------

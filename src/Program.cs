@@ -25,6 +25,12 @@ namespace PearNowPlaying
         [STAThread]
         static void Main(string[] args)
         {
+            if (args.Length >= 1 && args[0] == "--browser-probe")
+            {
+                double seconds;
+                BrowserProbe.Run(args.Length > 1 && double.TryParse(args[1], out seconds) ? seconds : 60);
+                return;
+            }
             // started by an update: wait for the old instance to exit so the single-instance check lets us in
             int pid;
             if (args.Length == 2 && args[0] == "--wait-for" && int.TryParse(args[1], out pid))

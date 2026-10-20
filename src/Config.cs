@@ -70,6 +70,10 @@ namespace PearNowPlaying
         public static string TokenPath { get { return Path.Combine(Dir, "token.txt"); } }
         public static string LogPath { get { return Path.Combine(Dir, "error.log"); } }
 
+        /// <summary>Where songs come from: "auto" (a web browser and Pear Desktop, whichever started playing last),
+        /// "browser" (YouTube Music in a web browser only) or "pear" (Pear Desktop only).</summary>
+        public string Source = "auto";
+
         // Pear Desktop API server
         public string Host = "127.0.0.1";
         public int Port = 26538;
@@ -158,6 +162,8 @@ namespace PearNowPlaying
                     widgets.Add(w);
                 }
                 c.Widgets = widgets.OrderBy(w => w.Monitor).ToList();
+                c.Source = Get(map, "source", c.Source).ToLowerInvariant();
+                if (c.Source != "browser" && c.Source != "pear") c.Source = "auto";
                 c.MarginX = GetInt(map, "marginX", c.MarginX);
                 c.MarginY = GetInt(map, "marginY", c.MarginY);
                 c.Scale = Clamp(GetDouble(map, "scale", c.Scale), 0.5, 3.0);
@@ -206,6 +212,9 @@ namespace PearNowPlaying
                 var sb = new StringBuilder();
                 sb.AppendLine("# Pear Now Playing 설정 파일");
                 sb.AppendLine("# 수정한 뒤 트레이 메뉴의 '설정 다시 불러오기'를 누르면 적용됩니다.");
+                sb.AppendLine();
+                sb.AppendLine("# 곡을 가져올 곳: auto(브라우저와 Pear Desktop 중 나중에 재생을 시작한 쪽), browser(브라우저의 YouTube Music만), pear(Pear Desktop만)");
+                sb.AppendLine("source=" + Source);
                 sb.AppendLine();
                 sb.AppendLine("# Pear Desktop > 플러그인 > API 서버 의 호스트/포트와 같아야 합니다.");
                 sb.AppendLine("host=" + Host);

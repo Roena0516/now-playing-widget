@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 APP="$PWD/build/Pear Now Playing.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/module-cache
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" build/module-cache
 # --universal: Apple Silicon + Intel in one binary (for releases); otherwise this Mac's architecture only
 # --dmg: also make build/PearNowPlaying-macOS-<version>.dmg (styled window: the app next to an Applications link, see dmg-settings.py).
 #        Uses dmgbuild, installed once into build/dmg-venv.
@@ -16,11 +16,16 @@ for ARG in "$@"; do
   esac
 done
 SLICES=()
+HELPERS=()
 for ARCH in $ARCHS; do
+  # the now-playing reader that /usr/bin/perl loads for the browser source (Helper/NowPlaying.m)
+  xcrun clang -arch "$ARCH" -mmacosx-version-min=13.0 -dynamiclib -fobjc-arc -O2 -framework Foundation Helper/NowPlaying.m -o "build/libnowplaying-$ARCH.dylib"
+  HELPERS+=("build/libnowplaying-$ARCH.dylib")
   xcrun swiftc -swift-version 5 -O -target "$ARCH-apple-macosx13.0" -module-cache-path "$PWD/build/module-cache" Sources/*.swift -o "build/PearNowPlaying-$ARCH" -framework AppKit -framework CoreText -framework QuartzCore -framework Carbon
   SLICES+=("build/PearNowPlaying-$ARCH")
 done
 xcrun lipo -create "${SLICES[@]}" -output "$APP/Contents/MacOS/PearNowPlaying"
+xcrun lipo -create "${HELPERS[@]}" -output "$APP/Contents/Frameworks/libnowplaying.dylib"
 # the version lives in one place: appVersion in Sources/Models.swift
 VERSION=$(sed -n 's/^let appVersion = "\(.*\)"$/\1/p' Sources/Models.swift)
 [ -n "$VERSION" ] || { echo "appVersion not found in Sources/Models.swift" >&2; exit 1; }
@@ -39,10 +44,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>브라우저에서 재생 중인 YouTube Music 탭의 주소를 읽어서 곡을 알아내요. 다른 탭의 주소는 읽지 않아요.</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
 cp ../assets/fonts/PretendardJP-Regular.ttf ../assets/fonts/PretendardJP-Medium.ttf ../assets/fonts/PretendardJP-OFL.txt Resources/AppIcon.icns "$APP/Contents/Resources/"
+codesign --force --sign - "$APP/Contents/Frameworks/libnowplaying.dylib"
 codesign --force --sign - "$APP"
 printf 'Built: %s\n' "$APP"
 if [ "$DMG" = 1 ]; then

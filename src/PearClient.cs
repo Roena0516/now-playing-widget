@@ -16,6 +16,56 @@ namespace PearNowPlaying
 {
     internal enum PearStatus { Starting, Waiting, Authorizing, Denied, Connected }
 
+    /// <summary>Where songs come from: Pear Desktop's API server, or YouTube Music in a web browser (BrowserSource).</summary>
+    internal enum SongSource { Pear, Browser }
+
+    /// <summary>One source's player: its song and whether it plays.</summary>
+    internal sealed class PlayerState
+    {
+        public SongInfo Current = new SongInfo();
+        public bool IsPlaying;
+        readonly PositionFilter jumps = new PositionFilter();
+
+        internal enum Change { None, Song, PlayState, Position }
+
+        /// <summary>One message in Pear's WebSocket format (the browser source speaks it too); what it changed.</summary>
+        public Change Apply(IDictionary<string, object> msg)
+        {
+            object songObj;
+            msg.TryGetValue("song", out songObj);
+            var songDict = songObj as IDictionary<string, object>;
+            switch (PearClient.Str(msg, "type"))
+            {
+                case "PLAYER_INFO":
+                case "VIDEO_CHANGED":
+                    if (songDict != null) Current = PearClient.ParseSong(songDict);
+                    if (msg.ContainsKey("isPlaying")) IsPlaying = PearClient.Bool(msg, "isPlaying");
+                    else if (songDict != null) IsPlaying = !Current.IsPaused;
+                    if (msg.ContainsKey("position")) Current.Elapsed = PearClient.Num(msg, "position");
+                    jumps.Reset();
+                    return Change.Song;
+                case "PLAYER_STATE_CHANGED":
+                {
+                    bool playing = PearClient.Bool(msg, "isPlaying");
+                    bool changed = playing != IsPlaying;
+                    IsPlaying = playing;
+                    Current.IsPaused = !playing;
+                    jumps.Reset();
+                    if (msg.ContainsKey("position")) Current.Elapsed = PearClient.Num(msg, "position");
+                    return changed ? Change.PlayState : Change.None;
+                }
+                case "POSITION_CHANGED":
+                {
+                    double pos = PearClient.Num(msg, "position");
+                    if (!jumps.Accept(pos, Current.Elapsed, DateTime.UtcNow)) return Change.None;
+                    Current.Elapsed = pos;
+                    return Change.Position;
+                }
+            }
+            return Change.None;
+        }
+    }
+
     internal sealed class SongInfo
     {
         public string Title = "";
@@ -50,6 +100,8 @@ namespace PearNowPlaying
     }
 
     /// <summary>
+    /// The player whose song is shown: Pear Desktop, or YouTube Music in a web browser (BrowserSource, messages in
+    /// Pear's format), whichever started playing last (Config.Source "auto"; "pear" / "browser" use one only).
     /// Talks to the Pear Desktop "API Server" plugin:
     ///   POST /auth/{id}                -> { accessToken }   (Pear shows an allow/deny dialog the first time)
     ///   WS   /api/v1/ws?token=...      -> PLAYER_INFO / VIDEO_CHANGED / PLAYER_STATE_CHANGED / POSITION_CHANGED ...
@@ -67,37 +119,75 @@ namespace PearNowPlaying
         ClientWebSocket socket;
         Config cfg;
         string token;
+        readonly object gate = new object();
+        readonly PlayerState pear = new PlayerState(), browserPlayer = new PlayerState();
+        readonly BrowserSource browser;
+        bool browserRunning;
+        string shownKey = "";
 
+        /// <summary>Pear's connection state.</summary>
         public PearStatus Status { get; private set; }
-        public SongInfo Current { get; private set; }
-        public bool IsPlaying { get; private set; }
+        /// <summary>The source of the song shown.</summary>
+        public SongSource Source { get; private set; }
+        PlayerState Shown { get { return Source == SongSource.Browser ? browserPlayer : pear; } }
+        public SongInfo Current { get { lock (gate) return Shown.Current; } }
+        public bool IsPlaying { get { lock (gate) return Shown.IsPlaying; } }
+        /// <summary>The browser playing YouTube Music, or null.</summary>
+        public string BrowserName { get { return browserRunning ? browser.Browser : null; } }
 
+        /// <summary>Pear's connection state changed.</summary>
         public event Action<PearStatus> StatusChanged;
+        /// <summary>The status line changed (Pear's state, the browser playing, or the source shown).</summary>
+        public event Action StatusLineChanged;
         public event Action<SongInfo, bool> SongUpdated;   // (song, isNewSong)
         public event Action<bool> PlayStateChanged;         // isPlaying
         public event Action<double> PositionChanged;        // seconds
 
-        public PearClient(SynchronizationContext ui, Config cfg)
+        public PearClient(SynchronizationContext ui, Config cfg, YtmLyrics ytm)
         {
             this.ui = ui;
             this.cfg = cfg;
             http = new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromMinutes(3) };
-            Current = new SongInfo();
+            browser = new BrowserSource(ytm);
+            browser.Message = m => HandleMessage(m, SongSource.Browser);
+            browser.BrowserChanged = () => Post(RaiseLine);
         }
 
-        public void Start()
+        public void Start() { ApplySource(); }
+
+        /// <summary>Start or stop the Pear connection and the browser source as Config.Source says.</summary>
+        void ApplySource()
         {
-            cts = new CancellationTokenSource();
-            var ct = cts.Token;
-            Task.Run(() => RunLoop(ct));
+            bool usePear = cfg.Source != "browser", useBrowser = cfg.Source != "pear";
+            if (usePear && cts == null)
+            {
+                cts = new CancellationTokenSource();
+                var ct = cts.Token;
+                Task.Run(() => RunLoop(ct));
+            }
+            else if (!usePear && cts != null)
+            {
+                cts.Cancel(); cts = null;
+                Abort();
+                lock (gate) pear.IsPlaying = false;
+                SetStatus(PearStatus.Starting);
+            }
+            if (useBrowser && !browserRunning) { browserRunning = true; browser.Start(); }
+            else if (!useBrowser && browserRunning)
+            {
+                browserRunning = false; browser.Stop();
+                lock (gate) browserPlayer.IsPlaying = false;
+            }
+            Post(RaiseLine);
         }
 
-        /// <summary>Apply new config (host/port changes) and reconnect.</summary>
+        /// <summary>Apply new config (host/port or source changes) and reconnect.</summary>
         public void Reconnect(Config newCfg)
         {
             cfg = newCfg;
             Abort();
             retrySignal.Release();
+            ApplySource();
         }
 
         /// <summary>Called from the tray menu after the user was denied, to ask Pear again.</summary>
@@ -237,57 +327,63 @@ namespace PearNowPlaying
         void Handle(string text)
         {
             var msg = json.DeserializeObject(text) as IDictionary<string, object>;
-            if (msg == null) return;
-            var type = Str(msg, "type");
-            object songObj;
-            msg.TryGetValue("song", out songObj);
-            var songDict = songObj as IDictionary<string, object>;
+            if (msg != null) HandleMessage(msg, SongSource.Pear);
+        }
 
-            switch (type)
+        /// <summary>
+        /// A message from Pear (or, in the same format, from the browser source). The song shown is the source's that
+        /// started playing last: a source that starts playing (or plays a new song) takes over, and one that plays
+        /// takes over from a paused one. Same as PearClient.handle in macos/Sources/PearClient.swift.
+        /// </summary>
+        internal void HandleMessage(IDictionary<string, object> msg, SongSource origin)
+        {
+            lock (gate)
             {
-                case "PLAYER_INFO":
-                case "VIDEO_CHANGED":
+                var state = origin == SongSource.Browser ? browserPlayer : pear;
+                bool wasPlaying = state.IsPlaying;
+                string before = Key(state.Current);
+                var change = state.Apply(msg);
+                var shown = Shown;
+                bool started = state.IsPlaying && (!wasPlaying || Key(state.Current) != before);
+                if (origin != Source && state.Current.HasData && (started || !shown.Current.HasData || (!shown.IsPlaying && state.IsPlaying)))
                 {
-                    bool isNew = false;
-                    if (songDict != null)
+                    Log.Info(origin == SongSource.Browser ? "showing the song playing in " + (browser.Browser ?? "the browser") : "showing the song playing in Pear");
+                    Source = origin;
+                    change = PlayerState.Change.Song;
+                    Post(RaiseLine);
+                }
+                if (origin != Source) return;
+                switch (change)
+                {
+                    case PlayerState.Change.Song:
                     {
-                        var s = ParseSong(songDict);
-                        isNew = s.VideoId != Current.VideoId || s.Title != Current.Title;
-                        Current = s;
+                        var snapshot = state.Current;
+                        bool isNew = Key(snapshot) != shownKey;
+                        shownKey = Key(snapshot);
+                        bool playing = state.IsPlaying;
+                        Post(() => { var h = SongUpdated; if (h != null) h(snapshot, isNew); });
+                        if (!isNew) Post(() => { var h = PlayStateChanged; if (h != null) h(playing); });
+                        break;
                     }
-                    if (msg.ContainsKey("isPlaying")) IsPlaying = Bool(msg, "isPlaying");
-                    else if (songDict != null) IsPlaying = !Current.IsPaused;
-                    if (msg.ContainsKey("position")) Current.Elapsed = Num(msg, "position");
-                    jumps.Reset();
-                    var snapshot = Current;
-                    Post(() => { var h = SongUpdated; if (h != null) h(snapshot, isNew); });
-                    break;
-                }
-                case "PLAYER_STATE_CHANGED":
-                {
-                    bool playing = Bool(msg, "isPlaying");
-                    bool changed = playing != IsPlaying;
-                    IsPlaying = playing;
-                    Current.IsPaused = !playing;
-                    jumps.Reset();
-                    if (msg.ContainsKey("position")) Current.Elapsed = Num(msg, "position");
-                    if (changed) Post(() => { var h = PlayStateChanged; if (h != null) h(playing); });
-                    break;
-                }
-                case "POSITION_CHANGED":
-                {
-                    double pos = Num(msg, "position");
-                    if (!jumps.Accept(pos, Current.Elapsed, DateTime.UtcNow)) break;
-                    Current.Elapsed = pos;
-                    Post(() => { var h = PositionChanged; if (h != null) h(pos); });
-                    break;
+                    case PlayerState.Change.PlayState:
+                    {
+                        bool playing = state.IsPlaying;
+                        Post(() => { var h = PlayStateChanged; if (h != null) h(playing); });
+                        break;
+                    }
+                    case PlayerState.Change.Position:
+                    {
+                        double pos = state.Current.Elapsed;
+                        Post(() => { var h = PositionChanged; if (h != null) h(pos); });
+                        break;
+                    }
                 }
             }
         }
 
-        readonly PositionFilter jumps = new PositionFilter();
+        static string Key(SongInfo s) { return s.VideoId + "|" + s.Title; }
 
-        static SongInfo ParseSong(IDictionary<string, object> d)
+        internal static SongInfo ParseSong(IDictionary<string, object> d)
         {
             var s = new SongInfo();
             s.Title = Str(d, "title");
@@ -309,9 +405,10 @@ namespace PearNowPlaying
 
         // ---- player controls -------------------------------------------------
 
-        public void Next() { Fire("/api/v1/next"); }
-        public void Previous() { Fire("/api/v1/previous"); }
-        public void TogglePlay() { Fire("/api/v1/toggle-play"); }
+        public void Next() { if (BrowserShown) browser.Control("next"); else Fire("/api/v1/next"); }
+        public void Previous() { if (BrowserShown) browser.Control("previous"); else Fire("/api/v1/previous"); }
+        public void TogglePlay() { if (BrowserShown) browser.Control("toggle-play"); else Fire("/api/v1/toggle-play"); }
+        bool BrowserShown { get { return Source == SongSource.Browser && browserRunning; } }
 
         void Fire(string path)
         {
@@ -344,6 +441,7 @@ namespace PearNowPlaying
         /// </summary>
         public async Task<SongInfo> GetNextSong(CancellationToken ct)
         {
+            if (Source == SongSource.Browser) return browserRunning ? await browser.NextSong(ct) : null;
             if (string.IsNullOrEmpty(token)) return null;
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
             using (var req = new HttpRequestMessage(HttpMethod.Get, cfg.BaseHttp + "/api/v1/queue/next"))
@@ -389,24 +487,54 @@ namespace PearNowPlaying
         {
             if (Status == s) return;
             Status = s;
-            Post(() => { var h = StatusChanged; if (h != null) h(s); });
+            // Pear is gone: its song no longer plays (so a browser playing takes over)
+            if (s != PearStatus.Connected) lock (gate) pear.IsPlaying = false;
+            Post(() => { var h = StatusChanged; if (h != null) h(s); RaiseLine(); });
         }
+
+        void RaiseLine() { var h = StatusLineChanged; if (h != null) h(); }
+
+        /// <summary>
+        /// The status line: the browser while its song is shown (or Pear isn't connected), else Pear's state. Same
+        /// wording as the macOS version's PearClient.status.
+        /// </summary>
+        public string StatusLine
+        {
+            get
+            {
+                var name = BrowserName;
+                if (name != null && (Source == SongSource.Browser || Status != PearStatus.Connected)) return "브라우저 YouTube Music에 연결됨 (" + name + ")";
+                if (cfg.Source == "browser") return "브라우저의 YouTube Music 기다리는 중";
+                if (cfg.Source == "auto" && Status == PearStatus.Waiting) return "YouTube Music 기다리는 중 (브라우저, Pear Desktop)";
+                switch (Status)
+                {
+                    case PearStatus.Waiting: return "Pear Desktop 기다리는 중 (API 서버 확인)";
+                    case PearStatus.Authorizing: return "Pear Desktop에서 허용 대기 중";
+                    case PearStatus.Denied: return "Pear Desktop에서 연결 거부됨";
+                    case PearStatus.Connected: return "Pear Desktop에 연결됨";
+                    default: return "연결 준비 중";
+                }
+            }
+        }
+
+        /// <summary>Whether a player is connected (the card says "재생 중인 곡이 없어요" then, not the connection state).</summary>
+        public bool IsConnected { get { return BrowserName != null || Status == PearStatus.Connected; } }
 
         void Post(Action a) { ui.Post(_ => a(), null); }
 
-        static string Str(IDictionary<string, object> d, string k)
+        internal static string Str(IDictionary<string, object> d, string k)
         {
             object v; return d.TryGetValue(k, out v) && v != null && !(v is IDictionary) ? Convert.ToString(v, CultureInfo.InvariantCulture) : "";
         }
 
-        static double Num(IDictionary<string, object> d, string k)
+        internal static double Num(IDictionary<string, object> d, string k)
         {
             object v;
             if (!d.TryGetValue(k, out v) || v == null) return 0;
             try { return Convert.ToDouble(v, CultureInfo.InvariantCulture); } catch { return 0; }
         }
 
-        static bool Bool(IDictionary<string, object> d, string k)
+        internal static bool Bool(IDictionary<string, object> d, string k)
         {
             object v; return d.TryGetValue(k, out v) && v is bool && (bool)v;
         }
@@ -415,6 +543,7 @@ namespace PearNowPlaying
         {
             try { if (cts != null) cts.Cancel(); } catch { }
             Abort();
+            try { browser.Dispose(); } catch { }
             http.Dispose();
         }
     }

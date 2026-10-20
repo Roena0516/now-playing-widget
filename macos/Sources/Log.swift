@@ -5,6 +5,8 @@ import Foundation
 /// the Pear connection and errors go here. Tokens and lyrics text are never written.
 enum Log {
     static var file = Settings.directory.appendingPathComponent("error.log")
+    /// Also print each line (the --browser-probe run).
+    static var echo = false
     private static let stamp: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd HH:mm:ss "; return f
     }()
@@ -16,6 +18,7 @@ enum Log {
     }
 
     static func write(_ message: String) {
+        if echo { print(stamp.string(from: Date()) + message); fflush(stdout) }
         do {
             let directory = file.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

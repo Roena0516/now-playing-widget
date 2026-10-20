@@ -26,7 +26,7 @@ namespace PearNowPlaying
         readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, albumOnlyItem, retryLyricsItem, lyricsInfoItem, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
-        readonly ToolStripMenuItem updateItem;
+        readonly ToolStripMenuItem updateItem, sourceMenu, retryAuthItem;
         UpdateInfo update;          // a newer release found on GitHub
         string announcedUpdate;     // told the user about this version already
         bool installing;
@@ -117,6 +117,14 @@ namespace PearNowPlaying
             widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, titleMenu, displayMenu, placeMenu, sizeMenu, transparencyMenu, new ToolStripSeparator(), moveItem });
             var lyricsMenu = new ToolStripMenuItem("가사");
             lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, albumOnlyItem, retryLyricsItem, offsetMenu });
+            // where songs come from (same items as the macOS version's 재생 앱 menu)
+            sourceMenu = new ToolStripMenuItem("재생 앱");
+            foreach (var pair in new[] { Tuple.Create("auto", "자동 (브라우저, Pear Desktop)"), Tuple.Create("browser", "브라우저"), Tuple.Create("pear", "Pear Desktop") })
+            {
+                var v = pair.Item1;
+                sourceMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item2, null, (s, e) => SetSource(v)) { Tag = v });
+            }
+            retryAuthItem = new ToolStripMenuItem("Pear 연결 권한 다시 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); });
 
             // at the top, so a new version ("업데이트 설치 (x.y.z)") is seen first
             updateItem = new ToolStripMenuItem("업데이트 확인", null, (s, e) => UpdateClicked());
@@ -133,8 +141,9 @@ namespace PearNowPlaying
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(widgetMenu);
             menu.Items.Add(lyricsMenu);
+            menu.Items.Add(sourceMenu);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("Pear 연결 권한 다시 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); }));
+            menu.Items.Add(retryAuthItem);
             menu.Items.Add(new ToolStripMenuItem("설정 파일 열기", null, (s, e) => OpenFile(Config.FilePath)));
             menu.Items.Add(new ToolStripMenuItem("설정 다시 불러오기", null, (s, e) => ReloadConfig()));
             menu.Items.Add(new ToolStripMenuItem("오류 기록 열기", null, (s, e) => OpenFile(Config.LogPath)));
@@ -162,8 +171,9 @@ namespace PearNowPlaying
             cardFrameTimer.Tick += (s, e) => CardFrameTick();
             infoTimer.Tick += (s, e) => EndInfo();
 
-            pear = new PearClient(ui, cfg);
+            pear = new PearClient(ui, cfg, lyricsProvider.Ytm);
             pear.StatusChanged += OnStatus;
+            pear.StatusLineChanged += OnStatusLine;
             pear.SongUpdated += OnSong;
             pear.PlayStateChanged += OnPlayState;
             pear.PositionChanged += OnPosition;
@@ -173,10 +183,14 @@ namespace PearNowPlaying
 
         // ---- pear events -----------------------------------------------------
 
+        void OnStatusLine()
+        {
+            statusItem.Text = pear.StatusLine;
+            tray.Text = Truncate("Pear Now Playing - " + pear.StatusLine, 63);
+        }
+
         void OnStatus(PearStatus s)
         {
-            statusItem.Text = StatusText(s);
-            tray.Text = Truncate("Pear Now Playing - " + StatusText(s), 63);
             switch (s)
             {
                 case PearStatus.Authorizing:
@@ -194,6 +208,7 @@ namespace PearNowPlaying
                     }
                     break;
                 case PearStatus.Waiting:
+                    if (pear.Source != SongSource.Pear) break;   // the browser's song is shown
                     clock.Stop();
                     lyricsWin.Dismiss();
                     break;
@@ -650,7 +665,7 @@ namespace PearNowPlaying
             var song = pear.Current;
             if (!song.HasData)
             {
-                ShowInfo(pear.Status == PearStatus.Connected ? "재생 중인 곡이 없어요" : StatusText(pear.Status));
+                ShowInfo(pear.IsConnected ? "재생 중인 곡이 없어요" : pear.StatusLine);
                 return;
             }
             lastKind = kind;
@@ -1155,7 +1170,7 @@ namespace PearNowPlaying
             RegisterHotkeys();
             lyricsProvider.BaseUrl = (cfg.LyricsServer ?? "https://lrclib.net").TrimEnd('/');
             ApplyLyricsSources();
-            if (old.Host != cfg.Host || old.Port != cfg.Port || old.Https != cfg.Https) pear.Reconnect(cfg);
+            if (old.Host != cfg.Host || old.Port != cfg.Port || old.Https != cfg.Https || old.Source != cfg.Source) pear.Reconnect(cfg);
             RebuildWidgets();
             TickLyrics(true);
             ShowNow(CurrentKind());
@@ -1186,6 +1201,8 @@ namespace PearNowPlaying
             foreach (ToolStripMenuItem it in titleMenu.DropDownItems) it.Checked = (bool)it.Tag == cfg.VideoTitle;
             BuildWidgetMenus();
             foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
+            foreach (ToolStripMenuItem it in sourceMenu.DropDownItems) it.Checked = (string)it.Tag == cfg.Source;
+            retryAuthItem.Visible = cfg.Source != "browser";
         }
 
         static void OpenFile(string path)
@@ -1203,16 +1220,13 @@ namespace PearNowPlaying
             try { tray.ShowBalloonTip(4000, "Pear Now Playing", text, ToolTipIcon.Info); } catch { }
         }
 
-        static string StatusText(PearStatus s)
+        void SetSource(string value)
         {
-            switch (s)
-            {
-                case PearStatus.Waiting: return "Pear Desktop 기다리는 중 (API 서버 확인)";
-                case PearStatus.Authorizing: return "Pear Desktop에서 허용 대기 중";
-                case PearStatus.Denied: return "Pear Desktop에서 연결 거부됨";
-                case PearStatus.Connected: return "Pear Desktop에 연결됨";
-                default: return "연결 준비 중";
-            }
+            if (cfg.Source == value) return;
+            cfg.Source = value;
+            cfg.Save();
+            pear.Reconnect(cfg);
+            ShowInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시해요" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시해요" : "브라우저와 Pear Desktop 중 재생 중인 곡을 표시해요");
         }
 
         static string PositionName(OverlayPosition p)

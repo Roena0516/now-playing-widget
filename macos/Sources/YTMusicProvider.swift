@@ -7,6 +7,10 @@ struct TrackInfo {
     /// MUSIC_VIDEO_TYPE_ATV (official audio), _OMV (official video), _UGC …
     var videoType = ""
     var duration: Double = 0
+    /// The largest cover / thumbnail of the queue entry (the browser source's album art).
+    var thumbnail = ""
+    /// A playlist entry's other version (the official audio of a music video entry), from its watch parameters.
+    var counterpartId = ""
     var lines: [LyricLine] = []
     /// YouTube Music has lyrics for it, but without times.
     var plainOnly = false
@@ -144,8 +148,118 @@ struct VideoDescription {
         }
         info.duration = parseClock(runs(path(r, "lengthText")))
         info.videoType = find("musicVideoType", in: r) as? String ?? ""
+        info.thumbnail = coverURL(path(path(r, "thumbnail"), "thumbnails") as? [Any] ?? [])
         let artist = findWhere("browseEndpoint", in: next) { pageType($0) == "MUSIC_PAGE_TYPE_ARTIST" }
         info.artistId = path(artist, "browseId") as? String ?? ""
+    }
+
+    /// The song after `videoId` in a playlist (an album, a playlist; the browser source's guess at the next song,
+    /// as the browser's own queue can't be read). Nil when it is the last one or not in the list. The list is
+    /// remembered for this session, so going through an album asks once.
+    func queueAfter(_ videoId: String, playlist: String) async throws -> TrackInfo? {
+        let entries = try await playlistEntries(videoId, playlist: playlist, ending: true)
+        guard let index = entries.firstIndex(where: { $0.videoId == videoId || $0.counterpartId == videoId }), index + 1 < entries.count else { return nil }
+        // the web player plays an album's official audio where the list names its music video: the next song in
+        // the same kind (its details from the queue entry YouTube Music gives for it, as for the song playing)
+        let next = entries[index + 1]
+        let nextId = entries[index].counterpartId == videoId && !next.counterpartId.isEmpty ? next.counterpartId : next.videoId
+        return try await lookup(nextId, withLyrics: false)
+    }
+    /// The songs of a playlist as YouTube Music's queue panel lists them around `videoId`. Asked again when the
+    /// video isn't in the remembered list (or, with `ending`, is its last entry: the panel shows a window of it).
+    func playlistEntries(_ videoId: String, playlist: String, ending: Bool = false) async throws -> [TrackInfo] {
+        if let known = queues[playlist], (ending ? known.dropLast() : known[...]).contains(where: { $0.videoId == videoId || $0.counterpartId == videoId }) { return known }
+        let next = try await post(musicBase.trimmed("/") + "/youtubei/v1/next?prettyPrint=false",
+                                  body: ["videoId": videoId, "playlistId": playlist, "context": ["client": ["clientName": "WEB_REMIX", "clientVersion": Self.webRemixVersion]]], label: "queue")
+        let entries = Self.queueEntries(next)
+        remember(&queues, playlist, entries)
+        return entries
+    }
+    private var queues: [String: [TrackInfo]] = [:]
+
+    /// The queue panel's songs in order (the album version of each, not its music video counterpart).
+    static func queueEntries(_ next: Any) -> [TrackInfo] {
+        var found: [TrackInfo] = []
+        for item in path(find("playlistPanelRenderer", in: next), "contents") as? [Any] ?? [] {
+            guard let r = path(item, "playlistPanelVideoRenderer") ?? path(item, "playlistPanelVideoWrapperRenderer", "primaryRenderer", "playlistPanelVideoRenderer"),
+                  let id = path(r, "videoId") as? String else { continue }
+            var info = TrackInfo(videoId: id)
+            readQueueEntry(["r": ["playlistPanelVideoRenderer": r]], into: &info)
+            info.counterpartId = counterpart(path(r, "navigationEndpoint", "watchEndpoint", "params") as? String ?? "") ?? ""
+            found.append(info)
+        }
+        return found
+    }
+
+    /// The video ID inside a playlist entry's watch parameters (base64 protobuf; a length byte 11 and the ID):
+    /// an album entry that is a music video carries its official audio this way.
+    static func counterpart(_ params: String) -> String? {
+        var b64 = (params.removingPercentEncoding ?? params).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        b64 += String(repeating: "=", count: (4 - b64.count % 4) % 4)
+        guard let data = Data(base64Encoded: b64) else { return nil }
+        let bytes = [UInt8](data)
+        for i in bytes.indices where bytes[i] == 11 && i + 11 < bytes.count {
+            let id = String(decoding: bytes[(i + 1)...(i + 11)], as: UTF8.self)
+            if BrowserSource.isVideoId(id) { return id }
+        }
+        return nil
+    }
+
+    /// A video for a song known only by its title, artist and length (the browser source when the tab's address
+    /// can't be read): YouTube's search for "artist title", picked by pickVideo. Nil when none is that sure.
+    func findVideo(title: String, artist: String, duration: Double) async throws -> String? {
+        guard !title.trimmed.isEmpty, duration > 0 else { return nil }
+        let key = title + "|" + artist + "|" + String(Int(duration.rounded()))
+        if let known = searches[key] { return known }
+        let query = (artist.trimmed.isEmpty ? "" : artist + " ") + title
+        let body: [String: Any] = ["query": query, "context": ["client": ["clientName": "WEB", "clientVersion": Self.webVersion, "hl": "ja"]]]
+        let found = Self.pickVideo(try await post(youtubeBase.trimmed("/") + "/youtubei/v1/search?prettyPrint=false", body: body, label: "search"),
+                                   title: title, artist: artist, duration: duration)
+        remember(&searches, key, found)
+        log("INFO YouTube search for \(artist) - \(title) (\(Int(duration))s): \(found ?? "no video of that length and title")")
+        return found
+    }
+    private var searches: [String: String?] = [:]
+
+    /// The search result that is this song, in order: as long as the song (±2 s) and titled exactly like it (a
+    /// cover's own upload); or from the artist's channel, or an official artist / "- Topic" channel, and naming the
+    /// song ("YOASOBI「ハルジオン」Official Music Video" for "ハルジオン (Halzion)"). Failing those, the one official
+    /// result within a second of the length: the browser may name the artist and song in the player's language
+    /// ("요아소비", "Idol"), which the video's title doesn't use. Fan uploads of the same length are never taken.
+    /// Same as YtmLyrics.PickVideo in src/YtmLyrics.cs.
+    static func pickVideo(_ response: Any, title: String, artist: String, duration: Double) -> String? {
+        let wanted = CoverLyrics.norm(title)
+        let names = CoverLyrics.titleNames(title, artist: artist).map(CoverLyrics.norm).filter { $0.count >= 2 }
+        let singer = CoverLyrics.norm(artist)
+        var official: [String] = []
+        for section in path(find("sectionListRenderer", in: response), "contents") as? [Any] ?? [] {
+            for item in path(section, "itemSectionRenderer", "contents") as? [Any] ?? [] {
+                guard let r = path(item, "videoRenderer"), let id = path(r, "videoId") as? String else { continue }
+                let length = parseClock(runs(path(r, "lengthText")))
+                guard length > 0, abs(length - duration) <= 2 else { continue }
+                let t = CoverLyrics.norm(runs(path(r, "title")))
+                if !wanted.isEmpty && t == wanted { return id }
+                let owner = runs(path(r, "ownerText"))
+                let ownerName = CoverLyrics.norm(owner.replacingOccurrences(of: " - Topic", with: ""))
+                let byArtist = !singer.isEmpty && !ownerName.isEmpty && (ownerName.contains(singer) || singer.contains(ownerName))
+                let badges = path(r, "ownerBadges") as? [Any] ?? []
+                let isOfficial = owner.hasSuffix(" - Topic") || badges.contains { path($0, "metadataBadgeRenderer", "style") as? String == "BADGE_STYLE_TYPE_VERIFIED_ARTIST" }
+                if (byArtist || isOfficial) && names.contains(where: { t.contains($0) }) { return id }
+                if isOfficial && abs(length - duration) <= 1 { official.append(id) }
+            }
+        }
+        return official.count == 1 ? official[0] : nil
+    }
+
+    /// The largest of a renderer's thumbnails; album covers (lh3.googleusercontent.com, "=w60-h60-…") are asked
+    /// for at 544 px, the size Pear's album art comes in.
+    static func coverURL(_ thumbnails: [Any]) -> String {
+        let best = thumbnails.max { ((path($0, "width") as? NSNumber)?.intValue ?? 0) < ((path($1, "width") as? NSNumber)?.intValue ?? 0) }
+        guard let url = path(best, "url") as? String, url.hasPrefix("https://") else { return "" }
+        if url.contains("googleusercontent.com/"), let range = url.range(of: #"=w\d+-h\d+"#, options: .regularExpression) {
+            return url.replacingCharacters(in: range, with: "=w544-h544")
+        }
+        return url
     }
 
     // ---- official audio track for a music video (MV -> artist page -> single/album -> track) -------------

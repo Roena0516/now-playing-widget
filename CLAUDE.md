@@ -45,7 +45,8 @@ Windows:
 | 파일 | 내용 |
 |---|---|
 | `src/Program.cs` | 진입점, 단일 인스턴스 확인, 버전 정보 |
-| `src/PearClient.cs` | Pear API 서버 플러그인과 통신합니다: `POST /auth/{id}`로 토큰 발급(처음 한 번은 Pear가 허용 창을 띄웁니다), WebSocket `/api/v1/ws`, `POST /api/v1/next`·`previous`·`toggle-play`, `GET /api/v1/queue/next`(다음 곡). `SongInfo.MediaType`은 AUDIO / ORIGINAL_MUSIC_VIDEO / USER_GENERATED_CONTENT / PODCAST_EPISODE / OTHER_VIDEO 중 하나이며, 재생목록(큐)에서 가져온 곡은 UNKNOWN입니다. |
+| `src/BrowserSource.cs` | 브라우저의 YouTube Music에서 곡을 가져옵니다(아래 "브라우저 연동"). SMTC와 UI Automation을 리플렉션으로 부르는 래퍼(`WinRt`, `Smtc`, `BrowserWindows`), `--browser-probe` 모드(`BrowserProbe`)도 이 파일에 있습니다. 맥은 `BrowserSource.swift`와 `macos/Helper/NowPlaying.m`입니다. |
+| `src/PearClient.cs` | 보여 줄 곡의 소스(Pear 또는 브라우저)를 고르고(`HandleMessage`, `PlayerState`), Pear API 서버 플러그인과 통신합니다: `POST /auth/{id}`로 토큰 발급(처음 한 번은 Pear가 허용 창을 띄웁니다), WebSocket `/api/v1/ws`, `POST /api/v1/next`·`previous`·`toggle-play`, `GET /api/v1/queue/next`(다음 곡). `SongInfo.MediaType`은 AUDIO / ORIGINAL_MUSIC_VIDEO / USER_GENERATED_CONTENT / PODCAST_EPISODE / OTHER_VIDEO 중 하나이며, 재생목록(큐)에서 가져온 곡은 UNKNOWN입니다. |
 | `src/OverlayWindow.cs` | 클릭이 통과하는 항상 위 레이어드 창(`UpdateLayeredWindow`), 페이드·이동 애니메이션. `Interactive`를 켜면 클릭 통과(`WS_EX_TRANSPARENT`)를 끄고 끌기 이벤트를 보냅니다 |
 | `src/Placement.cs` | 끌어서 놓은 위젯의 모니터와 위치(`Custom`) 계산(순수 함수). 맥은 `NativePlacement.fromDrop` |
 | `src/CardRenderer.cs` | 곡 카드 그리기, 긴 제목 마퀴 |
@@ -57,6 +58,18 @@ Windows:
 | `src/TrayApp.cs` | 트레이 메뉴(위젯·가사 하위 메뉴, 위젯별 위치·크기·투명도), 곡 카드·정보 카드의 표시 시점, 위젯 끌어서 옮기기 모드, 가사 재시도 루프, 다음 곡 미리 받기 |
 | `src/Config.cs` | config.ini 읽기/쓰기, 예전 ETS2NowPlaying 설정 이전(`MigrateOldConfig`), 토큰 저장 |
 | `src/Hotkeys.cs`, `src/Native.cs`, `src/Theme.cs` | 전역 단축키, Win32 P/Invoke, 색 토큰과 폰트 로딩 |
+
+## 브라우저 연동 (`BrowserSource`)
+
+웹 브라우저에서 재생하는 YouTube Music도 곡 소스로 씁니다(사용자 방침, 2026-10-20: 브라우저를 기본으로, Pear는 보조로 둡니다). 브라우저 확장 프로그램은 설치하지 않는 방식으로 정했습니다.
+
+- 설정 `source`(Windows config.ini, 맥 config.json)는 `auto`(기본), `browser`, `pear` 중 하나이며, 메뉴의 "재생 앱"에서 바꿉니다. `auto`에서는 두 소스를 모두 받고, 나중에 재생을 시작한 쪽의 곡을 보여 줍니다(`PearClient.HandleMessage`/`handle`): 재생을 시작하거나 새 곡을 재생한 소스가 넘겨받고, 보여 주던 소스가 일시정지했거나 곡이 없을 때는 재생 중인 소스가 넘겨받습니다. 소스마다 곡과 위치(`PlayerState`, 뒤로 가는 위치의 보류 포함)를 따로 둡니다. 브라우저 소스는 Pear의 WebSocket 메시지 형식(`VIDEO_CHANGED`, `PLAYER_STATE_CHANGED`, `POSITION_CHANGED`)으로 보내므로 가사 찾기, 미리 받기, 카드 표시는 Pear일 때와 같은 코드를 씁니다.
+- 곡 정보: 탭에서 videoId를 알면 YouTube Music `next`(가사 조회의 첫 요청과 같고, 메모됩니다)의 재생목록 항목으로 제목, 아티스트, 길이, 미디어 타입(`musicVideoType` → Pear의 MediaType), 앨범아트(`TrackInfo.Thumbnail`, 앨범 표지는 544px로 요청)를 채웁니다. 브라우저가 알려 주는 제목이 항목 제목의 한쪽 반이면(「アイドル - Idol」의 "Idol") Pear처럼 그 제목을 씁니다. 아티스트는 YouTube Music 쪽을 씁니다. 브라우저가 주는 아티스트는 YouTube Music 화면 언어로 바뀌어 있기 때문입니다(실제 사례: "요아소비").
+- 맥: macOS의 "지금 재생 중" 정보(MediaRemote)를 `/usr/bin/perl`이 불러오는 `libnowplaying.dylib`(`macos/Helper/NowPlaying.m`, `build.sh`가 `Contents/Frameworks`에 넣음)이 1초마다 JSON 한 줄로 알려 줍니다. macOS 15.4부터 MediaRemote는 Apple이 허용한 프로세스에만 답하고, 앱이 직접 부르면 빈 값이 옵니다(이 Mac, macOS 26.4에서 확인). 라이브러리는 격리 표시를 피하려고 `~/Library/Application Support/PearNowPlaying-macOS/helper/`에 복사해서 씁니다. 재생 중인 앱이 브라우저일 때만 `osascript`로 그 브라우저의 `music.youtube.com` 탭 주소와 제목을 읽습니다. 걸러내는 조건이 스크립트 안(`whose URL starts with`)에 있어서 다른 탭의 주소는 브라우저 밖으로 나오지 않습니다. 처음 읽을 때 "자동화" 권한을 묻습니다(`NSAppleEventsUsageDescription`). `NSAppleScript`는 쓰지 않습니다. 백그라운드 스레드에서 실행하면 브라우저의 응답을 받지 못하고 멈췄고, 메인 스레드에서는 응답을 기다리는 0.2–0.4초 동안 위젯이 멈추기 때문입니다. 스크립트의 구분자는 tell 블록 밖에서 `character id 9`로 정합니다. tell 블록 안의 `tab`은 Chrome의 탭 클래스로 해석되어 "tab"이라는 글자가 들어갑니다. 재생/일시정지, 다음 곡, 이전 곡은 MediaRemote 명령으로 보냅니다. Chromium 계열(Chrome, Edge, Brave, Arc, Vivaldi, Opera, Whale)과 Safari의 탭을 읽고, Firefox처럼 탭을 읽을 수 없거나 권한을 거부한 브라우저는 제목으로 찾습니다.
+- Windows: SMTC(`Windows.Media.Control`, Windows 10 1809 이상)를 리플렉션으로 읽습니다. 빌드에 Windows.winmd가 없어서(Mono 참조 어셈블리로도 빌드하므로) PowerShell 5.1과 같은 방식으로 실행할 때 타입을 이름으로 찾습니다. 재생 정보의 위치는 페이지가 위치를 알릴 때만 바뀝니다. YouTube Music 웹은 재생 시작과 탐색 때만 `setPositionState`를 부르므로(2026-10-20 Chrome에서 측정), 마지막 위치에 흐른 시간을 더해서 씁니다. 맥의 MediaRemote도 같습니다. 탭은 UI Automation(`System.Windows.Automation`, 실행할 때 불러옴)으로 읽습니다. 창 제목에 "YouTube Music"이 있는 창(YouTube Music 탭이 앞에 있는 창)에서만 주소창을 읽고(제목이 바뀐 뒤 5초 동안은 매번 읽음), 그 밖에는 탭 줄의 탭 이름만 읽습니다. 탭 이름에는 원제가 있어서("アイドル - Idol | YouTube Music") 검색에 씁니다. 재생 제어는 SMTC 명령으로 보냅니다. 2026-10-20 기준으로 Windows 쪽은 빌드와 Mono 테스트만 했고, 실제 실행은 사용자가 Windows를 쓸 수 있는 2026-10-23에 확인할 예정입니다. 확인할 때는 `PearNowPlaying.exe --browser-probe [초]`를 실행합니다. SMTC 값, 브라우저 창 제목, 주소창과 탭 이름, 보내는 메시지를 콘솔과 `%AppData%\PearNowPlaying\browser-probe.log`에 남깁니다. 맥은 `--browser-probe [초]`로 같은 내용을 출력합니다.
+- 다른 사이트와 구분: 브라우저에 YouTube Music 탭이 없으면 다른 사이트의 영상으로 보고 무시합니다. 탭 제목과 브라우저가 알려 주는 제목이 3초 넘게 다르면, 앨범 정보가 있는 곡은 YouTube Music 곡으로 보고 제목으로 찾고, 앨범 정보가 없으면 다른 사이트로 봅니다. 탭이 다른 곡의 주소와 제목을 그대로 둔 채 이 곡을 재생한 적이 있습니다(2026-10-20 맥, 앨범 링크로 연 탭의 주소창은 "Epilogue", 재생은 「ハルジオン」). 주소의 영상을 조회한 제목이 재생 중인 곡과 다를 때도(주소를 곡이 바뀌기 전에 읽은 경우) 3초 동안 기다린 뒤 제목으로 찾습니다.
+- 제목으로 찾기(`videoByTitle`/`VideoByTitle`): 탭의 재생목록에서 제목과 길이(±3초)가 맞는 항목을 찾고, 없으면 YouTube 검색(`www.youtube.com/youtubei/v1/search`, WEB, `hl=ja`)의 결과를 `PickVideo`/`pickVideo`로 고릅니다. 길이가 ±2초 안이고 제목이 똑같은 결과(커버 영상 자체), 아티스트 채널이거나 공식 아티스트 배지(`BADGE_STYLE_TYPE_VERIFIED_ARTIST`) 또는 "- Topic" 채널이면서 제목에 곡 이름(`TitleNames`)이 들어 있는 결과를 차례로 받습니다. 그것도 없으면 길이가 ±1초인 공식 채널 결과가 하나뿐일 때만 받습니다(현지화된 "요아소비 Idol"만 알 때). 같은 길이의 팬 업로드는 받지 않습니다(실제 사례: 3:46인 「アイドル」 영상이 공식 MV 말고도 있었음). 익명 YouTube Music 검색은 한국에서 팟캐스트만 돌려줘서 쓰지 않습니다. 끝내 못 찾으면 videoId 없이(미디어 타입 UNKNOWN) 제목과 아티스트로만 가사를 찾습니다.
+- 다음 곡(`NextSong`/`nextSong`): 탭 주소의 `list`(앨범, 재생목록)로 YouTube Music `next`를 불러 재생목록 순서에서 다음 곡을 고릅니다(`QueueAfter`, 목록은 메모). 익명 응답에서는 앨범 항목이 뮤직비디오 ID로 오고(이 지역에서는 "Video blocked in country", 제목 없음) 실제로 재생되는 공식 음원 ID는 항목의 `watchEndpoint.params`(base64 protobuf) 안에 있어서 `Counterpart`로 꺼냅니다. 브라우저의 실제 재생 대기열은 읽을 수 없으므로, 셔플이나 라디오에서는 추정이 틀립니다. 한 번 틀린 목록은 다시 맞을 때까지 추정만 하고 미리 받기는 하지 않습니다(사용자는 셔플을 자주 씁니다). 라디오(`RDAMVM…`)는 익명으로 부르면 곡 하나만 옵니다.
 
 ## 가사를 찾는 순서 (`LyricsProvider.Find`)
 
@@ -143,6 +156,7 @@ Windows:
 
 - **Google 계정 쿠키나 Pear 로그인 세션은 사용하지 않습니다.** Pear 토큰은 로컬 Pear API 서버 외에는 어디에도 보내지 않습니다. YouTube Music 요청은 모두 익명으로 보냅니다.
 - YouTube 오디오를 다운로드하거나 재전송하는 기능, 자막을 수집하는 기능 같은 것은 만들지 않습니다.
+- 브라우저에서는 YouTube Music 탭의 주소와 제목만 읽습니다. 다른 탭의 주소나 방문 기록, 쿠키는 읽지 않고, 탭 주소를 로그에 남기지 않습니다(videoId만 남깁니다).
 - 새로운 외부 서버와 통신하게 되면 README의 "통신하는 곳" 항목에 추가합니다.
 - 외부 요청은 줄이는 방향으로 작업합니다. LRCLIB에 대해서는 위의 요청 규칙(간격, 1분 한도, `Retry-After`)을 지키는 범위에서 다시 묻는 것을 허용합니다(사용자 방침, 2026-10-20). 429를 받지 않는 것이 기준입니다.
 - LRCLIB의 503은 사용자별 요청 제한이 아니라 서버 전체의 과부하 신호입니다(서버 소스 `server/src/state.rs`: DB 작업을 동시에 32개까지만 받고, 250ms 안에 자리가 나지 않으면 503). `/api/get`과 `/api/search` 응답은 서버가 24시간 캐시하며, 캐시에 있는 요청은 이 제한을 거치지 않습니다. 따라서 503은 클라이언트에서 없앨 수 없습니다. API 문서는 503에 `Retry-After`를 지켜서 다시 묻도록 안내합니다. `/api/get`은 아티스트 이름이 반드시 있어야 하므로, 원곡자를 모르면 검색만 사용합니다.

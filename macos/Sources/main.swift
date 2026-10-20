@@ -214,8 +214,13 @@ import CoreText
         }
         submenu(lyrics, "가사 타이밍", timing)
         submenu(menu, "가사", lyrics)
+        let sources = NSMenu()
+        for (value, label) in [("auto", "자동 (브라우저, Pear Desktop)"), ("browser", "브라우저"), ("pear", "Pear Desktop")] {
+            add(sources, label, #selector(songSource(_:)), state: client.settings.source == value, represented: value)
+        }
+        submenu(menu, "재생 앱", sources)
         menu.addItem(.separator())
-        add(menu, "Pear 연결 권한 다시 요청", #selector(retry))
+        if client.settings.source != "browser" { add(menu, "Pear 연결 권한 다시 요청", #selector(retry)) }
         add(menu, "설정 파일 열기", #selector(openConfig))
         add(menu, "설정 다시 불러오기", #selector(reload))
         add(menu, "오류 기록 열기", #selector(openLog))
@@ -285,6 +290,12 @@ import CoreText
     @objc func size(_ sender: NSMenuItem) { setWidget(sender) { $0.scale = $1 } }
     @objc func transparency(_ sender: NSMenuItem) { setWidget(sender) { $0.transparency = $1 } }
     @objc func offset(_ sender: NSMenuItem) { client.settings.lyricsOffsetMs = Double(sender.representedObject as! Int); save() }
+    @objc func songSource(_ sender: NSMenuItem) {
+        let value = sender.representedObject as! String
+        guard client.settings.source != value else { return }
+        client.settings.source = value; client.settings.save(); client.start(); updateMenu()
+        overlay.showInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시해요" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시해요" : "브라우저와 Pear Desktop 중 재생 중인 곡을 표시해요")
+    }
     @objc func previous() { client.control("previous") }
     @objc func togglePlay() { client.control("toggle-play") }
     @objc func next() { client.control("next") }
@@ -386,6 +397,38 @@ if CommandLine.arguments.contains("--ytmusic-tests") {
             print("UPDATED to \(info.version)"); exit(0)
         } catch { print("FAILED: \(error.localizedDescription)"); exit(1) }
     }
+    RunLoop.main.run()
+} else if let index = CommandLine.arguments.firstIndex(of: "--browser-probe") {
+    // what the browser source sends, for a number of seconds (default 60): for trying it against a real browser
+    let seconds = Double(CommandLine.arguments.dropFirst(index + 1).first ?? "") ?? 60
+    Log.echo = true
+    let ytm = YTMusicProvider(log: { print($0) })
+    let source = BrowserSource(ytm: ytm)
+    func line(_ text: String) { print(ISO8601DateFormatter().string(from: Date()), text); fflush(stdout) }
+    source.onMessage = { message in
+        let data = (try? JSONSerialization.data(withJSONObject: message, options: [.sortedKeys])) ?? Data()
+        line(String(decoding: data, as: UTF8.self))
+    }
+    source.onBrowser = { line("browser: \($0 ?? "none")") }
+    source.onNotice = { line("notice: \($0)") }
+    source.start()
+    let forward = source.reader.onInfo
+    source.reader.onInfo = { info in
+        let app = NSRunningApplication(processIdentifier: info.pid)?.bundleIdentifier ?? "?"
+        line("now playing: \(app) \(info.playing ? "playing" : "paused") \(Int(info.position(at: Date())))/\(Int(info.duration)) \(info.artist) - \(info.title)")
+        forward?(info)
+    }
+    Task {
+        try? await Task.sleep(for: .seconds(15))
+        line("playing \(source.videoId) in \(source.playlist.isEmpty ? "no playlist" : source.playlist)")
+        if !source.playlist.isEmpty, let entries = try? await ytm.playlistEntries(source.videoId, playlist: source.playlist) {
+            for e in entries { line("  entry \(e.videoId) / \(e.counterpartId) \(e.title)") }
+        }
+        do {
+            if let next = try await source.nextSong() { line("next: \(next.videoId) \(next.artist) - \(next.title) [\(next.mediaType)]") } else { line("next: none") }
+        } catch { line("next: failed: \(error)") }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { source.stop(); exit(0) }
     RunLoop.main.run()
 } else if CommandLine.arguments.contains("--self-test") {
     runSelfTests()
