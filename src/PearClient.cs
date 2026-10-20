@@ -171,6 +171,7 @@ namespace PearNowPlaying
         void ApplySource()
         {
             bool usePear = cfg.Source != "browser", useBrowser = cfg.Source != "pear";
+            if (pearSilenceWatch == null) pearSilenceWatch = new Timer(_ => { try { CheckPearSilence(DateTime.UtcNow); } catch (Exception ex) { Log.Error("pear silence", ex); } }, null, 500, 500);
             if (usePear && cts == null)
             {
                 cts = new CancellationTokenSource();
@@ -384,6 +385,7 @@ namespace PearNowPlaying
         {
             lock (gate)
             {
+                if (origin == SongSource.Pear && NotePearMessage(msg)) return;
                 var state = origin == SongSource.Browser ? browserPlayer : pear;
                 bool wasPlaying = state.IsPlaying;
                 string before = Key(state.Current);
@@ -427,6 +429,47 @@ namespace PearNowPlaying
         }
 
         static string Key(SongInfo s) { return s.VideoId + "|" + s.Title; }
+
+        // Pear 3.12.0 sends no PLAYER_STATE_CHANGED when the song is paused or played again, and its own song info keeps
+        // saying it plays (isPaused stays false, also in PLAYER_INFO and /api/v1/song; seen 2026-10-20). It does stop
+        // sending the position every second while paused, so that silence is taken for a pause, and a position coming
+        // after it for playing again. A Pear that does send the state is followed as before. Same as the macOS version.
+        DateTime pearLastTick = DateTime.MinValue;
+        bool pearPauseGuessed;
+        Timer pearSilenceWatch;
+        internal static readonly TimeSpan PearSilence = TimeSpan.FromSeconds(2.5);
+
+        /// <summary>Bookkeeping for each Pear message (under the gate); true when handled here (a position resuming a guessed pause).</summary>
+        bool NotePearMessage(IDictionary<string, object> msg)
+        {
+            switch (Str(msg, "type"))
+            {
+                case "PLAYER_STATE_CHANGED": pearPauseGuessed = false; break;
+                case "PLAYER_INFO":
+                case "VIDEO_CHANGED": pearLastTick = DateTime.UtcNow; pearPauseGuessed = false; break;
+                case "POSITION_CHANGED":
+                    pearLastTick = DateTime.UtcNow;
+                    if (pearPauseGuessed && !pear.IsPlaying)
+                    {
+                        pearPauseGuessed = false;
+                        HandleMessage(new Dictionary<string, object> { { "type", "PLAYER_STATE_CHANGED" }, { "isPlaying", true }, { "position", Num(msg, "position") } }, SongSource.Pear);
+                        return true;
+                    }
+                    break;
+            }
+            return false;
+        }
+
+        /// <summary>Pear's song plays but no position came for a while: paused at the last position Pear sent.</summary>
+        internal void CheckPearSilence(DateTime utcNow)
+        {
+            lock (gate)
+            {
+                if (!pear.IsPlaying || !pear.Current.HasData || pearLastTick == DateTime.MinValue || utcNow - pearLastTick <= PearSilence) return;
+                HandleMessage(new Dictionary<string, object> { { "type", "PLAYER_STATE_CHANGED" }, { "isPlaying", false }, { "position", pear.Current.Elapsed } }, SongSource.Pear);
+                pearPauseGuessed = true;
+            }
+        }
 
         internal static SongInfo ParseSong(IDictionary<string, object> d)
         {
@@ -589,6 +632,7 @@ namespace PearNowPlaying
         public void Dispose()
         {
             try { if (cts != null) cts.Cancel(); } catch { }
+            try { if (pearSilenceWatch != null) pearSilenceWatch.Dispose(); } catch { }
             Abort();
             try { browser.Dispose(); } catch { }
             http.Dispose();

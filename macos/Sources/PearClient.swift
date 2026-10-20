@@ -102,7 +102,16 @@ struct PlayerState {
     func start() {
         connection?.cancel(); socket?.cancel(with: .goingAway, reason: nil)
         pearStatus = PearClient.starting
-        if settings.source != "browser" { connection = Task { await run() } }
+        if settings.source != "browser" {
+            connection = Task { await run() }
+            pearSilenceWatch?.cancel()
+            pearSilenceWatch = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    self?.checkPearSilence()
+                }
+            }
+        }
         else { players[.pear]!.pause(); if source == .pear { show() } }
         if settings.source != "pear" { startBrowser() } else { stopBrowser() }
         updateStatus()
@@ -138,7 +147,7 @@ struct PlayerState {
     /// was rejected (it expired): never on its own at first start, so Pear's allow dialog doesn't pop up for users of
     /// the browser alone, and nothing is asked again and again while Pear isn't there.
     private var linkRequested = false
-    func stop() { discord.show(nil); connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); stopBrowser() }
+    func stop() { discord.show(nil); pearSilenceWatch?.cancel(); connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); stopBrowser() }
     func reload() { settings = Settings.load(); settings.save(); applyLyricsSources(); start() }
     private func persistToken(_ value: String) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -247,6 +256,7 @@ struct PlayerState {
     /// started playing last: a source that starts playing (or plays a new song) takes over, and one that plays
     /// takes over from a paused one.
     func handle(_ message: [String: Any], from origin: SongSource = .pear) {
+        if origin == .pear && notePearMessage(message) { return }
         var state = players[origin]!
         let wasPlaying = !state.song.paused, before = state.song.identity
         state.apply(message)
@@ -273,6 +283,40 @@ struct PlayerState {
         discord.show(DiscordPresence.Activity(title: cardTitle, artist: song.artist, album: song.album, imageURL: song.imageSrc, videoId: song.videoId,
                                               start: start, end: start.addingTimeInterval(song.duration), button: settings.discordButton))
     }
+    // Pear 3.12.0 sends no PLAYER_STATE_CHANGED when the song is paused or played again, and its own song info keeps
+    // saying it plays (isPaused stays false, also in PLAYER_INFO and /api/v1/song; seen 2026-10-20). It does stop
+    // sending the position every second while paused, so that silence is taken for a pause, and a position coming
+    // after it for playing again. A Pear that does send the state is followed as before.
+    private var pearLastTick = Date.distantPast
+    private var pearPauseGuessed = false
+    private var pearSilenceWatch: Task<Void, Never>?
+    static let pearSilence: TimeInterval = 2.5
+
+    /// Bookkeeping for each Pear message; true when it was handled here (a position resuming a guessed pause).
+    private func notePearMessage(_ message: [String: Any]) -> Bool {
+        switch message["type"] as? String ?? "" {
+        case "PLAYER_STATE_CHANGED": pearPauseGuessed = false
+        case "PLAYER_INFO", "VIDEO_CHANGED": pearLastTick = Date(); pearPauseGuessed = false
+        case "POSITION_CHANGED":
+            pearLastTick = Date()
+            if pearPauseGuessed && players[.pear]!.song.paused {
+                pearPauseGuessed = false
+                handle(["type": "PLAYER_STATE_CHANGED", "isPlaying": true, "position": message["position"] ?? players[.pear]!.song.elapsed])
+                return true
+            }
+        default: break
+        }
+        return false
+    }
+
+    /// Pear's song plays but no position came for a while: paused at the last position Pear sent.
+    func checkPearSilence(now: Date = Date()) {
+        let pear = players[.pear]!
+        guard !pear.song.paused, !pear.song.title.isEmpty, pearLastTick != .distantPast, now.timeIntervalSince(pearLastTick) > Self.pearSilence else { return }
+        handle(["type": "PLAYER_STATE_CHANGED", "isPlaying": false, "position": pear.song.elapsed])
+        pearPauseGuessed = true
+    }
+
     /// The shown source's song; a new one gets its cover and lyrics.
     private func show() {
         let previous = song.identity
