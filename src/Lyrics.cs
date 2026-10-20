@@ -279,77 +279,35 @@ namespace PearNowPlaying
             try
             {
                 var desc = description != null ? await description : null;
-                bool originalTooLong = false;
                 HashSet<string> hinted;
                 var ids = CoverLyrics.OriginalCandidates(desc, song.VideoId, out hinted);
                 if (ids.Count == 0) Log.Info("cover: no YouTube links in the description of " + song.VideoId);
                 // the original's YouTube Music lyrics need the relay; while it is down (paused or failing) the
                 // original is still identified (music.youtube.com) and looked up on LRCLIB
-                bool ytmLyrics = UseYtm && !Ytm.Paused;
+                var ytmLyrics = new Switch { On = UseYtm && !Ytm.Paused };
+                bool originalTooLong = false, used = false;
                 foreach (var id in ids)
                 {
-                    TrackInfo orig;
-                    try { orig = await Ytm.Lookup(id, ct, ytmLyrics); }
-                    catch (Exception ex) when (ytmLyrics && !ct.IsCancellationRequested)
-                    {
-                        Log.Write("WARN cover: original's YouTube Music lyrics failed (" + (ex is OperationCanceledException ? "timeout" : ex.Message)
-                                  + "), looking the original up without them");
-                        ytmLyrics = false;
-                        orig = await Ytm.Lookup(id, ct, false);
-                    }
-                    var label = id + " (" + orig.Artist + " - " + orig.Title + ", " + (int)orig.Duration + "s)";
-                    if (orig.Duration <= 0) { Log.Info("cover: original candidate " + id + " has no known length, skipped"); continue; }
-                    if (CoverLyrics.LooksArranged(orig.Title)) { Log.Info("cover: candidate " + label + " is an arrangement, skipped"); continue; }
-                    // links without an "原曲 / original" label are often the singer's other videos: the title must fit
-                    if (!hinted.Contains(id) && !CoverLyrics.TitleMatchesCover(song, orig))
-                    {
-                        Log.Info("cover: candidate " + label + " is a different song, skipped");
-                        continue;
-                    }
-                    double diff = Math.Abs(orig.Duration - song.Duration);
-                    if (diff > CoverLyrics.MaxLengthDiff)
-                    {
-                        Log.Info("cover: candidate " + label + " differs from the cover by " + (int)diff + "s, skipped");
-                        originalTooLong = true;
-                        continue;
-                    }
-                    if (orig.Lyrics != null && orig.Lyrics.HasSynced)
-                    {
-                        orig.Lyrics.Source = "YouTube Music · 원곡";
-                        Log.Info("lyrics found via original " + label + " on YouTube Music: " + song.Artist + " - " + song.Title);
-                        return orig.Lyrics;
-                    }
-                    if (ytmLyrics)
-                    {
-                        // the link is usually the original's music video; its official audio track has the timed lyrics
-                        // the cover may call it differently ("帝国少女" for "Imperial Girl")
-                        var coverName = CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null).Item1;
-                        var audio = await AudioTrackLyrics(orig, ct, coverName);
-                        if (audio != null)
-                        {
-                            audio.Source = "YouTube Music · 원곡";
-                            Log.Info("lyrics found via original " + label + "'s official audio on YouTube Music: " + song.Artist + " - " + song.Title);
-                            return audio;
-                        }
-                    }
-                    if (!string.IsNullOrEmpty(orig.Title))
-                    {
-                        // "ビノミ - Binomi": also try the title without the romanized/translated half
-                        var primary = CoverLyrics.PrimaryTitle(orig.Title, orig.Artist);
-                        // artist names in the title count too (as tags: they vouch for results with this title)
-                        var l = await FindSynced(new SongInfo { Title = orig.Title, AltTitle = primary != orig.Title ? primary : "",
-                                                                Artist = orig.Artist, Duration = orig.Duration, VideoId = id,
-                                                                Tags = CoverLyrics.ArtistsInTitle(orig.Title, primary) }, ct);
-                        if (l.HasSynced)
-                        {
-                            l.Source += " · 원곡";
-                            Log.Info("lyrics found via original " + label + " on " + l.Source + ": " + song.Artist + " - " + song.Title);
-                            return l;
-                        }
-                        if (l.Failed) return l;   // LRCLIB busy: retried later
-                    }
-                    Log.Info("cover: original " + label + " has no synced lyrics under that name");
+                    var t = await TryOriginal(id, song, desc, hinted.Contains(id), ytmLyrics, ct);
+                    if (t.Outcome == Outcome.Skipped) continue;
+                    if (t.Outcome == Outcome.TooLong) { originalTooLong = true; continue; }
+                    if (t.Lyrics != null) return t.Lyrics;   // found, or LRCLIB busy (retried later)
+                    used = true;
                     break;   // the first usable link decides; don't wander through unrelated links
+                }
+
+                // No usable link: the original's video from YouTube's search for the song's name (official channels
+                // only, and only when the results agree on the artist). Taken like a link that says it is the original.
+                if (!used && !originalTooLong)
+                {
+                    var hit = await SearchOriginal(song, desc, ct);
+                    if (hit != null)
+                    {
+                        var t = await TryOriginal(hit.VideoId, song, desc, true, ytmLyrics, ct);
+                        if (t.Outcome == Outcome.Used && t.Lyrics != null) return t.Lyrics;
+                        // its music video is longer than the recording: that artist's lyrics within the cover's length only
+                        if (t.Outcome == Outcome.TooLong) return await FromSearch(song, desc, ct, true, t.Track);
+                    }
                 }
 
                 // The original's video is known but its length doesn't fit (it often has an intro or outro the
@@ -369,6 +327,106 @@ namespace PearNowPlaying
             return null;
         }
 
+        sealed class Switch { public bool On; }
+        enum Outcome { Skipped, TooLong, Used }
+        sealed class OriginalTry { public Outcome Outcome; public TrackInfo Track; public LyricsResult Lyrics; }
+
+        /// <summary>
+        /// One candidate for the cover's original (a description link, or a search result): skipped (no length, an
+        /// arrangement, another song), too long or short for the cover, or used (Lyrics: found, or LRCLIB busy; null
+        /// when it has none). Same as tryOriginal in macos/Sources/LyricsFinder.swift.
+        /// </summary>
+        async Task<OriginalTry> TryOriginal(string id, SongInfo song, VideoDescription desc, bool hinted, Switch ytmLyrics, CancellationToken ct)
+        {
+            TrackInfo orig;
+            try { orig = await Ytm.Lookup(id, ct, ytmLyrics.On); }
+            catch (Exception ex) when (ytmLyrics.On && !ct.IsCancellationRequested)
+            {
+                Log.Write("WARN cover: original's YouTube Music lyrics failed (" + (ex is OperationCanceledException ? "timeout" : ex.Message)
+                          + "), looking the original up without them");
+                ytmLyrics.On = false;
+                orig = await Ytm.Lookup(id, ct, false);
+            }
+            var label = id + " (" + orig.Artist + " - " + orig.Title + ", " + (int)orig.Duration + "s)";
+            var skipped = new OriginalTry { Outcome = Outcome.Skipped, Track = orig };
+            if (orig.Duration <= 0) { Log.Info("cover: original candidate " + id + " has no known length, skipped"); return skipped; }
+            if (CoverLyrics.LooksArranged(orig.Title)) { Log.Info("cover: candidate " + label + " is an arrangement, skipped"); return skipped; }
+            // links without an "原曲 / original" label are often the singer's other videos: the title must fit
+            if (!hinted && !CoverLyrics.TitleMatchesCover(song, orig))
+            {
+                Log.Info("cover: candidate " + label + " is a different song, skipped");
+                return skipped;
+            }
+            double diff = Math.Abs(orig.Duration - song.Duration);
+            if (diff > CoverLyrics.MaxLengthDiff)
+            {
+                Log.Info("cover: candidate " + label + " differs from the cover by " + (int)diff + "s, skipped");
+                return new OriginalTry { Outcome = Outcome.TooLong, Track = orig };
+            }
+            var used = new OriginalTry { Outcome = Outcome.Used, Track = orig };
+            if (orig.Lyrics != null && orig.Lyrics.HasSynced)
+            {
+                orig.Lyrics.Source = "YouTube Music · 원곡";
+                Log.Info("lyrics found via original " + label + " on YouTube Music: " + song.Artist + " - " + song.Title);
+                used.Lyrics = orig.Lyrics;
+                return used;
+            }
+            if (ytmLyrics.On)
+            {
+                // the link is usually the original's music video; its official audio track has the timed lyrics
+                // the cover may call it differently ("帝国少女" for "Imperial Girl")
+                var coverName = CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null).Item1;
+                var audio = await AudioTrackLyrics(orig, ct, coverName);
+                if (audio != null)
+                {
+                    audio.Source = "YouTube Music · 원곡";
+                    Log.Info("lyrics found via original " + label + "'s official audio on YouTube Music: " + song.Artist + " - " + song.Title);
+                    used.Lyrics = audio;
+                    return used;
+                }
+            }
+            if (!string.IsNullOrEmpty(orig.Title))
+            {
+                // "ビノミ - Binomi": also try the title without the romanized/translated half
+                var primary = CoverLyrics.PrimaryTitle(orig.Title, orig.Artist);
+                // artist names in the title count too (as tags: they vouch for results with this title)
+                var l = await FindSynced(new SongInfo { Title = orig.Title, AltTitle = primary != orig.Title ? primary : "",
+                                                        Artist = orig.Artist, Duration = orig.Duration, VideoId = id,
+                                                        Tags = CoverLyrics.ArtistsInTitle(orig.Title, primary) }, ct);
+                if (l.HasSynced)
+                {
+                    l.Source += " · 원곡";
+                    Log.Info("lyrics found via original " + label + " on " + l.Source + ": " + song.Artist + " - " + song.Title);
+                    used.Lyrics = l;
+                    return used;
+                }
+                if (l.Failed) { used.Lyrics = l; return used; }   // LRCLIB busy: retried later
+            }
+            Log.Info("cover: original " + label + " has no synced lyrics under that name");
+            return used;
+        }
+
+        /// <summary>The cover's original found by searching YouTube for the song's name (CoverLyrics.PickOriginal), or null.</summary>
+        async Task<SearchHit> SearchOriginal(SongInfo song, VideoDescription desc, CancellationToken ct)
+        {
+            var name = CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null).Item1;
+            if (name.Length == 0) return null;
+            try
+            {
+                var hits = await Ytm.Search(name, ct);
+                var hit = CoverLyrics.PickOriginal(hits, name, song);
+                Log.Info("cover: YouTube search for the original \"" + name + "\": "
+                         + (hit != null ? hit.VideoId + " (" + hit.Owner + " - " + hit.Title + ", " + (int)hit.Length + "s)" : "no sure original among " + hits.Count + " results"));
+                return hit;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Info("cover: YouTube search for the original failed: " + (ex is OperationCanceledException ? "timeout" : ex.Message));
+                return null;
+            }
+        }
+
         /// <summary>
         /// No usable link: read the song title (and original artist, if given) from the cover's title or description
         /// and look the original up on LRCLIB. (YouTube Music's own search doesn't list songs without signing in,
@@ -376,10 +434,20 @@ namespace PearNowPlaying
         /// </summary>
         /// <param name="byArtist">only an original artist named by the title or description, and only results by that
         /// artist within the cover's length tolerance (the linked original didn't fit)</param>
-        async Task<LyricsResult> FromSearch(SongInfo song, VideoDescription desc, CancellationToken ct, bool byArtist = false)
+        /// <param name="original">the original's video found by search but longer or shorter than the cover: its artist
+        /// (and the artists its title names) instead of one the description names</param>
+        async Task<LyricsResult> FromSearch(SongInfo song, VideoDescription desc, CancellationToken ct, bool byArtist = false, TrackInfo original = null)
         {
             var guess = CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null);
             string title = guess.Item1, artist = guess.Item2;
+            var tags = new List<string>();
+            if (original != null)
+            {
+                var primary = CoverLyrics.PrimaryTitle(original.Title, original.Artist);
+                if (title.Length == 0) title = primary;
+                artist = original.Artist;
+                tags = CoverLyrics.ArtistsInTitle(original.Title, primary);
+            }
             if (title.Length == 0) { Log.Info("cover: couldn't tell the song title from \"" + song.Title + "\""); return null; }
             if (byArtist && artist.Length == 0)
             {
@@ -392,7 +460,7 @@ namespace PearNowPlaying
             // With the original artist named, another singer's lyrics only count when they are the well-known version
             // (the same timing uploaded at least 3 times): one cover of the song is no proof (Bad Apple!!: the PV's
             // lyrics, not FalKKonE's or an English cover's).
-            var l = await FindSynced(new SongInfo { Title = title, Artist = artist, Duration = song.Duration, VideoId = song.VideoId + "#original" }, ct,
+            var l = await FindSynced(new SongInfo { Title = title, Artist = artist, Duration = song.Duration, VideoId = song.VideoId + "#original", Tags = tags }, ct,
                                      CoverLyrics.MaxLengthDiff, !byArtist, byArtist ? CoverLyrics.MaxLengthDiff : 15, artist.Length > 0 ? 3 : 1);
             if (l.HasSynced)
             {

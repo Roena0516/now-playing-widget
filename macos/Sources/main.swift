@@ -430,6 +430,26 @@ if CommandLine.arguments.contains("--ytmusic-tests") {
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { source.stop(); exit(0) }
     RunLoop.main.run()
+} else if let index = CommandLine.arguments.firstIndex(of: "--lookup"), CommandLine.arguments.count > index + 1 {
+    // the whole lyrics lookup for one video, as the browser source would hand it over (no caches), with the log
+    let id = CommandLine.arguments[index + 1]
+    Log.echo = true
+    let ytm = YTMusicProvider(log: Log.write)
+    let finder = LyricsFinder(lrclib: LyricsProvider(log: Log.write), ytm: ytm, more: MoreLyrics(log: Log.write), disk: nil, log: Log.write)
+    Task {
+        do {
+            let track = try await ytm.lookup(id, withLyrics: false)
+            let song = Song(title: track.title, artist: track.artist, videoId: id, mediaType: BrowserSource.mediaType(track.videoType), duration: track.duration)
+            switch try await finder.find(song) {
+            case .synced(let lines, let source): print("RESULT synced \(lines.count) lines from \(source); first: \(lines.first(where: { $0.text != "♪" })?.text ?? "")")
+            case .instrumental: print("RESULT instrumental")
+            case .plainOnly: print("RESULT plain only")
+            case .notFound: print("RESULT not found")
+            }
+            exit(0)
+        } catch { print("FAILED: \(error.localizedDescription)"); exit(1) }
+    }
+    RunLoop.main.run()
 } else if CommandLine.arguments.contains("--self-test") {
     runSelfTests()
 } else if CommandLine.arguments.contains("--integration-test") {

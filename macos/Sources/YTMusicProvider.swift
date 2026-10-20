@@ -16,6 +16,14 @@ struct TrackInfo {
     var plainOnly = false
 }
 
+/// A video in YouTube's search results. `official`: an official artist channel (verified artist badge) or an
+/// artist's "- Topic" channel (official audio).
+struct SearchHit: Equatable {
+    var videoId = "", title = "", owner = ""
+    var length: Double = 0
+    var official = false
+}
+
 struct VideoDescription {
     var text = ""
     var linkedIds: [String] = []
@@ -205,21 +213,41 @@ struct VideoDescription {
         return nil
     }
 
+    /// YouTube's search results for a query (first page, videos only), remembered for this session. Used to find a
+    /// cover's original (LyricsFinder) and a browser song's video (findVideo).
+    func search(_ query: String) async throws -> [SearchHit] {
+        if let known = searchResults[query] { return known }
+        let body: [String: Any] = ["query": query, "context": ["client": ["clientName": "WEB", "clientVersion": Self.webVersion, "hl": "ja"]]]
+        let hits = Self.searchHits(try await post(youtubeBase.trimmed("/") + "/youtubei/v1/search?prettyPrint=false", body: body, label: "search"))
+        remember(&searchResults, query, hits)
+        return hits
+    }
+    private var searchResults: [String: [SearchHit]] = [:]
+
+    /// The videos of a search response, in order.
+    static func searchHits(_ response: Any) -> [SearchHit] {
+        var hits: [SearchHit] = []
+        for section in path(find("sectionListRenderer", in: response), "contents") as? [Any] ?? [] {
+            for item in path(section, "itemSectionRenderer", "contents") as? [Any] ?? [] {
+                guard let r = path(item, "videoRenderer"), let id = path(r, "videoId") as? String else { continue }
+                let owner = runs(path(r, "ownerText"))
+                let badges = path(r, "ownerBadges") as? [Any] ?? []
+                hits.append(SearchHit(videoId: id, title: runs(path(r, "title")), owner: owner, length: parseClock(runs(path(r, "lengthText"))),
+                                      official: owner.hasSuffix(" - Topic") || badges.contains { path($0, "metadataBadgeRenderer", "style") as? String == "BADGE_STYLE_TYPE_VERIFIED_ARTIST" }))
+            }
+        }
+        return hits
+    }
+
     /// A video for a song known only by its title, artist and length (the browser source when the tab's address
     /// can't be read): YouTube's search for "artist title", picked by pickVideo. Nil when none is that sure.
     func findVideo(title: String, artist: String, duration: Double) async throws -> String? {
         guard !title.trimmed.isEmpty, duration > 0 else { return nil }
-        let key = title + "|" + artist + "|" + String(Int(duration.rounded()))
-        if let known = searches[key] { return known }
         let query = (artist.trimmed.isEmpty ? "" : artist + " ") + title
-        let body: [String: Any] = ["query": query, "context": ["client": ["clientName": "WEB", "clientVersion": Self.webVersion, "hl": "ja"]]]
-        let found = Self.pickVideo(try await post(youtubeBase.trimmed("/") + "/youtubei/v1/search?prettyPrint=false", body: body, label: "search"),
-                                   title: title, artist: artist, duration: duration)
-        remember(&searches, key, found)
+        let found = Self.pickVideo(try await search(query), title: title, artist: artist, duration: duration)
         log("INFO YouTube search for \(artist) - \(title) (\(Int(duration))s): \(found ?? "no video of that length and title")")
         return found
     }
-    private var searches: [String: String?] = [:]
 
     /// The search result that is this song, in order: as long as the song (±2 s) and titled exactly like it (a
     /// cover's own upload); or from the artist's channel, or an official artist / "- Topic" channel, and naming the
@@ -227,26 +255,18 @@ struct VideoDescription {
     /// result within a second of the length: the browser may name the artist and song in the player's language
     /// ("요아소비", "Idol"), which the video's title doesn't use. Fan uploads of the same length are never taken.
     /// Same as YtmLyrics.PickVideo in src/YtmLyrics.cs.
-    static func pickVideo(_ response: Any, title: String, artist: String, duration: Double) -> String? {
+    static func pickVideo(_ hits: [SearchHit], title: String, artist: String, duration: Double) -> String? {
         let wanted = CoverLyrics.norm(title)
         let names = CoverLyrics.titleNames(title, artist: artist).map(CoverLyrics.norm).filter { $0.count >= 2 }
         let singer = CoverLyrics.norm(artist)
         var official: [String] = []
-        for section in path(find("sectionListRenderer", in: response), "contents") as? [Any] ?? [] {
-            for item in path(section, "itemSectionRenderer", "contents") as? [Any] ?? [] {
-                guard let r = path(item, "videoRenderer"), let id = path(r, "videoId") as? String else { continue }
-                let length = parseClock(runs(path(r, "lengthText")))
-                guard length > 0, abs(length - duration) <= 2 else { continue }
-                let t = CoverLyrics.norm(runs(path(r, "title")))
-                if !wanted.isEmpty && t == wanted { return id }
-                let owner = runs(path(r, "ownerText"))
-                let ownerName = CoverLyrics.norm(owner.replacingOccurrences(of: " - Topic", with: ""))
-                let byArtist = !singer.isEmpty && !ownerName.isEmpty && (ownerName.contains(singer) || singer.contains(ownerName))
-                let badges = path(r, "ownerBadges") as? [Any] ?? []
-                let isOfficial = owner.hasSuffix(" - Topic") || badges.contains { path($0, "metadataBadgeRenderer", "style") as? String == "BADGE_STYLE_TYPE_VERIFIED_ARTIST" }
-                if (byArtist || isOfficial) && names.contains(where: { t.contains($0) }) { return id }
-                if isOfficial && abs(length - duration) <= 1 { official.append(id) }
-            }
+        for h in hits where h.length > 0 && abs(h.length - duration) <= 2 {
+            let t = CoverLyrics.norm(h.title)
+            if !wanted.isEmpty && t == wanted { return h.videoId }
+            let ownerName = CoverLyrics.norm(h.owner.replacingOccurrences(of: " - Topic", with: ""))
+            let byArtist = !singer.isEmpty && !ownerName.isEmpty && (ownerName.contains(singer) || singer.contains(ownerName))
+            if (byArtist || h.official) && names.contains(where: { t.contains($0) }) { return h.videoId }
+            if h.official && abs(h.length - duration) <= 1 { official.append(h.videoId) }
         }
         return official.count == 1 ? official[0] : nil
     }

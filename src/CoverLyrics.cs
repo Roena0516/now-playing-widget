@@ -346,6 +346,34 @@ namespace PearNowPlaying
             return found;
         }
 
+        /// <summary>
+        /// The original song's video among YouTube's search results for the song's name, for a cover whose description
+        /// links no usable original: an official artist or "- Topic" channel's video whose title names the song and
+        /// doesn't say cover / 歌ってみた or an arrangement, not the cover's uploader's, within 30 s of the cover (a music
+        /// video often has an intro; the 10 s rule is applied afterwards, as for a linked original). When several
+        /// artists qualify (two songs of that name, or a well-known cover on a Topic channel), only the one within 10 s
+        /// of the cover, if there is just one; otherwise null (no original rather than a guess).
+        /// </summary>
+        public static SearchHit PickOriginal(List<SearchHit> hits, string songName, SongInfo cover)
+        {
+            string name = Norm(songName), uploader = Norm(cover.Artist);
+            if (name.Length < 2 || cover.Duration <= 0) return null;
+            Func<SearchHit, string> artist = h => Norm(h.Owner.Replace(" - Topic", ""));
+            var candidates = hits.Where(h => h.Official && h.VideoId != cover.VideoId && h.Length > 0 && Math.Abs(h.Length - cover.Duration) <= 30
+                                             && Norm(h.Title).Contains(name) && !CoverTitle.IsMatch(h.Title) && !LooksArranged(h.Title)
+                                             && artist(h).Length > 0 && artist(h) != uploader)
+                                 .OrderBy(h => Math.Abs(h.Length - cover.Duration)).ToList();
+            Func<IEnumerable<SearchHit>, int> artists = list =>
+            {
+                var seen = new List<string>();
+                foreach (var a in list.Select(artist)) if (!seen.Any(x => x.Contains(a) || a.Contains(x))) seen.Add(a);
+                return seen.Count;
+            };
+            if (artists(candidates) == 1) return candidates[0];
+            var close = candidates.Where(h => Math.Abs(h.Length - cover.Duration) <= MaxLengthDiff).ToList();
+            return artists(close) == 1 ? close[0] : null;
+        }
+
         /// <summary>"心を刺す言葉だけ - Only Words" -> both halves (a song LRCLIB may list under either), else none.</summary>
         public static List<string> TitleHalves(string title)
         {

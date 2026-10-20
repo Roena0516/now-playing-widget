@@ -55,6 +55,7 @@ import CoreGraphics
     precondition(parseLRC("[ar:Artist]\nplain text").isEmpty)
     client.stop()
     browserSourceTests()
+    coverSearchTests()
     let socketRequest = makeWebSocketRequest(url: URL(string: "ws://127.0.0.1:26538/api/v1/ws")!, token: "test-token")
     precondition(socketRequest.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
     precondition(socketRequest.url?.query == "token=test-token", "Pear 3.12 reads the WebSocket token from the query only")
@@ -371,17 +372,45 @@ func testCustomPlacement() {
         result("Pv9BgqukAb4", "YOASOBI Halzion / ハルジオン Live Compilation", "YoAdoBy", "3:22"),
         result("kzdJkT4kp-A", "YOASOBI「ハルジオン」Official Music Video", "YOASOBI", "3:23"),
         result("M5FqUyIVaVo", "ドラマツルギー / Eve(covered by 犬山たまき)", "Tamaki Ch. 犬山たまき / 佃煮のりお", "4:02")]]]]]]]
-    precondition(YTMusicProvider.pickVideo(search, title: "ハルジオン (Halzion)", artist: "YOASOBI", duration: 202) == "kzdJkT4kp-A",
+    precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(search), title: "ハルジオン (Halzion)", artist: "YOASOBI", duration: 202) == "kzdJkT4kp-A",
                  "the artist's video of that length, not a fan upload of the same length")
-    precondition(YTMusicProvider.pickVideo(search, title: "ドラマツルギー / Eve(covered by 犬山たまき)", artist: "Tamaki Ch. 犬山たまき / 佃煮のりお", duration: 242) == "M5FqUyIVaVo")
-    precondition(YTMusicProvider.pickVideo(search, title: "ハルジオン (Halzion)", artist: "YOASOBI", duration: 230) == nil, "no video of that length")
+    precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(search), title: "ドラマツルギー / Eve(covered by 犬山たまき)", artist: "Tamaki Ch. 犬山たまき / 佃煮のりお", duration: 242) == "M5FqUyIVaVo")
+    precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(search), title: "ハルジオン (Halzion)", artist: "YOASOBI", duration: 230) == nil, "no video of that length")
     // the browser names the song and artist in the player's language (recorded 2026-10-20, "요아소비 Idol", hl=ko)
     let localized: [String: Any] = ["contents": ["sectionListRenderer": ["contents": [["itemSectionRenderer": ["contents": [
         result("mEZqJ65ra08", "🔥해외 차트 점령 중인 화제의 애니 OST : YOASOBI - 아이돌(アイドル)", "쏘플 soso playlist", "3:34"),
         result("IvMFMA89Yi8", "YOASOBI「アイドル」from『劇場版YOASOBI 5th ANNIVERSARY", "YOASOBI 및 Echoes", "5:36", official: true),
         result("ZRtdQ81jPUQ", "YOASOBI「アイドル」 Official Music Video", "YOASOBI 및 Echoes", "3:46", official: true),
         result("qxB7mbtu7Rw", "스타데이즈 Stardays", "스타데이즈 Stardays", "3:46")]]]]]]]
-    precondition(YTMusicProvider.pickVideo(localized, title: "Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "the one official video of that length")
-    precondition(YTMusicProvider.pickVideo(localized, title: "アイドル - Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "an official channel naming the song")
-    precondition(YTMusicProvider.pickVideo(localized, title: "Idol", artist: "요아소비", duration: 230) == nil)
+    precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(localized), title: "Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "the one official video of that length")
+    precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(localized), title: "アイドル - Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "an official channel naming the song")
+    precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(localized), title: "Idol", artist: "요아소비", duration: 230) == nil)
+}
+
+/// A cover's original from YouTube's search for the song's name (results recorded 2026-10-20, hl=ja).
+@MainActor func coverSearchTests() {
+    func hit(_ id: String, _ length: Double, _ official: Bool, _ owner: String, _ title: String) -> SearchHit {
+        SearchHit(videoId: id, title: title, owner: owner, length: length, official: official)
+    }
+    let kimi = [hit("jpV5jeFlt_E", 356, true, "ryo (supercell)", "supercell - 君の知らない物語"),
+                hit("rZZzlY8vUf8", 90, false, "アニプレックス チャンネル", "『君の知らない物語』supercell｜『化物語』ノンクレジットED映像"),
+                hit("caF6nJxTejc", 338, false, "high_note Music Lounge", "君の知らない物語 - supercell"),
+                hit("46CUBRHdZA4", 347, true, "AZKi Channel", "【SorAZ】君の知らない物語 / AZKi ときのそら【歌ってみた】")]
+    let enel = Song(title: "君の知らない物語 歌ってみた；【Enel】", artist: "Enel ;", videoId: "XMomcatLNAI", mediaType: "USER_GENERATED_CONTENT", duration: 338)
+    precondition(CoverLyrics.pickOriginal(kimi, songName: "君の知らない物語", cover: enel)?.videoId == "jpV5jeFlt_E",
+                 "the official video (18 s longer: an intro), not a reupload of the right length or another cover")
+    let propose = [hit("VDdLF1YubI0", 179, true, "なとり / natori", "なとり - プロポーズ"),
+                   hit("XPLkkdMFmco", 234, true, "9Lana", "【MV】プロポーズ/ 9Lana cover"),
+                   hit("ST_AJmY_Tcc", 234, true, "内緒のピアス", "プロポーズ / 可不"),
+                   hit("zdPtgoB_B0I", 234, true, "そらる / soraru", "プロポーズ -cover / そらる")]
+    let lana = Song(title: "プロポーズ - propose", artist: "9Lana", videoId: "XPLkkdMFmco", mediaType: "ORIGINAL_MUSIC_VIDEO", duration: 234)
+    precondition(CoverLyrics.pickOriginal(propose, songName: "プロポーズ", cover: lana)?.videoId == "ST_AJmY_Tcc", "two songs of that name: the one of the cover's length")
+    let melancholic = [hit("86_kvUqhY-A", 220, true, "Junky // Clover lab.", "メランコリック / Junky feat.鏡音リン"),
+                       hit("HvzaOKUzjk4", 222, true, "Meychan", "メランコリック Cover / めいちゃん"),
+                       hit("TBVecP6BWPA", 220, true, "MORE MORE JUMP! - Topic", "メランコリック (feat. 花里みのり & 桐谷遥 & 桃井愛莉 & 日野森雫 &...")]
+    let mey = Song(title: "メランコリック Cover / めいちゃん", artist: "Meychan", videoId: "HvzaOKUzjk4", mediaType: "ORIGINAL_MUSIC_VIDEO", duration: 222)
+    precondition(CoverLyrics.pickOriginal(melancholic, songName: "メランコリック", cover: mey) == nil, "two artists of that length: no guess")
+    precondition(CoverLyrics.pickOriginal(Array(melancholic.prefix(2)), songName: "メランコリック", cover: mey)?.videoId == "86_kvUqhY-A", "the singer's own upload doesn't count")
+    precondition(CoverLyrics.pickOriginal(kimi, songName: "君", cover: enel) == nil, "a one-letter name is no evidence")
+    print("PASS: a cover's original from YouTube's search (official channel, one artist, not a cover)")
 }

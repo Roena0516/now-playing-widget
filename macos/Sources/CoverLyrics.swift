@@ -300,6 +300,31 @@ enum CoverLyrics {
             return nil
         }
     }
+    /// The original song's video among YouTube's search results for the song's name, for a cover whose description
+    /// links no usable original: an official artist or "- Topic" channel's video whose title names the song and doesn't
+    /// say cover / 歌ってみた or an arrangement, not the cover's uploader's, within 30 s of the cover (a music video
+    /// often has an intro; the 10 s rule is applied afterwards, as for a linked original). When several artists qualify
+    /// (two songs of that name, or a well-known cover on a Topic channel), only the one within 10 s of the cover, if
+    /// there is just one; otherwise nil (no original rather than a guess). Same as CoverLyrics.PickOriginal in src/CoverLyrics.cs.
+    static func pickOriginal(_ hits: [SearchHit], songName: String, cover: Song) -> SearchHit? {
+        let name = norm(songName), uploader = norm(cover.artist)
+        guard name.count >= 2, cover.duration > 0 else { return nil }
+        func artist(_ h: SearchHit) -> String { norm(h.owner.replacingOccurrences(of: " - Topic", with: "")) }
+        let candidates = hits.filter { h in
+            h.official && h.videoId != cover.videoId && h.length > 0 && abs(h.length - cover.duration) <= 30
+                && norm(h.title).contains(name) && !coverTitle.matches(h.title) && !looksArranged(h.title)
+                && !artist(h).isEmpty && artist(h) != uploader
+        }.sorted { abs($0.length - cover.duration) < abs($1.length - cover.duration) }
+        func artists(_ list: [SearchHit]) -> Int {
+            var seen: [String] = []
+            for a in list.map(artist) where !seen.contains(where: { $0.contains(a) || a.contains($0) }) { seen.append(a) }
+            return seen.count
+        }
+        if artists(candidates) == 1 { return candidates.first }
+        let close = candidates.filter { abs($0.length - cover.duration) <= maxLengthDiff }
+        return artists(close) == 1 ? close.first : nil
+    }
+
     /// "心を刺す言葉だけ - Only Words" -> both halves (a song LRCLIB may list under either), else none. Same as src/CoverLyrics.cs.
     static func titleHalves(_ title: String) -> [String] {
         let parts = dashes.split(title).map(\.trimmed)

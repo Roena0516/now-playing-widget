@@ -38,6 +38,17 @@ namespace PearNowPlaying
         public LyricsResult Lyrics;
     }
 
+    /// <summary>
+    /// A video in YouTube's search results. <see cref="Official"/>: an official artist channel (verified artist badge)
+    /// or an artist's "- Topic" channel (official audio).
+    /// </summary>
+    internal sealed class SearchHit
+    {
+        public string VideoId = "", Title = "", Owner = "";
+        public double Length;
+        public bool Official;
+    }
+
     internal sealed class VideoDescription
     {
         public string Text = "";
@@ -333,7 +344,41 @@ namespace PearNowPlaying
             return best;
         }
 
-        readonly Dictionary<string, string> searches = new Dictionary<string, string>();
+        readonly Dictionary<string, List<SearchHit>> searchResults = new Dictionary<string, List<SearchHit>>();
+
+        /// <summary>
+        /// YouTube's search results for a query (first page, videos only), remembered for this session. Used to find a
+        /// cover's original (LyricsProvider) and a browser song's video (FindVideo).
+        /// </summary>
+        public async Task<List<SearchHit>> Search(string query, CancellationToken ct)
+        {
+            List<SearchHit> known;
+            if (Recall(searchResults, query, out known)) return known;
+            var body = new Dictionary<string, object>
+            {
+                { "query", query },
+                { "context", new Dictionary<string, object> { { "client", new Dictionary<string, object> {
+                    { "clientName", "WEB" }, { "clientVersion", WebVersion }, { "hl", "ja" } } } } },
+            };
+            return Remember(searchResults, query, SearchHits(await Post(YoutubeBase.TrimEnd('/') + "/youtubei/v1/search?prettyPrint=false", body, ct, "search")));
+        }
+
+        /// <summary>The videos of a search response, in order.</summary>
+        internal static List<SearchHit> SearchHits(object response)
+        {
+            var hits = new List<SearchHit>();
+            foreach (var section in Path(Find(response, "sectionListRenderer", 0), "contents") as IEnumerable ?? new object[0])
+                foreach (var item in Path(section, "itemSectionRenderer", "contents") as IEnumerable ?? new object[0])
+                {
+                    var r = Path(item, "videoRenderer");
+                    var id = Path(r, "videoId") as string;
+                    if (id == null) continue;
+                    var owner = Runs(Path(r, "ownerText"));
+                    hits.Add(new SearchHit { VideoId = id, Title = Runs(Path(r, "title")), Owner = owner, Length = ParseClock(Runs(Path(r, "lengthText"))),
+                                             Official = owner.EndsWith(" - Topic", StringComparison.Ordinal) || OfficialArtist(r) });
+                }
+            return hits;
+        }
 
         /// <summary>
         /// A video for a song known only by its title, artist and length (the browser source when the tab's address
@@ -342,18 +387,9 @@ namespace PearNowPlaying
         public async Task<string> FindVideo(string title, string artist, double duration, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(title) || duration <= 0) return null;
-            var key = title + "|" + artist + "|" + Math.Round(duration).ToString(CultureInfo.InvariantCulture);
-            string known;
-            if (Recall(searches, key, out known)) return known;
-            var body = new Dictionary<string, object>
-            {
-                { "query", (string.IsNullOrWhiteSpace(artist) ? "" : artist + " ") + title },
-                { "context", new Dictionary<string, object> { { "client", new Dictionary<string, object> {
-                    { "clientName", "WEB" }, { "clientVersion", WebVersion }, { "hl", "ja" } } } } },
-            };
-            var found = PickVideo(await Post(YoutubeBase.TrimEnd('/') + "/youtubei/v1/search?prettyPrint=false", body, ct, "search"), title, artist, duration);
+            var found = PickVideo(await Search((string.IsNullOrWhiteSpace(artist) ? "" : artist + " ") + title, ct), title, artist, duration);
             Log.Info("YouTube search for " + artist + " - " + title + " (" + (int)duration + "s): " + (found ?? "no video of that length and title"));
-            return Remember(searches, key, found);
+            return found;
         }
 
         /// <summary>
@@ -363,29 +399,22 @@ namespace PearNowPlaying
         /// result within a second of the length: the browser may name the artist and song in the player's language
         /// ("요아소비", "Idol"), which the video's title doesn't use. Fan uploads of the same length are never taken.
         /// </summary>
-        internal static string PickVideo(object response, string title, string artist, double duration)
+        internal static string PickVideo(List<SearchHit> hits, string title, string artist, double duration)
         {
             var wanted = CoverLyrics.Norm(title);
             var names = CoverLyrics.TitleNames(title, artist).Select(CoverLyrics.Norm).Where(n => n.Length >= 2).ToList();
             var singer = CoverLyrics.Norm(artist);
             var official = new List<string>();
-            foreach (var section in Path(Find(response, "sectionListRenderer", 0), "contents") as IEnumerable ?? new object[0])
-                foreach (var item in Path(section, "itemSectionRenderer", "contents") as IEnumerable ?? new object[0])
-                {
-                    var r = Path(item, "videoRenderer");
-                    var id = Path(r, "videoId") as string;
-                    if (id == null) continue;
-                    double length = ParseClock(Runs(Path(r, "lengthText")));
-                    if (length <= 0 || Math.Abs(length - duration) > 2) continue;
-                    var t = CoverLyrics.Norm(Runs(Path(r, "title")));
-                    if (wanted.Length > 0 && t == wanted) return id;
-                    var owner = Runs(Path(r, "ownerText"));
-                    var ownerName = CoverLyrics.Norm(owner.Replace(" - Topic", ""));
-                    bool byArtist = singer.Length > 0 && ownerName.Length > 0 && (ownerName.Contains(singer) || singer.Contains(ownerName));
-                    bool isOfficial = owner.EndsWith(" - Topic", StringComparison.Ordinal) || OfficialArtist(r);
-                    if ((byArtist || isOfficial) && names.Any(n => t.Contains(n))) return id;
-                    if (isOfficial && Math.Abs(length - duration) <= 1) official.Add(id);
-                }
+            foreach (var h in hits)
+            {
+                if (h.Length <= 0 || Math.Abs(h.Length - duration) > 2) continue;
+                var t = CoverLyrics.Norm(h.Title);
+                if (wanted.Length > 0 && t == wanted) return h.VideoId;
+                var ownerName = CoverLyrics.Norm(h.Owner.Replace(" - Topic", ""));
+                bool byArtist = singer.Length > 0 && ownerName.Length > 0 && (ownerName.Contains(singer) || singer.Contains(ownerName));
+                if ((byArtist || h.Official) && names.Any(n => t.Contains(n))) return h.VideoId;
+                if (h.Official && Math.Abs(h.Length - duration) <= 1) official.Add(h.VideoId);
+            }
             return official.Count == 1 ? official[0] : null;
         }
 

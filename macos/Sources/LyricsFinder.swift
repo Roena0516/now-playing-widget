@@ -228,53 +228,30 @@ enum LrclibRecheck { @TaskLocal static var only = false }
             let desc = await description?.value
             try Task.checkCancellation()
             let (ids, hinted) = CoverLyrics.originalCandidates(desc, ownId: song.videoId)
-            var originalTooLong = false
             if ids.isEmpty { log("INFO cover: no YouTube links in the description of \(song.videoId)") }
             // the original's YouTube Music lyrics need the relay; while it is down (paused or failing) the original
             // is still identified (music.youtube.com) and looked up on LRCLIB
             var ytmLyrics = useYtm && !ytm.paused
+            var originalTooLong = false, used = false
             for id in ids {
-                let orig: TrackInfo
-                do { orig = try await ytm.lookup(id, withLyrics: ytmLyrics) }
-                catch where ytmLyrics && !Task.isCancelled {
-                    log("WARN cover: original's YouTube Music lyrics failed (\(error.localizedDescription)), looking the original up without them")
-                    ytmLyrics = false
-                    orig = try await ytm.lookup(id, withLyrics: false)
+                switch try await tryOriginal(id, song, desc, hinted: hinted.contains(id), ytmLyrics: &ytmLyrics) {
+                case .skipped: continue
+                case .tooLong: originalTooLong = true; continue
+                case .used(let found): if let found { return found }; used = true
                 }
-                let label = "\(id) (\(orig.artist) - \(orig.title), \(Int(orig.duration))s)"
-                if orig.duration <= 0 { log("INFO cover: original candidate \(id) has no known length, skipped"); continue }
-                if CoverLyrics.looksArranged(orig.title) { log("INFO cover: candidate \(label) is an arrangement, skipped"); continue }
-                // links without an "原曲 / original" label are often the singer's other videos: the title must fit
-                if !hinted.contains(id) && !CoverLyrics.titleMatchesCover(song, orig) { log("INFO cover: candidate \(label) is a different song, skipped"); continue }
-                let diff = abs(orig.duration - song.duration)
-                if diff > CoverLyrics.maxLengthDiff { log("INFO cover: candidate \(label) differs from the cover by \(Int(diff))s, skipped"); originalTooLong = true; continue }
-                if !orig.lines.isEmpty {
-                    log("INFO lyrics found via original \(label) on YouTube Music: \(song.artist) - \(song.title)")
-                    return Synced(lookup: .synced(orig.lines, source: "YouTube Music · 원곡"))
-                }
-                if ytmLyrics {
-                    // the link is usually the original's music video; its official audio track has the timed lyrics
-                    // the cover may call it differently ("帝国少女" for "Imperial Girl")
-                    let coverName = CoverLyrics.guessOriginal(song, description: desc?.text).title
-                    if let audio = try await audioTrackLyrics(orig, otherNames: [coverName]) {
-                        log("INFO lyrics found via original \(label)'s official audio on YouTube Music: \(song.artist) - \(song.title)")
-                        return Synced(lookup: .synced(audio, source: "YouTube Music · 원곡"))
-                    }
-                }
-                if !orig.title.isEmpty {
-                    // "ビノミ - Binomi": also try the title without the romanized/translated half
-                    let primary = CoverLyrics.primaryTitle(orig.title, artist: orig.artist)
-                    // artist names in the title count too (as tags: they vouch for results with this title)
-                    var original = Song(title: orig.title, alternativeTitle: primary != orig.title ? primary : "", artist: orig.artist, videoId: id, duration: orig.duration)
-                    original.tags = CoverLyrics.artistsInTitle(orig.title, songName: primary)
-                    let l = try await lrclibFind(original)
-                    if case .synced(let lines, let source) = l.lookup {
-                        log("INFO lyrics found via original \(label) on \(source): \(song.artist) - \(song.title)")
-                        return Synced(lookup: .synced(lines, source: source + " · 원곡"), standIn: l.standIn)
-                    }
-                }
-                log("INFO cover: original \(label) has no synced lyrics under that name")
                 break   // the first usable link decides; don't wander through unrelated links
+            }
+
+            // No usable link: the original's video from YouTube's search for the song's name (official channels only,
+            // and only when the results agree on the artist). Taken like a link that says it is the original.
+            if !used && !originalTooLong, let hit = try await searchOriginal(song, desc) {
+                switch try await tryOriginal(hit.videoId, song, desc, hinted: true, ytmLyrics: &ytmLyrics) {
+                case .used(let found): if let found { return found }
+                case .tooLong(let orig):
+                    // its music video is longer than the recording: that artist's lyrics within the cover's length only
+                    return try await fromSearch(song, desc, byArtist: true, original: orig)
+                case .skipped: break
+                }
             }
 
             // The original's video is known but its length doesn't fit (it often has an intro or outro the recording
@@ -292,13 +269,86 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         }
     }
 
+    private enum OriginalOutcome { case skipped, tooLong(TrackInfo), used(Synced?) }
+
+    /// One candidate for the cover's original (a description link, or a search result): skipped (no length, an
+    /// arrangement, another song), too long or short for the cover, or used (its lyrics, or nil when it has none).
+    private func tryOriginal(_ id: String, _ song: Song, _ desc: VideoDescription?, hinted: Bool, ytmLyrics: inout Bool) async throws -> OriginalOutcome {
+        let orig: TrackInfo
+        do { orig = try await ytm.lookup(id, withLyrics: ytmLyrics) }
+        catch where ytmLyrics && !Task.isCancelled {
+            log("WARN cover: original's YouTube Music lyrics failed (\(error.localizedDescription)), looking the original up without them")
+            ytmLyrics = false
+            orig = try await ytm.lookup(id, withLyrics: false)
+        }
+        let label = "\(id) (\(orig.artist) - \(orig.title), \(Int(orig.duration))s)"
+        if orig.duration <= 0 { log("INFO cover: original candidate \(id) has no known length, skipped"); return .skipped }
+        if CoverLyrics.looksArranged(orig.title) { log("INFO cover: candidate \(label) is an arrangement, skipped"); return .skipped }
+        // links without an "原曲 / original" label are often the singer's other videos: the title must fit
+        if !hinted && !CoverLyrics.titleMatchesCover(song, orig) { log("INFO cover: candidate \(label) is a different song, skipped"); return .skipped }
+        let diff = abs(orig.duration - song.duration)
+        if diff > CoverLyrics.maxLengthDiff { log("INFO cover: candidate \(label) differs from the cover by \(Int(diff))s, skipped"); return .tooLong(orig) }
+        if !orig.lines.isEmpty {
+            log("INFO lyrics found via original \(label) on YouTube Music: \(song.artist) - \(song.title)")
+            return .used(Synced(lookup: .synced(orig.lines, source: "YouTube Music · 원곡")))
+        }
+        if ytmLyrics {
+            // the link is usually the original's music video; its official audio track has the timed lyrics
+            // the cover may call it differently ("帝国少女" for "Imperial Girl")
+            let coverName = CoverLyrics.guessOriginal(song, description: desc?.text).title
+            if let audio = try await audioTrackLyrics(orig, otherNames: [coverName]) {
+                log("INFO lyrics found via original \(label)'s official audio on YouTube Music: \(song.artist) - \(song.title)")
+                return .used(Synced(lookup: .synced(audio, source: "YouTube Music · 원곡")))
+            }
+        }
+        if !orig.title.isEmpty {
+            // "ビノミ - Binomi": also try the title without the romanized/translated half
+            let primary = CoverLyrics.primaryTitle(orig.title, artist: orig.artist)
+            // artist names in the title count too (as tags: they vouch for results with this title)
+            var original = Song(title: orig.title, alternativeTitle: primary != orig.title ? primary : "", artist: orig.artist, videoId: id, duration: orig.duration)
+            original.tags = CoverLyrics.artistsInTitle(orig.title, songName: primary)
+            let l = try await lrclibFind(original)
+            if case .synced(let lines, let source) = l.lookup {
+                log("INFO lyrics found via original \(label) on \(source): \(song.artist) - \(song.title)")
+                return .used(Synced(lookup: .synced(lines, source: source + " · 원곡"), standIn: l.standIn))
+            }
+        }
+        log("INFO cover: original \(label) has no synced lyrics under that name")
+        return .used(nil)
+    }
+
+    /// The cover's original found by searching YouTube for the song's name (CoverLyrics.pickOriginal), or nil.
+    private func searchOriginal(_ song: Song, _ desc: VideoDescription?) async throws -> SearchHit? {
+        let name = CoverLyrics.guessOriginal(song, description: desc?.text).title
+        if name.isEmpty { return nil }
+        do {
+            let hits = try await ytm.search(name)
+            let hit = CoverLyrics.pickOriginal(hits, songName: name, cover: song)
+            log("INFO cover: YouTube search for the original \"\(name)\": " + (hit.map { "\($0.videoId) (\($0.owner) - \($0.title), \(Int($0.length))s)" } ?? "no sure original among \(hits.count) results"))
+            return hit
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            log("INFO cover: YouTube search for the original failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// No usable link: read the song title (and original artist, if given) from the cover's title or description
     /// and look the original up on LRCLIB. (YouTube Music's own search doesn't list songs without signing in,
     /// so it can't be used for this.) The original must be within a few seconds of the cover's length.
     /// `byArtist`: only an original artist named by the title or description, and only results by that artist within
     /// the cover's length tolerance (the linked original didn't fit).
-    private func fromSearch(_ song: Song, _ desc: VideoDescription?, byArtist: Bool = false) async throws -> Synced? {
-        let (title, artist) = CoverLyrics.guessOriginal(song, description: desc?.text)
+    /// `original`: the original's video found by search but longer or shorter than the cover: its artist (and the
+    /// artists its title names) instead of one the description names.
+    private func fromSearch(_ song: Song, _ desc: VideoDescription?, byArtist: Bool = false, original: TrackInfo? = nil) async throws -> Synced? {
+        var (title, artist) = CoverLyrics.guessOriginal(song, description: desc?.text)
+        var tags: [String] = []
+        if let original {
+            let primary = CoverLyrics.primaryTitle(original.title, artist: original.artist)
+            if title.isEmpty { title = primary }
+            artist = original.artist
+            tags = CoverLyrics.artistsInTitle(original.title, songName: primary)
+        }
         if title.isEmpty { log("INFO cover: couldn't tell the song title from \"\(song.title)\""); return nil }
         if byArtist && artist.isEmpty {
             log("INFO cover: the original differs in length and no artist is named, no lyrics rather than a title guess: \(song.title)")
@@ -309,7 +359,9 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         // With the original artist named, another singer's lyrics only count when they are the well-known version (the
         // same timing uploaded at least 3 times): one cover of the song is no proof (Bad Apple!!: the PV's lyrics, not
         // FalKKonE's or an English cover's).
-        let l = try await lrclibFind(Song(title: title, artist: artist, videoId: song.videoId + "#original", duration: song.duration),
+        var wanted = Song(title: title, artist: artist, videoId: song.videoId + "#original", duration: song.duration)
+        wanted.tags = tags
+        let l = try await lrclibFind(wanted,
                                      titleTolerance: CoverLyrics.maxLengthDiff, titleOnly: !byArtist,
                                      artistTolerance: byArtist ? CoverLyrics.maxLengthDiff : 15, titleCopies: artist.isEmpty ? 1 : 3)
         guard case .synced(let lines, let source) = l.lookup else { return nil }
