@@ -47,7 +47,7 @@ import CoreText
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.overlay.rebuildWidgets(); self?.updateMenu() } }
         updateMenu()
         if preview {
-            client.handle(["type": "PLAYER_INFO", "isPlaying": true, "song": ["title": "Now Playing Widget · macOS", "artist": "오버레이 미리보기", "album": "한국어 · 日本語 · English", "songDuration": 240, "elapsedSeconds": 42, "isPaused": false]])
+            client.handle(["type": "PLAYER_INFO", "isPlaying": true, "song": ["title": "Now Playing Widget · macOS 미리보기 · 카드에 다 들어가지 않는 긴 제목은 이렇게 흐릅니다", "artist": "오버레이 미리보기", "album": "한국어 · 日本語 · English", "songDuration": 240, "elapsedSeconds": 42, "isPaused": false]])
             client.lines = parseLRC("[00:00.00]음악과 함께하는 시간\n[00:40.00]macOS에서도 만나는 싱크 가사\n[00:46.00]クリックを通すオーバーレイ\n[00:52.00]Your music, always nearby")
             overlay.show(temporary: false)
         } else { client.start(); overlay.show(); startUpdateChecks() }

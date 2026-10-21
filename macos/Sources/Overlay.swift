@@ -9,7 +9,14 @@ final class OverlayPanel: NSPanel {
 }
 @MainActor final class OverlayCanvas: NSView {
     var render: (() -> Void)?
-    var scale: CGFloat = 1
+    var scale: CGFloat = 1 { didSet { if scale != oldValue { showMarquee() } } }
+    /// The card's title when it scrolls; render() leaves it out (see MarqueeView).
+    var marquee: MarqueeTitle? { didSet { if marquee != oldValue { showMarquee() } } }
+    private var marqueeView: MarqueeView?
+    private func showMarquee() {
+        if marquee != nil && marqueeView == nil { let view = MarqueeView(); addSubview(view); marqueeView = view }
+        marqueeView?.show(marquee, scale: scale)
+    }
     /// Drag callbacks (screen coordinates) while the panels take mouse input ("위젯 끌어서 옮기기").
     var onDragBegan: ((CGPoint) -> Void)?, onDragged: ((CGPoint) -> Void)?, onDragEnded: (() -> Void)?
     var movable = false { didSet { window?.invalidateCursorRects(for: self) } }
@@ -25,6 +32,84 @@ final class OverlayPanel: NSPanel {
         NSGraphicsContext.current?.cgContext.scaleBy(x: scale, y: scale)
         render?()
         NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+/// A card title too wide for its place, scrolling. It is drawn once into a layer that Core Animation moves, so the
+/// card itself is redrawn once a second instead of 60 times (redrawing the whole card for a long cover title kept
+/// the app near 55% CPU, 2026-10-21). Same motion as NativeRenderer.drawTitle: still for 1.8 s, then 36 pt/s, and
+/// the left edge fades while it moves.
+struct MarqueeTitle: Equatable {
+    var text: String
+    var rect: CGRect   // in card points
+    var start: Date
+}
+@MainActor final class MarqueeView: NSView {
+    private let strip = CALayer(), edges = CAGradientLayer()
+    private struct Shown: Equatable { var title: MarqueeTitle; var scale: CGFloat; var backing: CGFloat }
+    private var shown: Shown?
+    init() {
+        super.init(frame: .zero)
+        layer = CALayer(); wantsLayer = true   // layer-hosting: its layers are ours
+        layer?.masksToBounds = true; layer?.addSublayer(strip); layer?.mask = edges
+        strip.anchorPoint = .zero; strip.contentsGravity = .resize
+        edges.startPoint = CGPoint(x: 0, y: 0.5); edges.endPoint = CGPoint(x: 1, y: 0.5)
+        isHidden = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }   // drags go to the card
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        if let shown { self.shown = nil; show(shown.title, scale: shown.scale) }
+    }
+
+    func show(_ title: MarqueeTitle?, scale: CGFloat) {
+        guard let title else {
+            shown = nil; isHidden = true
+            strip.removeAllAnimations(); edges.removeAllAnimations(); strip.contents = nil
+            return
+        }
+        let backing = window?.backingScaleFactor ?? 2
+        let next = Shown(title: title, scale: scale, backing: backing)
+        guard next != shown else { return }
+        shown = next
+        let font = NativeRenderer.titleFont
+        let textWidth = NativeTheme.width(title.text, font: font), cycle = textWidth + 40
+        // the text twice, one cycle apart: when the first has moved a cycle on, the second stands where it began
+        let size = CGSize(width: cycle + textWidth + 4, height: title.rect.height), px = scale * backing
+        let width = Int(ceil(size.width * px)), height = Int((size.height * px).rounded())
+        guard width > 0, height > 0, let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        context.scaleBy(x: px, y: px); context.translateBy(x: 0, y: CGFloat(height) / px); context.scaleBy(x: 1, y: -1)
+        let previous = NSGraphicsContext.current
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        for x in [0, cycle] { NativeTheme.text(title.text, font: font, color: NativeTheme.ink, rect: CGRect(x: x, y: 0, width: textWidth + 4, height: size.height)) }
+        NSGraphicsContext.current = previous
+
+        let frame = CGRect(x: title.rect.minX * scale, y: title.rect.minY * scale, width: title.rect.width * scale, height: title.rect.height * scale)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        self.frame = frame; isHidden = false
+        strip.contents = context.makeImage(); strip.contentsScale = backing
+        strip.bounds = CGRect(x: 0, y: 0, width: CGFloat(width) / backing, height: frame.height); strip.position = .zero
+        edges.frame = CGRect(origin: .zero, size: frame.size)
+        let edge = min(0.5, 18 / title.rect.width)
+        let solid = NSColor.white.cgColor, clear = NSColor.white.withAlphaComponent(0).cgColor
+        edges.locations = [0, NSNumber(value: Double(edge)), NSNumber(value: Double(1 - edge)), 1]
+        edges.colors = [solid, solid, solid, clear]
+        CATransaction.commit()
+
+        let period = 1.8 + cycle / 36
+        let begin = strip.convertTime(CACurrentMediaTime(), from: nil) - Date().timeIntervalSince(title.start)
+        let move = CAKeyframeAnimation(keyPath: "position.x")
+        move.values = [0, 0, -cycle * scale]; move.keyTimes = [0, NSNumber(value: 1.8 / period), 1]
+        let fade = CAKeyframeAnimation(keyPath: "colors")   // the left edge fades once the text has moved
+        fade.values = [[solid, solid, solid, clear], [clear, solid, solid, clear]]
+        fade.keyTimes = [0, NSNumber(value: min(1, (1.8 + 0.5 / 36) / period)), 1]; fade.calculationMode = .discrete
+        for animation in [move, fade] {
+            animation.duration = period; animation.repeatCount = .infinity; animation.beginTime = begin
+            animation.isRemovedOnCompletion = false
+        }
+        strip.add(move, forKey: "marquee"); edges.add(fade, forKey: "marquee")
     }
 }
 
@@ -54,7 +139,6 @@ final class OverlayPanel: NSPanel {
     private var infoText: String?
     private var identity = "", wasPaused = true
     private var marqueeStart = Date()
-    private var marqueeActive = false
     private var lastSecond = -1
     private var lines: [LyricLine] = []
     private var linesSong = ""   // the song whose lyrics `lines` holds
@@ -85,7 +169,7 @@ final class OverlayPanel: NSPanel {
             let w = WidgetPanels(place)
             w.cardCanvas.render = { [weak self] in
                 guard let self else { return }
-                NativeRenderer.drawCard(self.client, kind: self.kind, marqueeTime: Date().timeIntervalSince(self.marqueeStart), infoText: self.infoText)
+                NativeRenderer.drawCard(self.client, kind: self.kind, marqueeTime: Date().timeIntervalSince(self.marqueeStart), infoText: self.infoText, titleOnLayer: true)
             }
             w.lyricsCanvas.render = { [weak self] in
                 guard let self else { return }
@@ -112,7 +196,15 @@ final class OverlayPanel: NSPanel {
     private var cardPanels: [OverlayPanel] { widgets.map(\.card) }
     private var lyricsPanels: [OverlayPanel] { widgets.map(\.lyrics) }
     private func redraw(card: Bool = true, lyrics: Bool = true) {
+        if card { updateMarquee() }
         for w in widgets { if card { w.cardCanvas.needsDisplay = true }; if lyrics { w.lyricsCanvas.needsDisplay = true } }
+    }
+    /// The card's title for every widget's MarqueeView when it doesn't fit (the cards draw the rest).
+    private func updateMarquee() {
+        let title = NativeRenderer.titleText(client, kind: kind, infoText: infoText)
+        let rect = NativeRenderer.titleRect(NativeRenderer.cardLayout(client, kind: kind))
+        let marquee = NativeRenderer.titleScrolls(title, width: rect.width) ? MarqueeTitle(text: title, rect: rect, start: marqueeStart) : nil
+        for w in widgets { w.cardCanvas.marquee = marquee }
     }
     private func fade(_ panels: [OverlayPanel], to alpha: CGFloat, duration: Double, then done: (() -> Void)? = nil) {
         NSAnimationContext.runAnimationGroup({ context in
@@ -194,9 +286,10 @@ final class OverlayPanel: NSPanel {
             if previous >= 0 { redraw(card: false) }
             if progress >= 1 { previous = -1; scrollFrom = scrollTo }
         }
+        // the scrolling title moves on its own layer (MarqueeView): the card changes only with the time
         if cardVisible {
             let second = Int(client.elapsed)
-            if marqueeActive || second != lastSecond { redraw(lyrics: false); lastSecond = second }
+            if second != lastSecond { redraw(lyrics: false); lastSecond = second }
         }
     }
     func refresh() {
@@ -233,8 +326,6 @@ final class OverlayPanel: NSPanel {
                 }
             }
         }
-        let title = kind == .info ? (infoText ?? client.status) : client.cardTitle
-        marqueeActive = NativeTheme.width(title, font: NativeTheme.font(17, medium: true)) > NativeRenderer.cardLayout(client, kind: kind).textWidth + 0.5
         redraw()
         layout(); tick()
     }

@@ -84,16 +84,48 @@ struct NativeCardLayout {
     static func cardLayout(_ client: PearClient, kind: NativeCardKind) -> NativeCardLayout {
         NativeCardLayout(width: client.settings.panelWidth, hasArt: kind != .info && client.settings.showAlbumArt, hasSubtitle: kind != .info && !subtitle(client.song).isEmpty, hasBar: kind != .info && client.song.duration > 0)
     }
-    static func drawCard(_ client: PearClient, kind: NativeCardKind, marqueeTime: Double, infoText: String? = nil) {
+    static let titleFont = NativeTheme.font(17, medium: true)
+    /// Where the card's title goes (in card points).
+    static func titleRect(_ layout: NativeCardLayout) -> CGRect {
+        CGRect(x: layout.textX, y: layout.textY + layout.headerH + 4, width: layout.textWidth, height: layout.titleH + 2)
+    }
+    static func titleText(_ client: PearClient, kind: NativeCardKind, infoText: String?) -> String {
+        kind == .info ? (infoText ?? (client.isConnected ? "재생 중인 곡이 없습니다" : client.status)) : (client.song.title.isEmpty ? "알 수 없는 곡" : client.cardTitle)
+    }
+    /// A title wider than its place scrolls (drawTitle, or the overlay's MarqueeView).
+    static func titleScrolls(_ text: String, width: CGFloat) -> Bool { NativeTheme.width(text, font: titleFont) > width + 0.5 }
+
+    /// The album art cut to a square and scaled down once per picture (240 px: 60 pt at the largest widget size on a
+    /// Retina screen). Decoding the JPEG and scaling it on every draw cost more than the rest of the card.
+    private static var art: (data: Data, image: NSImage)?
+    static func artImage(_ data: Data) -> NSImage? {
+        if let art, art.data == data { return art.image }
+        guard let source = NSImage(data: data), source.size.width > 0, source.size.height > 0,
+              let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 240, pixelsHigh: 240, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                         isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        rep.size = CGSize(width: 60, height: 60)
+        let side = min(source.size.width, source.size.height)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        source.draw(in: CGRect(x: 0, y: 0, width: 60, height: 60), from: CGRect(x: (source.size.width - side) / 2, y: (source.size.height - side) / 2, width: side, height: side),
+                    operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: rep.size); image.addRepresentation(rep)
+        art = (data, image)
+        return image
+    }
+
+    /// `titleOnLayer`: a title that scrolls is left out (the overlay's MarqueeView moves it).
+    static func drawCard(_ client: PearClient, kind: NativeCardKind, marqueeTime: Double, infoText: String? = nil, titleOnLayer: Bool = false) {
         let layout = cardLayout(client, kind: kind)
         NativeTheme.surface(in: CGRect(x: 0, y: 0, width: layout.width, height: layout.height), opacity: client.settings.opacity)
         if layout.hasArt {
             let rect = CGRect(x: 16, y: 16 + (layout.contentHeight - 60) / 2, width: 60, height: 60)
             let clip = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
             NSGraphicsContext.saveGraphicsState(); clip.addClip()
-            if let data = client.artwork, let image = NSImage(data: data) {
-                let side = min(image.size.width, image.size.height)
-                image.draw(in: rect, from: CGRect(x: (image.size.width - side) / 2, y: (image.size.height - side) / 2, width: side, height: side), operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
+            if let data = client.artwork, let image = artImage(data) {
+                image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
             } else {
                 NativeTheme.surface2.setFill(); rect.fill()
                 NativeTheme.text("♪", font: NativeTheme.font(25.2, medium: true), color: NativeTheme.dim, rect: CGRect(x: rect.minX, y: rect.midY - 16, width: 60, height: 32), alignment: .center)
@@ -118,8 +150,8 @@ struct NativeCardLayout {
             NativeTheme.text(NativeTheme.time(client.elapsed) + " / " + NativeTheme.time(client.song.duration), font: NativeTheme.font(12), color: NativeTheme.dim, rect: CGRect(x: x, y: y, width: layout.textWidth, height: layout.headerH + 2), alignment: .right)
         }
         y += layout.headerH + 4
-        let title = kind == .info ? (infoText ?? (client.isConnected ? "재생 중인 곡이 없습니다" : client.status)) : (client.song.title.isEmpty ? "알 수 없는 곡" : client.cardTitle)
-        drawTitle(title, rect: CGRect(x: x, y: y, width: layout.textWidth, height: layout.titleH + 2), elapsed: marqueeTime)
+        let title = titleText(client, kind: kind, infoText: infoText), titleRect = titleRect(layout)
+        if !(titleOnLayer && titleScrolls(title, width: titleRect.width)) { drawTitle(title, rect: titleRect, elapsed: marqueeTime) }
         y += layout.titleH
         if layout.hasSubtitle {
             y += 1
@@ -136,7 +168,7 @@ struct NativeCardLayout {
         }
     }
     static func drawTitle(_ text: String, rect: CGRect, elapsed: Double) {
-        let font = NativeTheme.font(17, medium: true)
+        let font = titleFont
         let textWidth = NativeTheme.width(text, font: font)
         guard textWidth > rect.width + 0.5, let context = NSGraphicsContext.current?.cgContext else {
             NativeTheme.text(text, font: font, color: NativeTheme.ink, rect: rect); return
