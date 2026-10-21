@@ -28,8 +28,10 @@ namespace PearNowPlaying
         /// 4 (1.7.5): a cover could get the singer's own song as its original (see CoverLyrics.OriginalCandidates).
         /// 5 (1.8.5): lyrics longer than their entry said could be saved (see LyricsProvider.LyricsFit).
         /// 6 (1.8.7): another song's lyrics uploaded under this title could be saved (see LyricsProvider.PickByTitle).
+        /// 7 (2.0.2): a cover's original titled "artist / song" with the artist spelled otherwise than its channel was
+        /// looked up under the artist's name, getting another song of that artist (see CoverLyrics.PrimaryTitle).
         /// </summary>
-        const int FormatVersion = 6;
+        const int FormatVersion = 7;
         const string DateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
         static readonly Regex VideoId = new Regex(@"^[A-Za-z0-9_-]{11}$");
 

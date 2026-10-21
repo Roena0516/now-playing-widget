@@ -39,6 +39,9 @@ import Foundation
     check(CoverLyrics.primaryTitle("夜に駆ける (Racing into the Night)", artist: "") == "夜に駆ける", "夜に駆ける (Racing into the Night)")
     check(CoverLyrics.primaryTitle("Song feat. X", artist: "") == "Song", "Song feat. X")
     check(CoverLyrics.primaryTitle("【MV】ロキ", artist: "みきとP") == "ロキ", "【MV】ロキ")
+    do { let g = CoverLyrics.guessOriginal(Song(title: "サマータイムレコード /じん （covered by AXF）", artist: "ラトナ・プティ -Ratna Petit -にじさんじ所属"), description: nil); check(g.title == "サマータイムレコード" && g.artist == "じん", "サマータイムレコード /じん （covered by AXF）") }
+    check(CoverLyrics.primaryTitle("じん / サマータイムレコード (IA)【OFFICIAL MUSIC VIDEO】", artist: "JIN", coverArtist: "じん") == "サマータイムレコード", "じん / サマータイムレコード on JIN")
+    check(CoverLyrics.primaryTitle("ビノミ - Binomi", artist: "", coverArtist: "") == "ビノミ", "ビノミ - Binomi, no artist named")
     check(CoverLyrics.sameTitle("サイエンス (feat. 初音ミク)", "サイエンス") == true, "サイエンス (feat. 初音ミク)")
     check(CoverLyrics.sameTitle("Science", "サイエンス") == false, "Science")
     check(CoverLyrics.sameTitle("Love Trial", "Love Trial (2022)") == true, "Love Trial")

@@ -169,13 +169,15 @@ namespace PearNowPlaying
         }
 
         /// <summary>"ビノミ - Binomi" / "夜に駆ける (Racing into the Night)" -> "ビノミ" / "夜に駆ける" (unchanged when nothing is left).</summary>
-        public static string PrimaryTitle(string title, string artist = null)
+        /// <param name="coverArtist">the original artist as a cover's title names it, another spelling of the artist</param>
+        public static string PrimaryTitle(string title, string artist = null, string coverArtist = null)
         {
             var t = Brackets.Replace(title ?? "", " ").Trim();
             if (t.Length == 0) t = (title ?? "").Trim();
             var segs = Regex.Split(t, @"\s+[-－–—]\s+|\s*[/／｜|]\s*").Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
-            // "DECO*27 - チェリーポップ": the first part is the artist, the song comes after it
-            if (segs.Count >= 2 && SameArtist(segs[0], artist)) segs.RemoveAt(0);
+            // "DECO*27 - チェリーポップ": the first part is the artist, the song comes after it; also when the channel
+            // spells the artist otherwise and the cover names the artist as the title does ("じん / サマータイムレコード" on "JIN")
+            if (segs.Count >= 2 && (SameArtist(segs[0], artist) || SameArtist(segs[0], coverArtist))) segs.RemoveAt(0);
             if (segs.Count > 0) t = segs[0];
             t = Regex.Replace(t, @"(?i)\s+(?:feat\.?|ft\.?)\s.*$", "").Trim();
             var noParen = Regex.Replace(t, @"\s*[\(（][^\)）]*[\)）]\s*$", "").Trim();

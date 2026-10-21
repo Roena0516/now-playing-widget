@@ -157,12 +157,14 @@ enum CoverLyrics {
     }
 
     /// "ビノミ - Binomi" / "夜に駆ける (Racing into the Night)" -> "ビノミ" / "夜に駆ける" (unchanged when nothing is left).
-    static func primaryTitle(_ title: String, artist: String = "") -> String {
+    /// `coverArtist`: the original artist as a cover's title names it, another spelling of `artist`.
+    static func primaryTitle(_ title: String, artist: String = "", coverArtist: String = "") -> String {
         var t = brackets.replace(title, with: " ").trimmed
         if t.isEmpty { t = title.trimmed }
         var segs = Rx(#"\s+[-－–—]\s+|\s*[/／｜|]\s*"#).split(t).map(\.trimmed).filter { !$0.isEmpty }
-        // "DECO*27 - チェリーポップ": the first part is the artist, the song comes after it
-        if segs.count >= 2 && sameArtist(segs[0], artist) { segs.removeFirst() }
+        // "DECO*27 - チェリーポップ": the first part is the artist, the song comes after it; also when the channel
+        // spells the artist otherwise and the cover names the artist as the title does ("じん / サマータイムレコード" on "JIN")
+        if segs.count >= 2 && (sameArtist(segs[0], artist) || sameArtist(segs[0], coverArtist)) { segs.removeFirst() }
         if let first = segs.first { t = first }
         t = feat.replace(t, with: "").trimmed
         let noParen = Rx(#"\s*[\(（][^\)）]*[\)）]\s*$"#).replace(t, with: "").trimmed

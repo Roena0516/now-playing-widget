@@ -303,7 +303,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         }
         if !orig.title.isEmpty {
             // "ビノミ - Binomi": also try the title without the romanized/translated half
-            let primary = CoverLyrics.primaryTitle(orig.title, artist: orig.artist)
+            let primary = CoverLyrics.primaryTitle(orig.title, artist: orig.artist, coverArtist: CoverLyrics.guessOriginal(song, description: desc?.text).artist)
             // artist names in the title count too (as tags: they vouch for results with this title)
             var original = Song(title: orig.title, alternativeTitle: primary != orig.title ? primary : "", artist: orig.artist, videoId: id, duration: orig.duration)
             original.tags = CoverLyrics.artistsInTitle(orig.title, songName: primary)

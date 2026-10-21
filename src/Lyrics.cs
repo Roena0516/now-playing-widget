@@ -388,7 +388,7 @@ namespace PearNowPlaying
             if (!string.IsNullOrEmpty(orig.Title))
             {
                 // "ビノミ - Binomi": also try the title without the romanized/translated half
-                var primary = CoverLyrics.PrimaryTitle(orig.Title, orig.Artist);
+                var primary = CoverLyrics.PrimaryTitle(orig.Title, orig.Artist, CoverLyrics.GuessOriginal(song, desc != null ? desc.Text : null).Item2);
                 // artist names in the title count too (as tags: they vouch for results with this title)
                 var l = await FindSynced(new SongInfo { Title = orig.Title, AltTitle = primary != orig.Title ? primary : "",
                                                         Artist = orig.Artist, Duration = orig.Duration, VideoId = id,

@@ -14,7 +14,9 @@ import Foundation
     /// 4 (1.7.5): a cover could get the singer's own song as its original (see CoverLyrics.originalCandidates).
     /// 5 (1.8.5): lyrics longer than their entry said could be saved (see LyricRecord.fits).
     /// 6 (1.8.7): another song's lyrics uploaded under this title could be saved (see LyricsProvider.pickByTitle).
-    nonisolated static let formatVersion = 6
+    /// 7 (2.0.2): a cover's original titled "artist / song" with the artist spelled otherwise than its channel was
+    /// looked up under the artist's name, getting another song of that artist (see CoverLyrics.primaryTitle).
+    nonisolated static let formatVersion = 7
 
     private struct Entry: Codable {
         struct Line: Codable { var timeMs: Int; var text: String }
