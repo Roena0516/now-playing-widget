@@ -23,7 +23,7 @@ namespace PearNowPlaying
         readonly Hotkeys hotkeys;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, albumOnlyItem, retryLyricsItem, lyricsInfoItem, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
+        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, coverLyricsItem, retryLyricsItem, lyricsInfoItem, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
         readonly ToolStripMenuItem updateItem, sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem;
@@ -93,7 +93,7 @@ namespace PearNowPlaying
             lyricsInfoItem = new ToolStripMenuItem("가사: -") { Enabled = false };
             pinItem = new ToolStripMenuItem("곡 정보 계속 표시", null, (s, e) => TogglePin());
             lyricsItem = new ToolStripMenuItem("가사 표시", null, (s, e) => ToggleLyrics());
-            albumOnlyItem = new ToolStripMenuItem("앨범 곡만 가사 표시", null, (s, e) => ToggleAlbumOnly());
+            coverLyricsItem = new ToolStripMenuItem("커버곡 가사 표시(beta)", null, (s, e) => ToggleCoverLyrics());
             retryLyricsItem = new ToolStripMenuItem("가사 다시 찾기", null, (s, e) => RetryLyrics());
             offsetMenu = new ToolStripMenuItem("가사 타이밍");
             foreach (var pair in new[] { Tuple.Create("1초 빠르게", 1300), Tuple.Create("0.5초 빠르게", 800), Tuple.Create("기본", 300),
@@ -117,7 +117,7 @@ namespace PearNowPlaying
             var widgetMenu = new ToolStripMenuItem("위젯");
             widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, titleMenu, displayMenu, placeMenu, sizeMenu, transparencyMenu, new ToolStripSeparator(), moveItem });
             var lyricsMenu = new ToolStripMenuItem("가사");
-            lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, albumOnlyItem, retryLyricsItem, offsetMenu });
+            lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, coverLyricsItem, retryLyricsItem, offsetMenu });
             // where songs come from (same items as the macOS version's 재생 앱 menu)
             sourceMenu = new ToolStripMenuItem("재생 앱");
             foreach (var pair in new[] { Tuple.Create("auto", "자동 (브라우저, Pear Desktop)"), Tuple.Create("browser", "브라우저"), Tuple.Create("pear", "Pear Desktop") })
@@ -325,7 +325,7 @@ namespace PearNowPlaying
             lyricsWin.Dismiss();
             if (!WantsLyrics(song))
             {
-                // "앨범 곡만 가사 표시": not an album track, so no lookup at all
+                // "커버곡 가사 표시(beta)" off: not an album track, so no lookup at all
                 lyricsInfoItem.Text = "가사: 앨범 곡이 아니라 찾지 않음";
                 if (announceKey == key) { announceKey = null; ShowInfo("앨범 곡이 아니어서 가사를 표시하지 않습니다"); }
                 PrefetchNext(key);
@@ -488,7 +488,7 @@ namespace PearNowPlaying
                         var next = await pear.GetNextSong(ct);   // asked each time: the queue may have changed
                         if (next == null || ct.IsCancellationRequested) return;
                         if (next.VideoId + "|" + next.Title == forKey) return;
-                        if (cfg.LyricsAlbumOnly)
+                        if (!cfg.CoverLyrics)
                         {
                             // the queue doesn't say whether it's an album track; YouTube Music does (this is the
                             // lookup's first request anyway, remembered for when the song starts)
@@ -539,17 +539,17 @@ namespace PearNowPlaying
             EnsureLyrics(song);
         }
 
-        /// <summary>Whether this song's lyrics are wanted ("앨범 곡만 가사 표시" skips everything but album tracks).</summary>
+        /// <summary>Whether this song's lyrics are wanted ("커버곡 가사 표시(beta)" off skips everything but album tracks).</summary>
         bool WantsLyrics(SongInfo song)
         {
-            return !cfg.LyricsAlbumOnly || song.MediaType == "AUDIO";
+            return cfg.CoverLyrics || song.MediaType == "AUDIO";
         }
 
-        void ToggleAlbumOnly()
+        void ToggleCoverLyrics()
         {
-            cfg.LyricsAlbumOnly = !cfg.LyricsAlbumOnly;
+            cfg.CoverLyrics = !cfg.CoverLyrics;
             cfg.Save();
-            ShowInfo(cfg.LyricsAlbumOnly ? "앨범 곡에서만 가사를 표시합니다" : "모든 곡에서 가사를 표시합니다");
+            ShowInfo(cfg.CoverLyrics ? "커버곡을 포함한 모든 곡에서 가사를 표시합니다" : "앨범 곡에서만 가사를 표시합니다");
             lyricsKey = null;   // decide again for the current song
             if (pear.Current.HasData) EnsureLyrics(pear.Current);
         }
@@ -1230,7 +1230,7 @@ namespace PearNowPlaying
         {
             pinItem.Checked = cfg.AlwaysShow;
             lyricsItem.Checked = cfg.ShowLyrics;
-            albumOnlyItem.Checked = cfg.LyricsAlbumOnly;
+            coverLyricsItem.Checked = cfg.CoverLyrics;
             moveItem.Checked = moveMode;
             updateItem.Text = update != null ? "업데이트 설치 (" + update.Version + ")" : "업데이트 확인";
             foreach (ToolStripMenuItem it in titleMenu.DropDownItems) it.Checked = (bool)it.Tag == cfg.VideoTitle;

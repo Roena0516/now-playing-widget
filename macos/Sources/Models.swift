@@ -50,8 +50,9 @@ struct Settings: Codable {
     /// a button to the project's GitHub page in that Discord status
     var discordButton = true
     var showLyrics = true
-    /// lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up
-    var lyricsAlbumOnly = false
+    /// "커버곡 가사 표시(beta)": lyrics for every song; off = album tracks (Pear's AUDIO) only, other songs aren't even
+    /// looked up (what "앨범 곡만 가사 표시", lyricsAlbumOnly: true, did until 2.0.2)
+    var coverLyrics = true
     /// look for a new release on GitHub at start and once a day (installing is always the user's choice)
     var checkUpdates = true
     var lyricsOffsetMs: Double = 300
@@ -81,6 +82,7 @@ struct Settings: Codable {
         if let size = widget.scale, (0.5...3).contains(size) { s.scale = size }
         return s
     }
+    private enum LegacyKeys: String, CodingKey { case lyricsAlbumOnly }
     // Keys missing from an older config.json keep their defaults instead of discarding the whole file.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -100,7 +102,9 @@ struct Settings: Codable {
         hotkeyNext = try value(.hotkeyNext, hotkeyNext); hotkeyPrevious = try value(.hotkeyPrevious, hotkeyPrevious)
         hotkeyAlwaysShow = try value(.hotkeyAlwaysShow, hotkeyAlwaysShow); hotkeyLyrics = try value(.hotkeyLyrics, hotkeyLyrics)
         lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
-        lyricsAlbumOnly = try value(.lyricsAlbumOnly, lyricsAlbumOnly)
+        // until 2.0.2: lyricsAlbumOnly true, the same as coverLyrics false
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        coverLyrics = try c.decodeIfPresent(Bool.self, forKey: .coverLyrics) ?? !(legacy.decodeIfPresent(Bool.self, forKey: .lyricsAlbumOnly) ?? !coverLyrics)
         checkUpdates = try value(.checkUpdates, checkUpdates)
         ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
         moreLyrics = try value(.moreLyrics, moreLyrics)

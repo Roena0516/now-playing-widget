@@ -84,12 +84,16 @@ import CoreGraphics
     precondition(Hotkeys.parse("ctrl + shift + F9")! == (UInt32(kVK_F9), UInt32(controlKey | shiftKey)))
     precondition(Hotkeys.parse("Win+1")! == (UInt32(kVK_ANSI_1), UInt32(cmdKey)) && Hotkeys.parse("Alt+D1")! == (UInt32(kVK_ANSI_1), UInt32(optionKey)))
     precondition(Hotkeys.parse("Ctrl+Alt") == nil && Hotkeys.parse("Ctrl+A+B") == nil && Hotkeys.parse("Ctrl++P") == nil && Hotkeys.parse("Ctrl+Nope") == nil)
-    // "앨범 곡만 가사 표시": off by default; when on, only album tracks are looked up
+    // "커버곡 가사 표시(beta)": on by default; when off, only album tracks are looked up (as "앨범 곡만 가사 표시" did)
     let albums = PearClient(loadRemoteAssets: false)
-    precondition(!Settings().lyricsAlbumOnly)
-    albums.settings.lyricsAlbumOnly = false
+    precondition(Settings().coverLyrics)
+    for (json, on) in [(#"{}"#, true), (#"{"lyricsAlbumOnly":true}"#, false), (#"{"lyricsAlbumOnly":false}"#, true), (#"{"coverLyrics":false,"lyricsAlbumOnly":false}"#, false)] {
+        precondition(try! JSONDecoder().decode(Settings.self, from: Data(json.utf8)).coverLyrics == on, "coverLyrics from \(json)")
+    }
+    precondition(!String(data: try! JSONEncoder().encode(Settings()), encoding: .utf8)!.contains("lyricsAlbumOnly"))
+    albums.settings.coverLyrics = true
     precondition(albums.wantsLyrics(Song(title: "x", artist: "y", mediaType: "USER_GENERATED_CONTENT")))
-    albums.settings.lyricsAlbumOnly = true
+    albums.settings.coverLyrics = false
     precondition(albums.wantsLyrics(Song(title: "x", artist: "y", mediaType: "AUDIO")) && !albums.wantsLyrics(Song(title: "x", artist: "y", mediaType: "ORIGINAL_MUSIC_VIDEO")))
     albums.song = Song(["title": "MV", "mediaType": "ORIGINAL_MUSIC_VIDEO", "videoId": "mv"])
     albums.findLyrics()

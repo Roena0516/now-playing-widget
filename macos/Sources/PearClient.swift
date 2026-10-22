@@ -320,7 +320,7 @@ struct PlayerState {
         lines = []; lyricsStatus = "가사: 찾는 중"; lyricsOutcome = nil; lyricsFailed = false
         guard !track.title.isEmpty else { lyricsStatus = "가사: -"; if force { onLyricsNotice?("재생 중인 곡이 없습니다") }; return }
         if !wantsLyrics(track) {
-            // "앨범 곡만 가사 표시": not an album track, so no lookup at all
+            // "커버곡 가사 표시(beta)" off: not an album track, so no lookup at all
             lyricsStatus = "가사: 앨범 곡이 아니라 찾지 않음"
             if force { onLyricsNotice?("앨범 곡이 아니어서 가사를 표시하지 않습니다") }
             prefetchNext(after: track)
@@ -394,8 +394,8 @@ struct PlayerState {
         updateDisplayTitle(track)
     }
 
-    /// Whether this song's lyrics are wanted ("앨범 곡만 가사 표시" skips everything but album tracks).
-    func wantsLyrics(_ track: Song) -> Bool { !settings.lyricsAlbumOnly || track.mediaType == "AUDIO" }
+    /// Whether this song's lyrics are wanted ("커버곡 가사 표시(beta)" off skips everything but album tracks).
+    func wantsLyrics(_ track: Song) -> Bool { settings.coverLyrics || track.mediaType == "AUDIO" }
 
     /// While this song plays, look up the next one in Pear's queue so its lyrics are ready when it starts.
     /// Waits a little first so quickly skipped songs don't trigger lookups. LRCLIB's "busy" answers usually clear
@@ -409,7 +409,7 @@ struct PlayerState {
                     try await Task.sleep(for: .seconds(wait))
                     // asked each time: the queue may have changed
                     guard var next = try await nextSong(), next.videoId + "|" + next.title != current.videoId + "|" + current.title else { return }
-                    if settings.lyricsAlbumOnly {
+                    if !settings.coverLyrics {
                         // the queue doesn't say whether it's an album track; YouTube Music does (this is the
                         // lookup's first request anyway, remembered for when the song starts)
                         guard settings.ytmLyrics, !lyrics.ytm.paused,

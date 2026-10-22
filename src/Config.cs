@@ -105,8 +105,9 @@ namespace PearNowPlaying
 
         // Lyrics
         public bool ShowLyrics = true;
-        /// <summary>Lyrics only for album tracks (Pear's AUDIO); other songs aren't even looked up.</summary>
-        public bool LyricsAlbumOnly = false;
+        /// <summary>"커버곡 가사 표시(beta)": lyrics for every song; off = album tracks (Pear's AUDIO) only, other songs
+        /// aren't even looked up (what "앨범 곡만 가사 표시", lyricsAlbumOnly=true, did until 2.0.2).</summary>
+        public bool CoverLyrics = true;
         /// <summary>Look for a new release on GitHub at start and once a day (installing is always the user's choice).</summary>
         public bool CheckUpdates = true;
         public bool LyricsShowNext = true;
@@ -191,7 +192,8 @@ namespace PearNowPlaying
                 c.DiscordPresence = GetBool(map, "discordPresence", c.DiscordPresence);
                 c.DiscordButton = GetBool(map, "discordButton", c.DiscordButton);
                 c.ShowLyrics = GetBool(map, "showLyrics", c.ShowLyrics);
-                c.LyricsAlbumOnly = GetBool(map, "lyricsAlbumOnly", c.LyricsAlbumOnly);
+                // until 2.0.2: lyricsAlbumOnly=true, the same as coverLyrics=false
+                c.CoverLyrics = GetBool(map, "coverLyrics", !GetBool(map, "lyricsAlbumOnly", !c.CoverLyrics));
                 c.CheckUpdates = GetBool(map, "checkUpdates", c.CheckUpdates);
                 c.LyricsShowNext = GetBool(map, "lyricsShowNext", c.LyricsShowNext);
                 c.LyricsOffsetMs = Math.Max(-10000, Math.Min(10000, GetInt(map, "lyricsOffsetMs", c.LyricsOffsetMs)));
@@ -265,8 +267,8 @@ namespace PearNowPlaying
                 sb.AppendLine();
                 sb.AppendLine("# 가사 (LRCLIB 싱크 가사가 있는 곡만 표시)");
                 sb.AppendLine("showLyrics=" + B(ShowLyrics));
-                sb.AppendLine("# true면 앨범 곡(공식 음원)에서만 가사를 찾아 표시 (MV·커버 등은 찾지 않음)");
-                sb.AppendLine("lyricsAlbumOnly=" + B(LyricsAlbumOnly));
+                sb.AppendLine("# 커버곡 가사 표시(beta). false면 앨범 곡(공식 음원)에서만 가사를 찾아 표시 (커버·MV 등은 찾지 않음)");
+                sb.AppendLine("coverLyrics=" + B(CoverLyrics));
                 sb.AppendLine("# 다음 줄 가사도 작게 표시");
                 sb.AppendLine("lyricsShowNext=" + B(LyricsShowNext));
                 sb.AppendLine("# 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다.");

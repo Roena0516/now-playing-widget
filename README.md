@@ -124,7 +124,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 | 상태 줄 | 어디에 연결되어 있는지("브라우저 YouTube Music에 연결됨 (Chrome)" 등)와 가사 상태를 표시합니다. |
 | **지금 곡 보기**, **이전 곡 / 재생·일시정지 / 다음 곡** | 지금 곡을 다시 보여 주거나 재생을 조작합니다. |
 | **위젯** | 곡 정보 계속 표시, 영상 곡 제목(곡 제목 또는 영상 제목), 표시할 모니터, 위치, 크기, 투명도, 위젯 끌어서 옮기기 |
-| **가사** | 가사 표시, 앨범 곡만 가사 표시, 가사 다시 찾기(저장된 가사를 지우고 새로 찾음), 가사 타이밍 |
+| **가사** | 가사 표시, 커버곡 가사 표시(beta), 가사 다시 찾기(저장된 가사를 지우고 새로 찾음), 가사 타이밍 |
 | **재생 앱** | 자동, 브라우저, Pear Desktop 중에서 고릅니다. |
 | **Discord** | 듣는 중 표시, GitHub 버튼 표시 |
 | **Pear Desktop 연결 요청** | Pear Desktop에 연결을 요청합니다. 재생 앱이 **브라우저**이면 나타나지 않습니다. |
@@ -163,7 +163,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 | `discordPresence` | `false` | 듣는 곡을 Discord에 "듣는 중"으로 표시할지 정합니다. |
 | `discordButton` | `true` | Discord 상태에 이 앱의 GitHub 페이지로 가는 버튼을 붙일지 정합니다. |
 | `showLyrics` | `true` | 가사 카드를 표시할지 정합니다. |
-| `lyricsAlbumOnly` | `false` | `true`이면 앨범 곡(공식 음원)에서만 가사를 찾아 표시합니다. |
+| `coverLyrics` | `true` | 메뉴의 "커버곡 가사 표시(beta)"입니다. `false`이면 앨범 곡(공식 음원)에서만 가사를 찾아 표시하고, 커버·MV·일반 업로드 영상에서는 찾지 않습니다. 2.0.2까지의 `lyricsAlbumOnly=true`(앨범 곡만 가사 표시)는 `coverLyrics=false`로 이어집니다. |
 | `checkUpdates` | `true` | 시작할 때와 하루에 한 번 새 버전이 있는지 확인합니다. |
 | `lyricsOffsetMs` | `300` | 가사 타이밍 보정값(ms)입니다. 양수이면 가사가 더 빨리, 음수이면 더 늦게 표시됩니다. |
 | `lyricsServer` | `https://lrclib.net` | LRCLIB 서버의 주소입니다. |
