@@ -23,7 +23,8 @@ namespace PearNowPlaying
         readonly Hotkeys hotkeys;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, coverLyricsItem, retryLyricsItem, lyricsInfoItem, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
+        readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, coverLyricsItem, retryLyricsItem, lyricsInfoItem, songOffsetMenu, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
+        LyricsTiming timing = new LyricsTiming(LyricsTiming.DefaultPath);   // this video's lyrics timing (가사 타이밍 → 이 곡)
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
         readonly ToolStripMenuItem updateItem, sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem;
@@ -95,13 +96,9 @@ namespace PearNowPlaying
             lyricsItem = new ToolStripMenuItem("가사 표시", null, (s, e) => ToggleLyrics());
             coverLyricsItem = new ToolStripMenuItem("커버곡 가사 표시(beta)", null, (s, e) => ToggleCoverLyrics());
             retryLyricsItem = new ToolStripMenuItem("가사 다시 찾기", null, (s, e) => RetryLyrics());
-            offsetMenu = new ToolStripMenuItem("가사 타이밍");
-            foreach (var pair in new[] { Tuple.Create("1초 빠르게", 1300), Tuple.Create("0.5초 빠르게", 800), Tuple.Create("기본", 300),
-                                         Tuple.Create("0.5초 늦게", -200), Tuple.Create("1초 늦게", -700) })
-            {
-                var v = pair.Item2;
-                offsetMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item1, null, (s, e) => SetOffset(v)) { Tag = v });
-            }
+            // lyrics timing for this video (kept per video ID, added to the one for all songs) and for all songs
+            songOffsetMenu = TimingMenu("이 곡 가사 타이밍", ShiftSongOffset);
+            offsetMenu = TimingMenu("모든 곡 가사 타이밍", ShiftOffset);
             // filled when the menu opens (screens and widgets can change)
             displayMenu = new ToolStripMenuItem("표시");
             placeMenu = new ToolStripMenuItem("위치");
@@ -117,7 +114,7 @@ namespace PearNowPlaying
             var widgetMenu = new ToolStripMenuItem("위젯");
             widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, titleMenu, displayMenu, placeMenu, sizeMenu, transparencyMenu, new ToolStripSeparator(), moveItem });
             var lyricsMenu = new ToolStripMenuItem("가사");
-            lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, coverLyricsItem, retryLyricsItem, offsetMenu });
+            lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, coverLyricsItem, retryLyricsItem, songOffsetMenu, offsetMenu });
             // where songs come from (same items as the macOS version's 재생 앱 menu)
             sourceMenu = new ToolStripMenuItem("재생 앱");
             foreach (var pair in new[] { Tuple.Create("auto", "자동 (브라우저, Pear Desktop)"), Tuple.Create("browser", "브라우저"), Tuple.Create("pear", "Pear Desktop") })
@@ -435,7 +432,7 @@ namespace PearNowPlaying
                 force = true;
             }
 
-            int ms = (int)Math.Round(PlaybackPosition * 1000) + cfg.LyricsOffsetMs;
+            int ms = (int)Math.Round(PlaybackPosition * 1000) + cfg.LyricsOffsetMs + timing.For(pear.Current.VideoId);
             int entry = MainView.EntryFor(lyrics.IndexAt(ms));
             bool paused = !pear.IsPlaying;
 
@@ -564,10 +561,65 @@ namespace PearNowPlaying
             else if (lyrics != null && !lyrics.HasSynced) ShowInfo("이 곡의 싱크 가사를 찾지 못했습니다");
         }
 
-        void SetOffset(int ms)
+        static readonly int[] TimingSteps = { 500, 100, -100, -500 };
+
+        /// <summary>
+        /// A 가사 타이밍 submenu: the timing now, 0.5 s and 0.1 s steps either way, and back to the default. shift gets a step,
+        /// or null for the default. Clicks inside don't close the menu, so a step can be clicked several times in a row
+        /// while the lyrics move (AutoClose is off only while the mouse is in it, so clicking elsewhere still closes it).
+        /// </summary>
+        ToolStripMenuItem TimingMenu(string title, Action<int?> shift)
         {
-            cfg.LyricsOffsetMs = ms;
+            var sub = new ToolStripMenuItem(title);
+            sub.DropDownItems.Add(new ToolStripMenuItem("지금: 기본") { Enabled = false });
+            foreach (var step in TimingSteps)
+            {
+                var d = step;
+                sub.DropDownItems.Add(new ToolStripMenuItem(LyricsTiming.Text(d), null, (s, e) => shift(d)));
+            }
+            sub.DropDownItems.Add(new ToolStripSeparator());
+            sub.DropDownItems.Add(new ToolStripMenuItem("기본으로 되돌리기", null, (s, e) => shift(null)));
+            sub.DropDown.MouseEnter += (s, e) => sub.DropDown.AutoClose = false;
+            sub.DropDown.MouseLeave += (s, e) => sub.DropDown.AutoClose = true;
+            sub.DropDown.Closed += (s, e) => sub.DropDown.AutoClose = true;
+            return sub;
+        }
+
+        /// <summary>Shows a timing (relative to the default) at the top of its submenu; back to the default only when it isn't.</summary>
+        static void SyncTimingMenu(ToolStripMenuItem sub, int ms)
+        {
+            sub.DropDownItems[0].Text = "지금: " + LyricsTiming.Text(ms);
+            sub.DropDownItems[sub.DropDownItems.Count - 1].Enabled = ms != 0;
+        }
+
+        void SyncTimingMenus()
+        {
+            var id = pear.Current.VideoId;
+            songOffsetMenu.Enabled = pear.Current.HasData && LyricsTiming.CanKeep(id);
+            SyncTimingMenu(songOffsetMenu, timing.For(id));
+            SyncTimingMenu(offsetMenu, cfg.LyricsOffsetMs - Config.DefaultLyricsOffsetMs);
+        }
+
+        /// <summary>This video's lyrics timing: a step (+ = lyrics earlier), or null for the default.</summary>
+        void ShiftSongOffset(int? step)
+        {
+            var id = pear.Current.VideoId;
+            if (!LyricsTiming.CanKeep(id)) return;
+            int ms = timing.Set(id, step.HasValue ? timing.For(id) + step.Value : 0);
+            SyncTimingMenus();
+            ShowInfo(ms == 0 ? "이 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "이 곡의 가사를 " + LyricsTiming.Text(ms) + " 표시합니다");
+            TickLyrics(true);
+        }
+
+        /// <summary>The lyrics timing for all songs: a step (+ = lyrics earlier), or null for the default.</summary>
+        void ShiftOffset(int? step)
+        {
+            int ms = step.HasValue ? cfg.LyricsOffsetMs + step.Value : Config.DefaultLyricsOffsetMs;
+            cfg.LyricsOffsetMs = Math.Max(-Config.LyricsOffsetLimit, Math.Min(Config.LyricsOffsetLimit, ms));
             cfg.Save();
+            SyncTimingMenus();
+            int rel = cfg.LyricsOffsetMs - Config.DefaultLyricsOffsetMs;
+            ShowInfo(rel == 0 ? "모든 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "모든 곡의 가사를 " + LyricsTiming.Text(rel) + " 표시합니다");
             TickLyrics(true);
         }
 
@@ -1201,6 +1253,7 @@ namespace PearNowPlaying
         {
             var old = cfg;
             cfg = Config.Load();
+            timing = new LyricsTiming(LyricsTiming.DefaultPath);
             RegisterHotkeys();
             lyricsProvider.BaseUrl = (cfg.LyricsServer ?? "https://lrclib.net").TrimEnd('/');
             ApplyLyricsSources();
@@ -1235,7 +1288,7 @@ namespace PearNowPlaying
             updateItem.Text = update != null ? "업데이트 설치 (" + update.Version + ")" : "업데이트 확인";
             foreach (ToolStripMenuItem it in titleMenu.DropDownItems) it.Checked = (bool)it.Tag == cfg.VideoTitle;
             BuildWidgetMenus();
-            foreach (ToolStripMenuItem it in offsetMenu.DropDownItems) it.Checked = (int)it.Tag == cfg.LyricsOffsetMs;
+            SyncTimingMenus();
             foreach (ToolStripMenuItem it in sourceMenu.DropDownItems) it.Checked = (string)it.Tag == cfg.Source;
             discordItem.Checked = cfg.DiscordPresence;
             discordButtonItem.Checked = cfg.DiscordButton;

@@ -84,10 +84,15 @@ struct PlayerState {
     }()
     private let directory: URL
     private let loadRemoteAssets: Bool
+    /// This video's lyrics timing (가사 타이밍 → 이 곡), added to settings.lyricsOffsetMs.
+    private(set) var timing: LyricsTiming
     init(directory: URL = Settings.directory, loadRemoteAssets: Bool = true) {
         self.directory = directory; self.loadRemoteAssets = loadRemoteAssets
+        timing = LyricsTiming(file: directory.appendingPathComponent("lyrics-timing.json"))
         applyLyricsSources()
     }
+    /// The lyrics timing for the song now in seconds (+ = lyrics earlier): the one for all songs plus this video's.
+    var lyricsOffset: Double { (settings.lyricsOffsetMs + Double(timing.ms(for: song.videoId))) / 1000 }
     func applyLyricsSources() {
         lyrics.useYtm = settings.ytmLyrics
         lyrics.useMore = settings.moreLyrics
@@ -139,7 +144,11 @@ struct PlayerState {
     /// the browser alone, and nothing is asked again and again while Pear isn't there.
     private var linkRequested = false
     func stop() { discord.show(nil); connection?.cancel(); lyricTask?.cancel(); prefetchTask?.cancel(); artTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); stopBrowser() }
-    func reload() { settings = Settings.load(); settings.save(); applyLyricsSources(); start() }
+    func reload() {
+        settings = Settings.load(); settings.save(); applyLyricsSources()
+        timing = LyricsTiming(file: directory.appendingPathComponent("lyrics-timing.json"))
+        start()
+    }
     private func persistToken(_ value: String) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try Data(value.utf8).write(to: tokenFile, options: .atomic)

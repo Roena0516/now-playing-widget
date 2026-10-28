@@ -116,6 +116,36 @@ import CoreGraphics
     titled.handle(["type": "PLAYER_INFO", "song": ["title": "Lemon", "mediaType": "ORIGINAL_MUSIC_VIDEO", "videoId": "mv"]])
     precondition(titled.cardTitle == "Lemon", "no video title: the song title")
     titled.stop()
+    // lyrics timing per video (가사 타이밍 → 이 곡): kept in lyrics-timing.json, added to the one for all songs
+    precondition(LyricsTiming.text(0) == "기본" && LyricsTiming.text(300) == "0.3초 빠르게" && LyricsTiming.text(-1000) == "1초 늦게"
+                 && LyricsTiming.text(1200) == "1.2초 빠르게" && LyricsTiming.text(-250) == "0.25초 늦게")
+    let timingDir = FileManager.default.temporaryDirectory.appendingPathComponent("timing-test-\(UUID().uuidString)")
+    let timingFile = timingDir.appendingPathComponent("lyrics-timing.json")
+    let timing = LyricsTiming(file: timingFile, maxEntries: 3)
+    precondition(timing.set("not-an-id", 500) == 0 && !FileManager.default.fileExists(atPath: timingFile.path), "no video ID: nothing kept")
+    precondition(timing.set("MFEaIgMkR_0", 1200) == 1200 && timing.set("aaaaaaaaaaa", -300) == -300 && timing.set("bbbbbbbbbbb", 99999) == LyricsTiming.limit)
+    let reread = LyricsTiming(file: timingFile, maxEntries: 3)
+    precondition(reread.ms(for: "MFEaIgMkR_0") == 1200 && reread.ms(for: "aaaaaaaaaaa") == -300 && reread.ms(for: "bbbbbbbbbbb") == 30000)
+    reread.set("MFEaIgMkR_0", 1300); reread.set("ccccccccccc", 100)   // a change makes it the newest; the oldest goes
+    let trimmed = LyricsTiming(file: timingFile, maxEntries: 3)
+    precondition(trimmed.ms(for: "aaaaaaaaaaa") == 0 && trimmed.ms(for: "MFEaIgMkR_0") == 1300 && trimmed.ms(for: "ccccccccccc") == 100
+                 && trimmed.ms(for: "bbbbbbbbbbb") == 30000, "the oldest change goes over the limit")
+    trimmed.set("ccccccccccc", 0)
+    precondition(!(try! String(contentsOf: timingFile, encoding: .utf8)).contains("ccccccccccc"), "back to the default forgets the video")
+    try! Data(#"{"version":1,"videos":[{"id":"bbbbbbbbbbb","ms":30000},{"id":"MFEaIgMkR_0","ms":-700},{"id":"x","ms":5}]}"#.utf8).write(to: timingFile)
+    precondition(LyricsTiming(file: timingFile).ms(for: "MFEaIgMkR_0") == -700, "the Windows version's file")
+    try! Data("{ not json".utf8).write(to: timingFile)
+    precondition(LyricsTiming(file: timingFile).ms(for: "MFEaIgMkR_0") == 0, "an unreadable file is ignored")
+    let timed = PearClient(directory: timingDir, loadRemoteAssets: false)
+    timed.timing.set("MFEaIgMkR_0", 1200)
+    timed.settings.lyricsOffsetMs = 300
+    timed.handle(["type": "PLAYER_INFO", "song": ["title": "x", "videoId": "MFEaIgMkR_0", "mediaType": "ORIGINAL_MUSIC_VIDEO"]])
+    precondition(abs(timed.lyricsOffset - 1.5) < 0.0001, "this video's timing is added")
+    timed.handle(["type": "PLAYER_INFO", "song": ["title": "y", "videoId": "zzzzzzzzzzz", "mediaType": "AUDIO"]])
+    precondition(abs(timed.lyricsOffset - 0.3) < 0.0001, "another video: the timing for all songs")
+    timed.stop()
+    try? FileManager.default.removeItem(at: timingDir)
+    precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"lyricsOffsetMs":99999}"#.utf8)).lyricsOffsetMs == 10000)
     // the next song's lyrics scroll on from the last song's line instead of restarting at the top
     let view = NativeLyricsLayout()
     let first = (0..<5).map { LyricLine(id: $0, time: Double($0 * 10), text: "first \($0)") }
@@ -150,7 +180,7 @@ import CoreGraphics
     precondition(abs((view.entries[2].y - view.entries[1].y) - gapToFirst) < 0.001, "and its lines stay where they were")
     view.setLines(second, width: 500, carryFrom: 3)
     precondition(view.carried == 0, "a new width lays out from scratch")
-    print("PASS: LRC timestamps, multi-tags, offset, blank lines, lyric selection, scrolling on into the next song, Pear song/state/seek messages")
+    print("PASS: LRC timestamps, multi-tags, offset, lyrics timing per video, blank lines, lyric selection, scrolling on into the next song, Pear song/state/seek messages")
 }
 
 @MainActor func runIntegrationTest() async {

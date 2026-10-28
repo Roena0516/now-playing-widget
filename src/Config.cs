@@ -111,7 +111,9 @@ namespace PearNowPlaying
         /// <summary>Look for a new release on GitHub at start and once a day (installing is always the user's choice).</summary>
         public bool CheckUpdates = true;
         public bool LyricsShowNext = true;
-        public int LyricsOffsetMs = 300;
+        /// <summary>Lyrics timing for all songs in ms (+ = earlier); a video's own timing (LyricsTiming) is added to it.</summary>
+        public int LyricsOffsetMs = DefaultLyricsOffsetMs;
+        public const int DefaultLyricsOffsetMs = 300, LyricsOffsetLimit = 10000;
         public string LyricsServer = "https://lrclib.net";
         public bool YtmLyrics = true;
         public string YtmLyricsProxy = PearNowPlaying.YtmLyrics.DefaultProxy;
@@ -196,7 +198,7 @@ namespace PearNowPlaying
                 c.CoverLyrics = GetBool(map, "coverLyrics", !GetBool(map, "lyricsAlbumOnly", !c.CoverLyrics));
                 c.CheckUpdates = GetBool(map, "checkUpdates", c.CheckUpdates);
                 c.LyricsShowNext = GetBool(map, "lyricsShowNext", c.LyricsShowNext);
-                c.LyricsOffsetMs = Math.Max(-10000, Math.Min(10000, GetInt(map, "lyricsOffsetMs", c.LyricsOffsetMs)));
+                c.LyricsOffsetMs = Math.Max(-LyricsOffsetLimit, Math.Min(LyricsOffsetLimit, GetInt(map, "lyricsOffsetMs", c.LyricsOffsetMs)));
                 c.LyricsServer = Get(map, "lyricsServer", c.LyricsServer);
                 c.YtmLyrics = GetBool(map, "ytmLyrics", c.YtmLyrics);
                 c.YtmLyricsProxy = Get(map, "ytmLyricsProxy", c.YtmLyricsProxy);
@@ -271,7 +273,7 @@ namespace PearNowPlaying
                 sb.AppendLine("coverLyrics=" + B(CoverLyrics));
                 sb.AppendLine("# 다음 줄 가사도 작게 표시");
                 sb.AppendLine("lyricsShowNext=" + B(LyricsShowNext));
-                sb.AppendLine("# 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다.");
+                sb.AppendLine("# 모든 곡의 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다. 곡(영상)별 보정은 lyrics-timing.json에 따로 저장하고 이 값에 더합니다.");
                 sb.AppendLine("lyricsOffsetMs=" + LyricsOffsetMs.ToString(inv));
                 sb.AppendLine("lyricsServer=" + LyricsServer);
                 sb.AppendLine("# YouTube Music 가사를 먼저 찾고, 실패하면 LRCLIB로 찾기 (Pear Desktop의 YTMusic 가사 제공자와 같은 방식). 메뉴에는 없는 설정입니다.");

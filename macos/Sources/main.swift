@@ -208,11 +208,10 @@ import CoreText
         add(lyrics, "가사 표시", #selector(toggleLyrics), state: client.settings.showLyrics)
         add(lyrics, "커버곡 가사 표시(beta)", #selector(toggleCoverLyrics), state: client.settings.coverLyrics)
         add(lyrics, "가사 다시 찾기", #selector(findLyrics))
-        let timing = NSMenu()
-        for (title, value) in [("1초 빠르게", 1300), ("0.5초 빠르게", 800), ("기본", 300), ("0.5초 늦게", -200), ("1초 늦게", -700)] {
-            add(timing, title, #selector(offset(_:)), state: Int(client.settings.lyricsOffsetMs) == value, represented: value)
-        }
-        submenu(lyrics, "가사 타이밍", timing)
+        // lyrics timing for this video (kept per video ID, added to the one for all songs) and for all songs
+        let videoId = client.song.videoId
+        timingMenu(lyrics, "이 곡 가사 타이밍", client.timing.ms(for: videoId), enabled: !client.song.title.isEmpty && LyricsTiming.canKeep(videoId)) { [unowned self] in self.shiftSongOffset($0) }
+        timingMenu(lyrics, "모든 곡 가사 타이밍", Int(client.settings.lyricsOffsetMs - Settings.defaultLyricsOffsetMs), enabled: true) { [unowned self] in self.shiftOffset($0) }
         submenu(menu, "가사", lyrics)
         let sources = NSMenu()
         for (value, label) in [("auto", "자동 (브라우저, Pear Desktop)"), ("browser", "브라우저"), ("pear", "Pear Desktop")] {
@@ -235,6 +234,42 @@ import CoreText
     }
     func submenu(_ menu: NSMenu, _ title: String, _ sub: NSMenu) {
         let entry = NSMenuItem(title: title, action: nil, keyEquivalent: ""); entry.submenu = sub; menu.addItem(entry)
+    }
+    /// A 가사 타이밍 submenu like the Windows version's: the timing now (relative to the default), 0.5 s and 0.1 s steps
+    /// either way, and back to the default. Its rows (MenuRow) don't close the menu, so a step can be clicked several
+    /// times in a row while the lyrics move. shift gets a step, or nil for the default, and returns the timing it set.
+    func timingMenu(_ menu: NSMenu, _ title: String, _ value: Int, enabled: Bool, shift: @escaping (Int?) -> Int) {
+        guard enabled else { add(menu, title, nil); return }
+        let sub = NSMenu(); sub.autoenablesItems = false
+        let now = MenuRow("지금: " + LyricsTiming.text(value), enabled: false)
+        let reset = MenuRow("기본으로 되돌리기", enabled: value != 0)
+        let apply: (Int?) -> Void = { [weak now, weak reset] step in
+            let ms = shift(step)
+            now?.title = "지금: " + LyricsTiming.text(ms); reset?.isEnabled = ms != 0
+        }
+        sub.addRow(now)
+        for step in [500, 100, -100, -500] { sub.addRow(MenuRow(LyricsTiming.text(step)) { apply(step) }) }
+        sub.addItem(.separator())
+        reset.perform = { apply(nil) }
+        sub.addRow(reset)
+        submenu(menu, title, sub)
+    }
+    /// This video's lyrics timing: a step (+ = lyrics earlier), or nil for the default. Same messages as the Windows version.
+    func shiftSongOffset(_ step: Int?) -> Int {
+        let id = client.song.videoId
+        guard LyricsTiming.canKeep(id) else { return 0 }
+        let ms = client.timing.set(id, step.map { client.timing.ms(for: id) + $0 } ?? 0)
+        overlay.showInfo(ms == 0 ? "이 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "이 곡의 가사를 \(LyricsTiming.text(ms)) 표시합니다")
+        return ms
+    }
+    /// The lyrics timing for all songs: a step (+ = lyrics earlier), or nil for the default.
+    func shiftOffset(_ step: Int?) -> Int {
+        let ms = step.map { client.settings.lyricsOffsetMs + Double($0) } ?? Settings.defaultLyricsOffsetMs
+        client.settings.lyricsOffsetMs = max(-Settings.lyricsOffsetLimit, min(Settings.lyricsOffsetLimit, ms))
+        client.settings.save()
+        let relative = Int(client.settings.lyricsOffsetMs - Settings.defaultLyricsOffsetMs)
+        overlay.showInfo(relative == 0 ? "모든 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "모든 곡의 가사를 \(LyricsTiming.text(relative)) 표시합니다")
+        return relative
     }
     func save() { client.settings.save(); client.applyLyricsSources(); overlay.show(); updateMenu() }
     @objc func show() { overlay.show() }
@@ -293,7 +328,6 @@ import CoreText
     }
     @objc func size(_ sender: NSMenuItem) { setWidget(sender) { $0.scale = $1 } }
     @objc func transparency(_ sender: NSMenuItem) { setWidget(sender) { $0.transparency = $1 } }
-    @objc func offset(_ sender: NSMenuItem) { client.settings.lyricsOffsetMs = Double(sender.representedObject as! Int); save() }
     @objc func songSource(_ sender: NSMenuItem) {
         let value = sender.representedObject as! String
         guard client.settings.source != value else { return }

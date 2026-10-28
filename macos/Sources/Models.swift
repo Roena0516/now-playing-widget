@@ -55,7 +55,9 @@ struct Settings: Codable {
     var coverLyrics = true
     /// look for a new release on GitHub at start and once a day (installing is always the user's choice)
     var checkUpdates = true
-    var lyricsOffsetMs: Double = 300
+    /// lyrics timing for all songs in ms (+ = earlier); a video's own timing (LyricsTiming) is added to it
+    var lyricsOffsetMs: Double = Settings.defaultLyricsOffsetMs
+    static let defaultLyricsOffsetMs: Double = 300, lyricsOffsetLimit: Double = 10000
     var ytmLyrics = true
     var ytmLyricsProxy = YTMusicProvider.defaultProxy
     /// ask Kugou and NetEase when LRCLIB has no synced lyrics
@@ -101,7 +103,7 @@ struct Settings: Codable {
         hotkeyShow = try value(.hotkeyShow, hotkeyShow); hotkeyToggle = try value(.hotkeyToggle, hotkeyToggle)
         hotkeyNext = try value(.hotkeyNext, hotkeyNext); hotkeyPrevious = try value(.hotkeyPrevious, hotkeyPrevious)
         hotkeyAlwaysShow = try value(.hotkeyAlwaysShow, hotkeyAlwaysShow); hotkeyLyrics = try value(.hotkeyLyrics, hotkeyLyrics)
-        lyricsOffsetMs = try value(.lyricsOffsetMs, lyricsOffsetMs)
+        lyricsOffsetMs = max(-Self.lyricsOffsetLimit, min(Self.lyricsOffsetLimit, try value(.lyricsOffsetMs, lyricsOffsetMs)))
         // until 2.0.2: lyricsAlbumOnly true, the same as coverLyrics false
         let legacy = try decoder.container(keyedBy: LegacyKeys.self)
         coverLyrics = try c.decodeIfPresent(Bool.self, forKey: .coverLyrics) ?? !(legacy.decodeIfPresent(Bool.self, forKey: .lyricsAlbumOnly) ?? !coverLyrics)

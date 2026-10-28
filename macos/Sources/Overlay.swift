@@ -277,7 +277,7 @@ struct MarqueeTitle: Equatable {
         // the song just changed and refresh() hasn't swapped the lyrics yet: the old ones must not follow the new
         // song's position (they scrolled back to the top before the next song's lines came in)
         if lyricsVisible && linesSong == client.song.identity {
-            let index = lyrics.entry(at: client.elapsed + client.settings.lyricsOffsetMs / 1000, lines: lines)
+            let index = lyrics.entry(at: client.elapsed + client.lyricsOffset, lines: lines)
             if index != current && lyrics.entries.indices.contains(index) {
                 scrollFrom = scroll; scrollTo = lyrics.entries[index].y - lyrics.anchor
                 previous = current; current = index
@@ -301,7 +301,7 @@ struct MarqueeTitle: Equatable {
             lyrics.setLines(lines, width: client.settings.panelWidth, carryFrom: carry)
             lyrics.setNext(client.nextLines); shownNext = client.nextLines
             current = lyrics.carriedCurrent >= 0 ? lyrics.carriedCurrent   // still on the last song's line; tick() glides on
-                : lyrics.entry(at: client.elapsed + client.settings.lyricsOffsetMs / 1000, lines: lines)
+                : lyrics.entry(at: client.elapsed + client.lyricsOffset, lines: lines)
             previous = -1
             scrollTo = lyrics.entries.indices.contains(current) ? lyrics.entries[current].y - lyrics.anchor : 0
             scrollFrom = scrollTo; lyricStart = .distantPast
