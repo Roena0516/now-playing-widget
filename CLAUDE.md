@@ -5,7 +5,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 - 저장소: `Roena0516/now-playing-widget`(이전 이름 `pear-now-playing`, GitHub가 예전 주소를 넘겨 줍니다)
 - 이전 이름을 그대로 두는 것: 설정·로그·캐시 폴더(`PearNowPlaying`, `PearNowPlaying-macOS`), 맥 번들 ID(`io.github.pdh0128.pear-now-playing.macos`), Pear 인증 ID(`pear-now-playing`, `pear-now-playing-macos`: 바꾸면 Pear가 허용 창을 다시 띄웁니다), Windows 단일 실행 뮤텍스, C# 네임스페이스(`PearNowPlaying`). 업데이트한 사용자의 설정, 권한, 저장된 가사가 이어지게 하기 위해서입니다.
 - 사용자 문서: `README.md` (한국어, 합니다체)
-- 버전: 올리는 기준과 고칠 곳은 `VERSIONING.md`에 있습니다. Windows는 `src/Program.cs`의 AssemblyVersion(현재 2.0.4.0, User-Agent도 이 값을 읽음)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
+- 버전: 올리는 기준과 고칠 곳은 `VERSIONING.md`에 있습니다. Windows는 `src/Program.cs`의 AssemblyVersion(현재 2.0.5.0, User-Agent도 이 값을 읽음)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
 - macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). **맥 버전은 웬만하면 Windows 버전을 따라갑니다**(사용자 방침): 메뉴 구성과 이름, 상태·안내 문구, 기본값, 설정 키(단축키 문자열 형식 `Ctrl+Alt+Up` 포함), 로그 파일 이름과 형식, 동작 규칙을 Windows와 같게 맞추고, 플랫폼 차이 때문에 어쩔 수 없을 때만 다르게 합니다. 지금 남아 있는 차이: 설정 파일 형식(Windows `config.ini`, 맥 `config.json`), 여백 기본값과 단위(Windows 40/140px, 맥 Dock과 메뉴 막대를 뺀 영역 기준 24/24pt), 맥의 "Pear Desktop 연결 요청"이 음악 앱의 `config.json`에서 API 서버를 켜 주는 기능(PR #1에서 온 것), 맥 버전에 없는 `https` 설정, Windows의 안내 풍선(맥은 안내 카드로 대신함). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`, `MoreLyrics.cs` ↔ `MoreLyrics.swift`).
 
 ## 작업 방식
