@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import CoreText
 
-@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let client = PearClient()
     let hotkeys = Hotkeys()
     var overlay: OverlayController!
@@ -15,6 +15,10 @@ import CoreText
     var update: UpdateInfo?         // a newer release found on GitHub
     var announcedUpdate = ""        // told the user about this version already
     var installing = false
+    var checkingUpdate = false      // a check from the menu header's button is under way
+    var upToDateShown = false       // that check found nothing newer: the button says so until the menu opens again
+    weak var header: MenuHeader?    // the open menu's header (its button changes while the menu stays open)
+    var menuOpen = false, menuDirty = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         Log.migrate()
@@ -65,7 +69,8 @@ import CoreText
         }
     }
 
-    func checkForUpdate(manual: Bool) async {
+    /// Asks GitHub for a newer release; false when that failed.
+    @discardableResult func checkForUpdate(manual: Bool) async -> Bool {
         do {
             let found = try await updater.check()
             update = found; updateMenu()
@@ -76,11 +81,38 @@ import CoreText
                     overlay.showInfo("새 버전 \(found.version)이 나왔습니다. 메뉴에서 업데이트할 수 있습니다")
                 }
             } else if manual { overlay.showInfo("최신 버전입니다 (\(appVersion))") }
+            return true
         } catch {
             Log.write("INFO update check failed: \(error.localizedDescription)")
             if manual { overlay.showInfo("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오") }
+            return false
         }
     }
+
+    var headerButton: UpdateButton {
+        if installing { return .installing }
+        if let update { return .install(update.version) }
+        if checkingUpdate { return .checking }
+        return upToDateShown ? .upToDate : .check
+    }
+    /// The header's button: installs a newer version (the menu has closed), or checks with the menu left open.
+    func headerClicked(_ pressed: UpdateButton) {
+        if case .install = pressed { updateClicked(); return }
+        guard !checkingUpdate else { return }
+        checkingUpdate = true; header?.button = headerButton
+        Task {
+            let ok = await checkForUpdate(manual: true)
+            checkingUpdate = false; upToDateShown = ok && update == nil
+            header?.button = headerButton
+        }
+    }
+    // the menu isn't rebuilt while it is open (the open one would stay as it was); the header's button changes in place
+    func menuWillOpen(_ menu: NSMenu) { menuOpen = true; upToDateShown = false; header?.button = headerButton }
+    func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
+        if menuDirty { menuDirty = false; updateMenu() }
+    }
+    @objc func headerItem() {}   // the header's item needs an action to be enabled; its view takes the clicks
 
     @objc func updateClicked() {
         guard let target = update else {
@@ -89,7 +121,7 @@ import CoreText
             return
         }
         guard !installing else { return }
-        installing = true
+        installing = true; updateMenu()
         overlay.showInfo("업데이트를 받고 있습니다 (\(target.version))")
         Task {
             var dmg: URL?
@@ -103,7 +135,7 @@ import CoreText
             } catch {
                 // e.g. no permission to replace the app (another user's install, run from the DMG): install by hand
                 Log.write("WARN update to \(target.version) failed: \(error.localizedDescription)")
-                installing = false
+                installing = false; updateMenu()
                 overlay.showInfo(dmg != nil ? "업데이트하지 못했습니다. 받은 파일을 엽니다" : "업데이트하지 못했습니다. 릴리스 페이지를 엽니다")
                 if let dmg { NSWorkspace.shared.open(dmg) } else if let page = URL(string: target.pageURL) { NSWorkspace.shared.open(page) }
             }
@@ -137,9 +169,15 @@ import CoreText
     }
     func updateMenu() {
         guard item != nil else { return }
+        if menuOpen { menuDirty = true; header?.button = headerButton; return }
         let menu = NSMenu()
-        // at the top, so a new version ("업데이트 설치 (x.y.z)") is seen first (like the Windows version)
-        add(menu, update.map { "업데이트 설치 (\($0.version))" } ?? "업데이트 확인", #selector(updateClicked))
+        menu.delegate = self
+        // at the top, so a new version ("2.0.6 설치" on the button) is seen first (like the Windows version)
+        let top = MenuHeader(button: headerButton)
+        top.onButton = { [weak self] in self?.headerClicked($0) }
+        let entry = NSMenuItem(title: "Now Playing Widget", action: #selector(headerItem), keyEquivalent: "")
+        entry.target = self; entry.view = top
+        menu.addItem(entry); header = top
         menu.addItem(.separator())
         add(menu, preview ? "미리보기 모드" : client.status, nil)
         add(menu, client.lyricsStatus, nil)
@@ -200,6 +238,14 @@ import CoreText
         let settings = client.settings
         perWidget("크기", choices([(0.8, "작게"), (1.0, "보통"), (1.25, "크게"), (1.5, "아주 크게")], #selector(size(_:))) { settings.placed($0).scale })
         perWidget("투명도", choices([(0, "없음"), (0.2, "20%"), (0.4, "40%"), (0.6, "60%")], #selector(transparency(_:))) { $0.transparency ?? 0 })
+        // macOS only (Windows has no Liquid Glass); greyed out before macOS 26
+        if LiquidGlass.available {
+            let glass = NSMenu()
+            for (value, label) in [("off", "사용 안 함"), ("regular", "Regular"), ("clear", "Clear")] {
+                add(glass, label, #selector(liquidGlass(_:)), state: client.settings.liquidGlass == value, represented: value)
+            }
+            submenu(widget, "Liquid Glass 배경(beta)", glass)
+        } else { add(widget, "Liquid Glass 배경(beta, macOS 26 이상)", nil) }
         widget.addItem(.separator())
         add(widget, "위젯 끌어서 옮기기", #selector(toggleMoveMode), state: overlay?.moveMode ?? false)
         submenu(menu, "위젯", widget)
@@ -327,6 +373,10 @@ import CoreText
         client.settings.save(); overlay.rebuildWidgets(); overlay.show(); updateMenu()
     }
     @objc func size(_ sender: NSMenuItem) { setWidget(sender) { $0.scale = $1 } }
+    @objc func liquidGlass(_ sender: NSMenuItem) {
+        client.settings.liquidGlass = sender.representedObject as! String
+        client.settings.save(); overlay.rebuildWidgets(); overlay.show(); updateMenu()
+    }
     @objc func transparency(_ sender: NSMenuItem) { setWidget(sender) { $0.transparency = $1 } }
     @objc func songSource(_ sender: NSMenuItem) {
         let value = sender.representedObject as! String

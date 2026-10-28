@@ -26,8 +26,12 @@ enum NativeTheme {
                        green: a.greenComponent + (b.greenComponent - a.greenComponent) * t,
                        blue: a.blueComponent + (b.blueComponent - a.blueComponent) * t, alpha: 1)
     }
+    /// Set while the overlay draws a card on Liquid Glass (OverlayCanvas.glass): the surface only darkens the glass
+    /// a little so the light text stays readable on bright screens, and has no border (the glass has its own edge).
+    static var glassDimming: Double?
     static func surface(in rect: CGRect, opacity: Double) {
         let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 16, yRadius: 16)
+        if let dim = glassDimming { surface.withAlphaComponent(dim).setFill(); path.fill(); return }
         surface.withAlphaComponent(opacity).setFill(); path.fill()
         border.withAlphaComponent(min(1, opacity + 20 / 255)).setStroke(); path.lineWidth = 1; path.stroke()
     }

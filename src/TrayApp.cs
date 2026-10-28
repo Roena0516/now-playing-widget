@@ -27,7 +27,10 @@ namespace PearNowPlaying
         LyricsTiming timing = new LyricsTiming(LyricsTiming.DefaultPath);   // this video's lyrics timing (가사 타이밍 → 이 곡)
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
-        readonly ToolStripMenuItem updateItem, sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem;
+        readonly ToolStripMenuItem sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem;
+        readonly MenuHeaderItem header;   // the app's name, version and update button, at the top of the menu
+        bool checkingUpdate;      // a check from the header's button is under way
+        bool upToDateShown;       // that check found nothing newer: the button says so until the menu opens again
         readonly DiscordPresence discord = new DiscordPresence();
         UpdateInfo update;          // a newer release found on GitHub
         string announcedUpdate;     // told the user about this version already
@@ -130,9 +133,10 @@ namespace PearNowPlaying
             discordMenu.DropDownItems.AddRange(new ToolStripItem[] { discordItem, discordButtonItem });
             retryAuthItem = new ToolStripMenuItem("Pear Desktop 연결 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); });
 
-            // at the top, so a new version ("업데이트 설치 (x.y.z)") is seen first
-            updateItem = new ToolStripMenuItem("업데이트 확인", null, (s, e) => UpdateClicked());
-            menu.Items.Add(updateItem);
+            // at the top, so a new version ("2.0.6 설치" on the button) is seen first
+            header = new MenuHeaderItem { ButtonState = HeaderButton, NewVersion = () => update != null ? update.Version : "" };
+            header.ButtonClicked += (s, e) => HeaderClicked();
+            menu.Items.Add(header);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(statusItem);
             menu.Items.Add(lyricsInfoItem);
@@ -155,6 +159,7 @@ namespace PearNowPlaying
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("종료", null, (s, e) => ExitThread()));
             menu.Opening += (s, e) => SyncMenuChecks();
+            menu.Closed += (s, e) => menu.AutoClose = true;   // the header turns it off while the mouse is on it
 
             tray = new NotifyIcon
             {
@@ -640,7 +645,8 @@ namespace PearNowPlaying
             });
         }
 
-        async Task CheckForUpdate(bool manual)
+        /// <summary>Asks GitHub for a newer release; false when that failed.</summary>
+        async Task<bool> CheckForUpdate(bool manual)
         {
             try
             {
@@ -659,12 +665,36 @@ namespace PearNowPlaying
                     }
                     else if (manual) ShowInfo("최신 버전입니다 (" + AppInfo.Version + ")");
                 }, null);
+                return true;
             }
             catch (Exception ex)
             {
                 Log.Write("INFO update check failed: " + (ex is OperationCanceledException ? "timeout" : ex.Message));
                 if (manual) ui.Post(_ => ShowInfo("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오"), null);
+                return false;
             }
+        }
+
+        UpdateButton HeaderButton()
+        {
+            if (installing) return UpdateButton.Installing;
+            if (update != null) return UpdateButton.Install;
+            if (checkingUpdate) return UpdateButton.Checking;
+            return upToDateShown ? UpdateButton.UpToDate : UpdateButton.Check;
+        }
+
+        /// <summary>The header's button: installs a newer version (the menu closes), or checks with the menu left open.</summary>
+        void HeaderClicked()
+        {
+            if (update != null) { UpdateClicked(); return; }
+            if (checkingUpdate) return;
+            checkingUpdate = true;
+            header.Invalidate();
+            Task.Run(async () =>
+            {
+                bool ok = await CheckForUpdate(true);
+                ui.Post(_ => { checkingUpdate = false; upToDateShown = ok && update == null; header.Invalidate(); }, null);
+            });
         }
 
         void UpdateClicked()
@@ -1285,7 +1315,8 @@ namespace PearNowPlaying
             lyricsItem.Checked = cfg.ShowLyrics;
             coverLyricsItem.Checked = cfg.CoverLyrics;
             moveItem.Checked = moveMode;
-            updateItem.Text = update != null ? "업데이트 설치 (" + update.Version + ")" : "업데이트 확인";
+            upToDateShown = false;
+            header.Invalidate();
             foreach (ToolStripMenuItem it in titleMenu.DropDownItems) it.Checked = (bool)it.Tag == cfg.VideoTitle;
             BuildWidgetMenus();
             SyncTimingMenus();

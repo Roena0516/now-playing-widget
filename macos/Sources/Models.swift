@@ -45,6 +45,9 @@ struct Settings: Codable {
     /// title shown for videos (not album tracks): "song" = Pear's title, "video" = the video's own title
     /// (Pear's alternativeTitle, what Pear's Discord status shows)
     var videoTitle = "song"
+    /// "Liquid Glass 배경(beta)": the cards on macOS 26's Liquid Glass ("regular" or "clear") instead of the dark
+    /// background, "off" by default; macOS only (see LiquidGlass)
+    var liquidGlass = "off"
     /// show the song playing as "Listening to" on Discord (off unless the user turns it on)
     var discordPresence = false
     /// a button to the project's GitHub page in that Discord status
@@ -98,6 +101,8 @@ struct Settings: Codable {
         showSeconds = try value(.showSeconds, showSeconds); opacity = try value(.opacity, opacity)
         alwaysShow = try value(.alwaysShow, alwaysShow); showLyrics = try value(.showLyrics, showLyrics)
         videoTitle = try value(.videoTitle, videoTitle)
+        liquidGlass = try value(.liquidGlass, liquidGlass)
+        if !LiquidGlass.styles.contains(liquidGlass) { liquidGlass = "off" }
         discordPresence = try value(.discordPresence, discordPresence); discordButton = try value(.discordButton, discordButton)
         showOnPause = try value(.showOnPause, showOnPause); showAlbumArt = try value(.showAlbumArt, showAlbumArt)
         hotkeyShow = try value(.hotkeyShow, hotkeyShow); hotkeyToggle = try value(.hotkeyToggle, hotkeyToggle)

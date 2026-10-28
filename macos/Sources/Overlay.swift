@@ -9,6 +9,8 @@ final class OverlayPanel: NSPanel {
 }
 @MainActor final class OverlayCanvas: NSView {
     var render: (() -> Void)?
+    /// Drawn on Liquid Glass: how much the card's surface darkens the glass instead of covering it (nil = no glass).
+    var glassDimming: Double?
     var scale: CGFloat = 1 { didSet { if scale != oldValue { showMarquee() } } }
     /// The card's title when it scrolls; render() leaves it out (see MarqueeView).
     var marquee: MarqueeTitle? { didSet { if marquee != oldValue { showMarquee() } } }
@@ -30,7 +32,9 @@ final class OverlayPanel: NSPanel {
     override func draw(_ dirtyRect: NSRect) {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current?.cgContext.scaleBy(x: scale, y: scale)
+        NativeTheme.glassDimming = glassDimming
         render?()
+        NativeTheme.glassDimming = nil
         NSGraphicsContext.restoreGraphicsState()
     }
 }
@@ -113,15 +117,45 @@ struct MarqueeTitle: Equatable {
     }
 }
 
+/// "Liquid Glass 배경(beta)": macOS 26's glass (NSGlassEffectView) behind the cards. The view is looked up by name, as
+/// the app is built with an older SDK and runs from macOS 13; on older systems the setting can't be chosen.
+enum LiquidGlass {
+    static let styles = ["off", "regular", "clear"]
+    static var available: Bool { NSClassFromString("NSGlassEffectView") != nil }
+    /// The card's surface over the glass, a share of its usual opacity: "clear" lets the screen through and needs more
+    /// to keep the light text readable on bright screens (compared on white and colorful backgrounds, 2026-10-28).
+    static func dimming(_ style: String, opacity: Double) -> Double { opacity * (style == "clear" ? 0.5 : 0.15) }
+    /// A glass view holding the canvas, or nil when the style is off or the system has no Liquid Glass.
+    @MainActor static func wrap(_ canvas: OverlayCanvas, style: String, opacity: Double) -> NSView? {
+        guard style != "off", let type = NSClassFromString("NSGlassEffectView") as? NSView.Type else { return nil }
+        let glass = type.init(frame: .zero)
+        glass.setValue(style == "clear" ? 1 : 0, forKey: "style")   // NSGlassEffectView.Style: regular 0, clear 1
+        glass.appearance = NSAppearance(named: .darkAqua)            // dark glass under the light text, whatever the system's look
+        canvas.autoresizingMask = [.width, .height]
+        glass.setValue(canvas, forKey: "contentView")
+        canvas.glassDimming = dimming(style, opacity: opacity)
+        return glass
+    }
+}
+
 /// One widget's song card and lyrics panel, on its own screen.
 @MainActor final class WidgetPanels {
     let card = OverlayController.makePanel(), lyrics = OverlayController.makePanel()
     let cardCanvas = OverlayCanvas(), lyricsCanvas = OverlayCanvas()
+    private var glass: [NSView] = []
     var place: WidgetSetting
-    init(_ place: WidgetSetting) {
+    init(_ place: WidgetSetting, glass style: String = "off", opacity: Double = 0.92) {
         self.place = place
-        card.contentView = cardCanvas; lyrics.contentView = lyricsCanvas
+        for (panel, canvas) in [(card, cardCanvas), (lyrics, lyricsCanvas)] {
+            if let view = LiquidGlass.wrap(canvas, style: style, opacity: opacity) { panel.contentView = view; glass.append(view) }
+            else { panel.contentView = canvas }
+        }
         card.maxAlpha = place.opacity; lyrics.maxAlpha = place.opacity
+    }
+    /// The glass's corners follow the cards' (16 pt at this widget's size).
+    func setScale(_ scale: CGFloat) {
+        cardCanvas.scale = scale; lyricsCanvas.scale = scale
+        for view in glass { view.setValue(16 * scale, forKey: "cornerRadius") }
     }
 }
 
@@ -166,7 +200,7 @@ struct MarqueeTitle: Equatable {
         dragging = nil
         for w in widgets { w.card.orderOut(nil); w.lyrics.orderOut(nil) }
         widgets = client.settings.shownWidgets(screenCount: NSScreen.screens.count).map { place in
-            let w = WidgetPanels(place)
+            let w = WidgetPanels(place, glass: client.settings.liquidGlass, opacity: client.settings.opacity)
             w.cardCanvas.render = { [weak self] in
                 guard let self else { return }
                 NativeRenderer.drawCard(self.client, kind: self.kind, marqueeTime: Date().timeIntervalSince(self.marqueeStart), infoText: self.infoText, titleOnLayer: true)
@@ -339,7 +373,7 @@ struct MarqueeTitle: Equatable {
             let placed = config.placed(w.place), scale = placed.scale   // each widget has its own size
             let frames = NativePlacement.frames(screen: screen, config: placed, cardHeight: cardHeight * scale, lyricHeight: lyrics.height * scale,
                                                 cardVisible: cardVisible, lyricsVisible: lyricsVisible)
-            w.cardCanvas.scale = scale; w.lyricsCanvas.scale = scale
+            w.setScale(scale)
             move(w.card, to: frames.card)
             move(w.lyrics, to: frames.lyrics)
         }

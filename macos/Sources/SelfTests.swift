@@ -146,6 +146,16 @@ import CoreGraphics
     timed.stop()
     try? FileManager.default.removeItem(at: timingDir)
     precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"lyricsOffsetMs":99999}"#.utf8)).lyricsOffsetMs == 10000)
+    // "Liquid Glass 배경(beta)": off by default and for unknown values; the glass only where macOS has it (26 and later)
+    precondition(Settings().liquidGlass == "off")
+    precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"liquidGlass":"clear"}"#.utf8)).liquidGlass == "clear")
+    precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"liquidGlass":"frosted"}"#.utf8)).liquidGlass == "off")
+    precondition(LiquidGlass.wrap(OverlayCanvas(), style: "off", opacity: 0.92) == nil)
+    let glassCanvas = OverlayCanvas()
+    if let glass = LiquidGlass.wrap(glassCanvas, style: "clear", opacity: 0.92) {
+        precondition(LiquidGlass.available && (glass.value(forKey: "style") as? Int) == 1 && glass.value(forKey: "contentView") as? OverlayCanvas === glassCanvas)
+        precondition(abs((glassCanvas.glassDimming ?? 0) - 0.46) < 0.0001, "the card's surface only darkens the glass")
+    } else { precondition(!LiquidGlass.available && glassCanvas.glassDimming == nil) }
     // the next song's lyrics scroll on from the last song's line instead of restarting at the top
     let view = NativeLyricsLayout()
     let first = (0..<5).map { LyricLine(id: $0, time: Double($0 * 10), text: "first \($0)") }
