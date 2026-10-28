@@ -395,6 +395,19 @@ namespace PearNowPlaying
             return parts[0].Trim() + " - " + parts[1].Trim() + feat;
         }
 
+        /// <summary>
+        /// How closely a release or track title names the song, for picking the closest of several that SameTitle accepts:
+        /// 0 = one of its names ("(feat. …)" left out), 1 = one of its names with something else in brackets
+        /// ("Mesmerizer (Official English Version)" for メズマライザー - Mesmerizer), 2 = only close.
+        /// </summary>
+        public static int TitleCloseness(string title, IEnumerable<string> names)
+        {
+            var wanted = names.Select(n => Norm(LyricsProvider.WithoutFeat(n))).Where(n => n.Length > 0).ToList();
+            if (wanted.Contains(Norm(LyricsProvider.WithoutFeat(title)))) return 0;
+            if (wanted.Contains(Norm(Regex.Replace(title ?? "", @"[\(\[（【][^\)\]）】]*[\)\]）】]", " ")))) return 1;
+            return 2;
+        }
+
         /// <summary>Does a search hit's title name the same song? (case/width/punctuation ignored; "(feat. …)" etc. allowed)</summary>
         public static bool SameTitle(string hit, string wanted)
         {

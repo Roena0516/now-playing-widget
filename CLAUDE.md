@@ -142,6 +142,7 @@ Windows:
   - 아티스트 페이지를 hl=ja로 받아서 원래의 일본어 제목을 얻은 뒤, 싱글과 앨범(MPREb_) 중 제목이 맞는 것을 고르고, 그 앨범 페이지의 트랙 중 제목이 같고 길이 차이가 ±5초 이내인 트랙을 고릅니다.
   - 아티스트 페이지에 최근 발매작만 보이면 "모두 보기"(`MUSIC_PAGE_TYPE_ARTIST_DISCOGRAPHY`) 페이지도 받아서 확인합니다.
   - 곡 이름은 `CoverLyrics.TitleNames`로 여러 개를 추출하며, 그중 하나라도 맞으면 됩니다. 예를 들어 일본어/영어로 나뉜 제목의 각 부분("サイエンス - Science"), 괄호 안의 영어 제목, 아티스트 부분을 뺀 나머지, 커버 제목에 쓰인 이름을 사용합니다.
+  - 제목이 맞는 싱글·앨범과 트랙이 여럿이면 제목이 가장 가까운 것을 고릅니다(`CoverLyrics.TitleCloseness`/`titleCloseness`, 사용자 방침, 2026-10-28): 곡 이름과 똑같은 제목("(feat. …)"은 빼고 비교)이 먼저이고, 괄호 속에 다른 말이 붙은 제목("(Official English Version)", "(Instrumental)")이 그다음입니다. 똑같은 제목의 트랙을 찾으면 바로 끝내고, 아티스트 페이지에 똑같은 제목의 발매작이 없으면 "모두 보기"도 확인합니다. 2.0.4까지는 제목 비교에서 괄호 속을 무시하고 처음 맞는 트랙을 써서, サツキ의 「メズマライザー - Mesmerizer」 MV에 영어판 싱글 "Mesmerizer (Official English Version)"(158초)의 영어 가사가 붙었습니다. 다른 버전밖에 없으면 그 버전을 그대로 씁니다.
   - 한계: 곡 이름으로 된 싱글이 없고, 이름이 다른 정규 앨범에만 수록되어 있으면 찾지 못합니다.
 - **익명으로 YTM을 검색하면 곡이 결과에 나오지 않기 때문에**(한국 기준) 검색으로 곡을 대조하는 기능은 없습니다. 제목만으로 추정한 원곡은 LRCLIB에서 찾습니다.
 - **설명란**: `www.youtube.com/youtubei/v1/player`(WEB)의 `videoDetails.shortDescription`을 사용하고, 이 요청이 실패하면 WEB `next`의 `attributedDescription`과 링크된 videoId를 사용합니다.

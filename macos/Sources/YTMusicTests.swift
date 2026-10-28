@@ -107,7 +107,34 @@ enum FakeYouTube {
         let audio = try await catalog.findAudioTrack(mv)
         precondition(audio == "atvSong0001" && pages == ["UCband", "MPREb_song"], "Official audio found by name and length")
         _ = try await catalog.findAudioTrack(mv); precondition(pages.count == 2, "Audio tracks are remembered")
-        print("PASS: YTMusic lyric-tab discovery, queue entry, timed/plain/unavailable parsing, relay-only browse with redirect, credential isolation, memo and eviction, relay pause, official audio track search, cancellation")
+
+        // the closest title, not the first that matches: サツキ's 「メズマライザー」 also has an English version single of
+        // about the same length ("Mesmerizer" matched once the brackets were left out, and its English lyrics were shown)
+        let original = TrackInfo(videoId: "19y8YTbvri8", title: "メズマライザー - Mesmerizer", artist: "サツキ", artistId: "UCsatsuki", videoType: "MUSIC_VIDEO_TYPE_OMV", duration: 157)
+        func versions(_ releases: [(String, String)]) -> (YTMusicProvider, () -> [String]) {
+            var asked: [String] = []
+            let provider = YTMusicProvider(transport: { request in
+                let id = FakeYouTube.body(request)["browseId"] as? String ?? ""
+                asked.append(id)
+                switch id {
+                case "UCsatsuki": return try FakeYouTube.ok(request, FakeYouTube.artistPage(releases))
+                case "MPREb_en": return try FakeYouTube.ok(request, FakeYouTube.album([("englishVer1", "Mesmerizer (Official English Version)", "2:38")]))
+                case "MPREb_ja": return try FakeYouTube.ok(request, FakeYouTube.album([("japanese001", "メズマライザー", "2:37"), ("instrumenta", "メズマライザー (Instrumental)", "2:37")]))
+                default: preconditionFailure("unexpected page \(id)")
+                }
+            })
+            return (provider, { asked })
+        }
+        let both = versions([("MPREb_en", "Mesmerizer (Official English Version)"), ("MPREb_ja", "メズマライザー")])
+        let closest = try await both.0.findAudioTrack(original)
+        precondition(closest == "japanese001" && both.1() == ["UCsatsuki", "MPREb_ja"], "The release and track named exactly come first")
+        let englishOnly = versions([("MPREb_en", "Mesmerizer (Official English Version)")])
+        let fallback = try await englishOnly.0.findAudioTrack(original)
+        precondition(fallback == "englishVer1", "Another version still serves when it is all there is")
+        precondition(CoverLyrics.titleCloseness("心を刺す言葉だけ (feat. 初音ミク & 可不)", ["心を刺す言葉だけ", "Only Words"]) == 0
+                     && CoverLyrics.titleCloseness("メズマライザー (Instrumental)", ["メズマライザー"]) == 1
+                     && CoverLyrics.titleCloseness("メズマライザーズ", ["メズマライザー"]) == 2)
+        print("PASS: YTMusic lyric-tab discovery, queue entry, timed/plain/unavailable parsing, relay-only browse with redirect, credential isolation, memo and eviction, relay pause, official audio track search (closest title first), cancellation")
         exit(0)
     } catch { fputs("YTMusic tests failed: \(error)\n", stderr); exit(1) }
 }

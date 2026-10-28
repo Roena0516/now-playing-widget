@@ -343,6 +343,16 @@ enum CoverLyrics {
         return parts[0].trimmed + " - " + parts[1].trimmed + feat
     }
 
+    /// How closely a release or track title names the song, for picking the closest of several that sameTitle accepts:
+    /// 0 = one of its names ("(feat. …)" left out), 1 = one of its names with something else in brackets
+    /// ("Mesmerizer (Official English Version)" for メズマライザー - Mesmerizer), 2 = only close. Same as the Windows version.
+    static func titleCloseness(_ title: String, _ names: [String]) -> Int {
+        let wanted = Set(names.map { norm(LyricsProvider.withoutFeat($0)) }.filter { !$0.isEmpty })
+        if wanted.contains(norm(LyricsProvider.withoutFeat(title))) { return 0 }
+        if wanted.contains(norm(Rx(#"[\(\[（【][^\)\]）】]*[\)\]）】]"#).replace(title, with: " "))) { return 1 }
+        return 2
+    }
+
     /// Does a search hit's title name the same song? (case/width/punctuation ignored; "(feat. …)" etc. allowed)
     static func sameTitle(_ hit: String, _ wanted: String) -> Bool {
         let a = norm(Rx(#"[\(\[（【][^\)\]）】]*[\)\]）】]"#).replace(hit, with: " ")), b = norm(wanted)

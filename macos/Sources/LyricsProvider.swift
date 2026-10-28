@@ -248,7 +248,7 @@ struct LyricRecord: Decodable {
         let t = norm(withoutFeat(trackName))
         return !t.isEmpty && [song.title, song.alternativeTitle].contains { norm(withoutFeat($0)) == t }
     }
-    static func withoutFeat(_ title: String) -> String {
+    nonisolated static func withoutFeat(_ title: String) -> String {
         title.replacingOccurrences(of: #"[\(\[（][^\)\]）]*\b(feat|ft|with)\b[^\)\]）]*[\)\]）]"#, with: " ", options: [.regularExpression, .caseInsensitive])
             .replacingOccurrences(of: #"\s+(feat\.?|ft\.?)\s.*$"#, with: "", options: [.regularExpression, .caseInsensitive])
     }

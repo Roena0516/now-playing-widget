@@ -310,13 +310,18 @@ struct VideoDescription {
         else { artistPage = try await post(browseURL, body: browseBody(video.artistId), label: "artist page"); remember(&artistPages, video.artistId, artistPage) }
         var releases: [(id: String, title: String)] = []
         Self.collectReleases(artistPage, into: &releases)
-        func match() -> [String] {
-            Array(releases.filter { !CoverLyrics.looksArranged($0.title) && named($0.title) }.map(\.id).uniqued().prefix(2))
+        // the closest titles first: "メズマライザー" before "Mesmerizer (Official English Version)", the page's order otherwise
+        func namedReleases() -> [(id: String, title: String)] {
+            releases.enumerated().filter { !CoverLyrics.looksArranged($0.element.title) && named($0.element.title) }
+                .map { (CoverLyrics.titleCloseness($0.element.title, names), $0.offset, $0.element) }
+                .sorted { ($0.0, $0.1) < ($1.0, $1.1) }.map(\.2)
         }
+        func match() -> [String] { Array(namedReleases().map(\.id).uniqued().prefix(2)) }
         var matching = match()
 
-        // The artist page only shows the latest releases; "show all" (full singles / albums lists) has the rest.
-        if matching.isEmpty {
+        // The artist page only shows the latest releases; "show all" (full singles / albums lists) has the rest. Also
+        // looked at when only a different version is on the artist page (a newer English version, the original older).
+        if matching.isEmpty || namedReleases().allSatisfy({ CoverLyrics.titleCloseness($0.title, names) > 0 }) {
             var all: [(id: String, title: String)]
             if let known = fullDiscographies[video.artistId] { all = known }
             else {
@@ -336,7 +341,9 @@ struct VideoDescription {
             log("INFO YouTube Music: no single/album named \"\(title)\" by this artist (\(releases.map(\.id).uniqued().count) releases)")
             return nil
         }
-        for album in matching {
+        // the closest track: one named exactly ends the search, otherwise the closest of the releases looked at
+        var best: (id: String, title: String, length: Double, closeness: Int)?
+        for album in matching where best?.closeness != 0 {
             let page = try await post(browseURL, body: browseBody(album), label: "album page")
             var tracks: [Any] = []
             Self.collectAll("musicResponsiveListItemRenderer", in: page, into: &tracks)
@@ -349,9 +356,15 @@ struct VideoDescription {
                 }
                 if !named(trackTitle) { continue }
                 if length > 0 && abs(length - video.duration) > 5 { continue }
-                log("INFO YouTube Music: official audio for \(video.videoId) (\(video.title)) is \(id) (\(trackTitle), \(Int(length))s)")
-                return id
+                let closeness = CoverLyrics.titleCloseness(trackTitle, names)
+                if closeness >= best?.closeness ?? .max { continue }
+                best = (id, trackTitle, length, closeness)
+                if closeness == 0 { break }
             }
+        }
+        if let best {
+            log("INFO YouTube Music: official audio for \(video.videoId) (\(video.title)) is \(best.id) (\(best.title), \(Int(best.length))s)")
+            return best.id
         }
         log("INFO YouTube Music: no track \"\(title)\" of about \(Int(video.duration))s in \(matching.joined(separator: ", "))")
         return nil

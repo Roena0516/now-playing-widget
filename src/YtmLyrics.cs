@@ -457,14 +457,17 @@ namespace PearNowPlaying
                 artistPage = Remember(artistPages, video.ArtistId, await Post(browseUrl, BrowseBody(video.ArtistId), ct, "artist page"));
             var releases = new List<Tuple<string, string>>();   // (browseId, title)
             CollectReleases(artistPage, releases, 0);
-            Func<List<string>> match = () => releases
+            // the closest titles first: "メズマライザー" before "Mesmerizer (Official English Version)" (OrderBy keeps the page's order otherwise)
+            Func<List<Tuple<string, string>>> namedReleases = () => releases
                 .Where(r => !CoverLyrics.LooksArranged(r.Item2))
                 .Where(r => named(r.Item2))
-                .Select(r => r.Item1).Distinct().Take(2).ToList();
+                .OrderBy(r => CoverLyrics.TitleCloseness(r.Item2, names)).ToList();
+            Func<List<string>> match = () => namedReleases().Select(r => r.Item1).Distinct().Take(2).ToList();
             var matching = match();
 
-            // The artist page only shows the latest releases; "show all" (full singles / albums lists) has the rest.
-            if (matching.Count == 0)
+            // The artist page only shows the latest releases; "show all" (full singles / albums lists) has the rest. Also
+            // looked at when only a different version is on the artist page (a newer English version, the original older).
+            if (matching.Count == 0 || namedReleases().All(r => CoverLyrics.TitleCloseness(r.Item2, names) > 0))
             {
                 List<Tuple<string, string>> all;
                 if (!Recall(fullDiscographies, video.ArtistId, out all))
@@ -484,8 +487,13 @@ namespace PearNowPlaying
                 Log.Info("YouTube Music: no single/album named \"" + title + "\" by this artist (" + releases.Select(r => r.Item1).Distinct().Count() + " releases)");
                 return null;
             }
+            // the closest track: one named exactly ends the search, otherwise the closest of the releases looked at
+            string best = null, bestTitle = null;
+            int bestCloseness = int.MaxValue;
+            double bestLength = 0;
             foreach (var album in matching)
             {
+                if (bestCloseness == 0) break;
                 var page = await Post(MusicBase.TrimEnd('/') + "/youtubei/v1/browse?prettyPrint=false", BrowseBody(album), ct, "album page");
                 var tracks = new List<object>();
                 CollectAll(page, "musicResponsiveListItemRenderer", tracks, 0);
@@ -501,9 +509,16 @@ namespace PearNowPlaying
                     if (fixedCols != null) foreach (var c in fixedCols) { length = ParseClock(Runs(Path(c, "musicResponsiveListItemFixedColumnRenderer", "text"))); if (length > 0) break; }
                     if (!named(trackTitle)) continue;
                     if (length > 0 && Math.Abs(length - video.Duration) > 5) continue;
-                    Log.Info("YouTube Music: official audio for " + video.VideoId + " (" + video.Title + ") is " + id + " (" + trackTitle + ", " + (int)length + "s)");
-                    return id;
+                    int closeness = CoverLyrics.TitleCloseness(trackTitle, names);
+                    if (closeness >= bestCloseness) continue;
+                    best = id; bestTitle = trackTitle; bestLength = length; bestCloseness = closeness;
+                    if (closeness == 0) break;
                 }
+            }
+            if (best != null)
+            {
+                Log.Info("YouTube Music: official audio for " + video.VideoId + " (" + video.Title + ") is " + best + " (" + bestTitle + ", " + (int)bestLength + "s)");
+                return best;
             }
             Log.Info("YouTube Music: no track \"" + title + "\" of about " + (int)video.Duration + "s in " + string.Join(", ", matching));
             return null;
