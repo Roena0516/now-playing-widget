@@ -341,7 +341,9 @@ The Windows version is written in C# 7.3 on .NET Framework 4.8 with WinForms, an
 
 </details>
 
-## License notes
+## License
+
+This project is released under the [MIT License](LICENSE).
 
 The app bundles the Pretendard JP font (Regular, Medium). The font is distributed under the SIL Open Font License 1.1, and the full license text is in [`assets/fonts/PretendardJP-OFL.txt`](assets/fonts/PretendardJP-OFL.txt).
 Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard), with Reserved Font Name Pretendard JP.

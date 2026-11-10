@@ -341,7 +341,9 @@ Windows 版は C# 7.3、.NET Framework 4.8、WinForms で作られており、�
 
 </details>
 
-## ライセンスについて
+## ライセンス
+
+このプロジェクトは [MIT ライセンス](LICENSE)で公開しています。
 
 アプリには Pretendard JP フォント(Regular、Medium)が含まれています。このフォントは SIL Open Font License 1.1 で配布されており、ライセンスの全文は [`assets/fonts/PretendardJP-OFL.txt`](assets/fonts/PretendardJP-OFL.txt) で確認できます。
 Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard), with Reserved Font Name Pretendard JP.
