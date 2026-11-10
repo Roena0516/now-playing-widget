@@ -4,7 +4,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 
 - 저장소: `Roena0516/now-playing-widget`(이전 이름 `pear-now-playing`, GitHub가 예전 주소를 넘겨 줍니다)
 - 이전 이름을 그대로 두는 것: 설정·로그·캐시 폴더(`PearNowPlaying`, `PearNowPlaying-macOS`), 맥 번들 ID(`io.github.pdh0128.pear-now-playing.macos`), Pear 인증 ID(`pear-now-playing`, `pear-now-playing-macos`: 바꾸면 Pear가 허용 창을 다시 띄웁니다), Windows 단일 실행 뮤텍스, C# 네임스페이스(`PearNowPlaying`). 업데이트한 사용자의 설정, 권한, 저장된 가사가 이어지게 하기 위해서입니다.
-- 사용자 문서: `README.md` (한국어, 합니다체)
+- 사용자 문서: `README.md`(영어), `README.ko.md`(한국어, 합니다체), `README.ja.md`(일본어, です・ます体). 세 파일은 구성이 같으며, 내용을 고칠 때는 세 파일을 함께 고칩니다. 앱의 메뉴와 상태 문구는 한국어뿐이므로, 영어와 일본어 문서에서는 번역 옆에 실제 한국어 문구를 그대로 적습니다.
 - 버전: 올리는 기준과 고칠 곳은 `VERSIONING.md`에 있습니다. Windows는 `src/Program.cs`의 AssemblyVersion(현재 2.0.6.0, User-Agent도 이 값을 읽음)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
 - macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). **맥 버전은 웬만하면 Windows 버전을 따라갑니다**(사용자 방침): 메뉴 구성과 이름, 상태·안내 문구, 기본값, 설정 키(단축키 문자열 형식 `Ctrl+Alt+Up` 포함), 로그 파일 이름과 형식, 동작 규칙을 Windows와 같게 맞추고, 플랫폼 차이 때문에 어쩔 수 없을 때만 다르게 합니다. 지금 남아 있는 차이: 설정 파일 형식(Windows `config.ini`, 맥 `config.json`), 여백 기본값과 단위(Windows 40/140px, 맥 Dock과 메뉴 막대를 뺀 영역 기준 24/24pt), 맥의 "Pear Desktop 연결 요청"이 음악 앱의 `config.json`에서 API 서버를 켜 주는 기능(PR #1에서 온 것), 맥 버전에 없는 `https` 설정, Windows의 안내 풍선(맥은 안내 카드로 대신함), 맥에만 있는 "Liquid Glass 배경(beta)"(Windows에는 Liquid Glass가 없음, 사용자 결정 2026-10-28). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`, `MoreLyrics.cs` ↔ `MoreLyrics.swift`).
 
@@ -24,7 +24,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 
 ## 문서 작성 규칙
 
-- `README.md`, `macos/README.md`, `macos/ORIGINAL-BEHAVIOR-AUDIT.ko.md`, `VERSIONING.md`, 이 `CLAUDE.md`를 포함한 모든 문서는 합니다체로 씁니다.
+- `README.ko.md`, `macos/README.md`, `macos/ORIGINAL-BEHAVIOR-AUDIT.ko.md`, `VERSIONING.md`, 이 `CLAUDE.md`를 포함한 모든 문서는 합니다체로 씁니다.
 - 문서를 쓸 때는 사용자가 제공한 한국어 작성 지침(`~/Desktop/fluent-korean-not-coding.md`)을 따릅니다. 예를 들어 의미가 있는 문장 성분과 조사를 생략하지 않고, 문장은 서술어와 종결어미로 끝내며, 비유적인 어휘와 엠대시(—)는 피합니다.
 - 이 지침은 프로젝트 문서에만 적용합니다. 사용자와 대화할 때는 위의 "작업 방식"에 적은 대로 반말(임/함체)을 사용합니다.
 - 앱의 UI 문자열(안내 카드, 알림, 대화상자, 권한 설명)도 문서와 같이 합니다체로 씁니다(사용자 방침, 2026-10-20, 그전에는 해요체였습니다). 사용자에게 무언가를 하도록 요청하는 문장은 "'허용'을 눌러 주십시오"처럼 "~해 주십시오"로 끝냅니다. 메뉴 항목과 상태 줄("연결 준비 중", "가사: 찾는 중")처럼 명사로 끝나는 표시는 그대로 둡니다. DMG 배경에 들어가는 설치 안내 문구도 합니다체입니다. 코드 주석과 로그는 영어로 씁니다. 문서에서 UI 문구를 인용할 때는 실제 문구를 그대로 옮깁니다.
