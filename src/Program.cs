@@ -8,7 +8,8 @@ using System.Windows.Forms;
 [assembly: TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: AssemblyTitle("Now Playing Widget")]
 [assembly: AssemblyProduct("Now Playing Widget")]
-[assembly: AssemblyDescription("브라우저나 Pear Desktop에서 재생하는 YouTube Music 곡과 가사를 화면 위에 표시")]
+// one text for every language (it can't follow the "language" setting), so in English
+[assembly: AssemblyDescription("Shows the song and lyrics playing on YouTube Music (in a browser or Pear Desktop) on top of your screen")]
 [assembly: AssemblyVersion("2.0.6.0")]
 [assembly: AssemblyFileVersion("2.0.6.0")]
 

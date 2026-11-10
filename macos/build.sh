@@ -30,11 +30,19 @@ xcrun lipo -create "${HELPERS[@]}" -output "$APP/Contents/Frameworks/libnowplayi
 # the version lives in one place: appVersion in Sources/Models.swift
 VERSION=$(sed -n 's/^let appVersion = "\(.*\)"$/\1/p' Sources/Models.swift)
 [ -n "$VERSION" ] || { echo "appVersion not found in Sources/Models.swift" >&2; exit 1; }
+# What macOS shows under "... wants access to control (the browser)" the first time a tab is read, in the app's three
+# languages. macOS picks the one for the system's language (not the app's own "language" setting) from the .lproj
+# folders below, and the English one in Info.plist for any other language.
+NOTE_EN="Reads the address of the YouTube Music tab playing in your browser to identify the song. Addresses of other tabs are not read."
+NOTE_KO="브라우저에서 재생 중인 YouTube Music 탭의 주소를 읽어서 곡을 알아냅니다. 다른 탭의 주소는 읽지 않습니다."
+NOTE_JA="ブラウザで再生中の YouTube Music タブのアドレスを読み取って、曲を特定します。他のタブのアドレスは読み取りません。"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Now Playing Widget</string>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleLocalizations</key><array><string>en</string><string>ko</string><string>ja</string></array>
 <key>CFBundleDisplayName</key><string>Now Playing Widget</string>
 <key>CFBundleIdentifier</key><string>io.github.pdh0128.pear-now-playing.macos</string>
 <key>CFBundleExecutable</key><string>NowPlayingWidget</string>
@@ -45,11 +53,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSAppleEventsUsageDescription</key><string>브라우저에서 재생 중인 YouTube Music 탭의 주소를 읽어서 곡을 알아냅니다. 다른 탭의 주소는 읽지 않습니다.</string>
+<key>NSAppleEventsUsageDescription</key><string>$NOTE_EN</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
 cp ../assets/fonts/PretendardJP-Regular.ttf ../assets/fonts/PretendardJP-Medium.ttf ../assets/fonts/PretendardJP-OFL.txt Resources/AppIcon.icns "$APP/Contents/Resources/"
+for PAIR in "en:$NOTE_EN" "ko:$NOTE_KO" "ja:$NOTE_JA"; do
+  LPROJ="$APP/Contents/Resources/${PAIR%%:*}.lproj"
+  mkdir -p "$LPROJ"
+  printf '"NSAppleEventsUsageDescription" = "%s";\n' "${PAIR#*:}" > "$LPROJ/InfoPlist.strings"
+  plutil -lint -s "$LPROJ/InfoPlist.strings"
+done
 codesign --force --sign - "$APP/Contents/Frameworks/libnowplaying.dylib"
 codesign --force --sign - "$APP"
 printf 'Built: %s\n' "$APP"

@@ -3,6 +3,26 @@ import Carbon
 import CoreGraphics
 
 @MainActor func runSelfTests() {
+    // texts in the app's other languages (L): a plain text, one with a value, a status with a detail in brackets
+    L.language = .en
+    precondition(L.t("가사 표시") == "Show lyrics" && L.f("새 버전 {0}이 나왔습니다. 메뉴에서 업데이트할 수 있습니다", "2.1.0").hasPrefix("Version 2.1.0 is out"))
+    precondition(L.shown("가사: 싱크 가사 있음 (LRCLIB · 원곡 검색)") == "Lyrics: synced lyrics found (LRCLIB · original (search))")
+    precondition(L.shown(PearClient.browserConnected("Chrome")) == "Connected to YouTube Music in the browser (Chrome)")
+    precondition(L.shown(PearClient.notLinked) != PearClient.notLinked && L.shown("표에 없는 문구") == "표에 없는 문구")
+    precondition(LyricsTiming.text(-500) == "0.5 s later" && LyricsTiming.text(0) == "default")
+    L.language = .ja
+    precondition(L.t("가사 표시") == "歌詞を表示" && L.source("YouTube Music · 공식 음원") == "YouTube Music · 公式音源")
+    L.language = .ko
+    precondition(L.t("가사 표시") == "가사 표시" && L.shown(PearClient.notLinked) == PearClient.notLinked)
+    for (ko, other) in L.table { precondition(other.count == 2 && !other[0].isEmpty && !other[1].isEmpty, "translation missing: \(ko)") }
+    print("PASS: menu and message texts in English and Japanese (L)")
+    // the automation prompt's explanation is in the bundle in the same three languages (build.sh writes them)
+    for language in ["en", "ko", "ja"] {
+        let file = Bundle.main.url(forResource: "InfoPlist", withExtension: "strings", subdirectory: nil, localization: language)
+        let note = file.flatMap { NSDictionary(contentsOf: $0) }?["NSAppleEventsUsageDescription"] as? String
+        precondition(note?.isEmpty == false, "no automation note for \(language)")
+    }
+    print("PASS: the automation prompt's explanation in three languages")
     let lyrics = parseLRC("[offset:200]\n[00:01.00][00:03.50]안녕 日本語\n[00:02.00]\n[ar:ignored]\n[bad]ignored")
     precondition(lyrics.count == 3 && lyrics[0].text == "안녕 日本語" && abs(lyrics[0].time - 1.2) < 0.001)
     precondition(lyrics[1].text == "♪" && abs(lyrics[2].time - 3.7) < 0.001)

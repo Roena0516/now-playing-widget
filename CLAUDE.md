@@ -96,7 +96,7 @@ Windows:
 - 맥의 `PearClient`는 상태와 안내 문구를 한국어 그대로 둡니다. 상태 문구끼리 비교하고, 테스트가 그 문구를 확인하기 때문입니다. 문구를 보여 주는 곳(메뉴, 안내 카드, 곡 카드)에서 `L.shown`으로 바꿉니다. `L.shown`은 "문구 (세부)" 형식(브라우저 이름, 가사 출처, 다시 시도한 횟수)도 처리합니다.
 - Windows는 메뉴를 시작할 때 한 번만 만들기 때문에, 언어가 바뀌면 앱을 다시 시작합니다(`TrayApp.Restart`, 업데이트와 같은 `--wait-for` 방식). 맥은 메뉴를 매번 새로 만들기 때문에 바로 바뀝니다.
 - 맥의 테스트와 README 그림(`--self-test`, `--lyrics-tests`, `--render-demo`처럼 `--preview`를 뺀 모든 `--` 실행)은 한국어로 고정합니다(`main.swift`). GitHub Actions의 맥은 영어이기 때문입니다.
-- 아직 한국어로만 나오는 것: 맥의 자동화 권한 설명(`NSAppleEventsUsageDescription`), Windows 파일 속성의 설명(`AssemblyDescription`). DMG 배경의 설치 안내("그래도 열기")는 배경 그림이 하나뿐이므로 영어, 한국어, 일본어 세 줄로 함께 적습니다(사용자 요청, 2026-11-10, `macos/Tools/make-art.swift`). 한국어 줄은 합니다체입니다.
+- 앱의 언어 설정을 따르지 않는 문구: 맥의 자동화 권한 설명(`NSAppleEventsUsageDescription`)은 `macos/build.sh`가 `en.lproj`, `ko.lproj`, `ja.lproj`의 `InfoPlist.strings`로 넣고, macOS가 시스템 언어에 맞는 것을 보여 줍니다(그 밖의 언어는 `Info.plist`의 영어). DMG 배경의 설치 안내("그래도 열기")는 배경 그림이 하나뿐이므로 영어, 한국어, 일본어 세 줄로 함께 적습니다(`macos/Tools/make-art.swift`). Windows 파일 속성의 설명(`AssemblyDescription`)은 하나만 넣을 수 있어서 영어로 적습니다(모두 사용자 요청, 2026-11-10). 한국어 줄은 합니다체입니다.
 - 번역 문구의 말투: 일본어는 です・ます体로 쓰고, 영어는 메뉴 항목의 첫 글자만 대문자로 씁니다.
 
 ## 가사를 찾는 순서 (`LyricsProvider.Find`)
