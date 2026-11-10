@@ -73,6 +73,8 @@ namespace PearNowPlaying
         /// <summary>Where songs come from: "auto" (a web browser and Pear Desktop, whichever started playing last),
         /// "browser" (YouTube Music in a web browser only) or "pear" (Pear Desktop only).</summary>
         public string Source = "auto";
+        /// <summary>The language of the menu and messages: "auto" (Windows's display language), "ko", "en" or "ja" (see L).</summary>
+        public string Language = "auto";
 
         // Pear Desktop API server
         public string Host = "127.0.0.1";
@@ -172,6 +174,8 @@ namespace PearNowPlaying
                 c.Widgets = widgets.OrderBy(w => w.Monitor).ToList();
                 c.Source = Get(map, "source", c.Source).ToLowerInvariant();
                 if (c.Source != "browser" && c.Source != "pear") c.Source = "auto";
+                c.Language = Get(map, "language", c.Language).ToLowerInvariant();
+                if (c.Language != "ko" && c.Language != "en" && c.Language != "ja") c.Language = "auto";
                 c.MarginX = GetInt(map, "marginX", c.MarginX);
                 c.MarginY = GetInt(map, "marginY", c.MarginY);
                 c.Scale = Clamp(GetDouble(map, "scale", c.Scale), 0.5, 3.0);
@@ -221,22 +225,25 @@ namespace PearNowPlaying
                 Directory.CreateDirectory(Dir);
                 var inv = CultureInfo.InvariantCulture;
                 var sb = new StringBuilder();
-                sb.AppendLine("# Now Playing Widget 설정 파일");
-                sb.AppendLine("# 수정한 뒤 트레이 메뉴의 '설정 다시 불러오기'를 누르면 적용됩니다.");
+                sb.AppendLine(L.T("# Now Playing Widget 설정 파일"));
+                sb.AppendLine(L.T("# 수정한 뒤 트레이 메뉴의 '설정 다시 불러오기'를 누르면 적용됩니다."));
                 sb.AppendLine();
-                sb.AppendLine("# 곡을 가져올 곳: auto(브라우저와 Pear Desktop 중 나중에 재생을 시작한 쪽), browser(브라우저의 YouTube Music만), pear(Pear Desktop만)");
+                sb.AppendLine(L.T("# 곡을 가져올 곳: auto(브라우저와 Pear Desktop 중 나중에 재생을 시작한 쪽), browser(브라우저의 YouTube Music만), pear(Pear Desktop만)"));
                 sb.AppendLine("source=" + Source);
                 sb.AppendLine();
-                sb.AppendLine("# Pear Desktop > 플러그인 > API 서버 의 호스트/포트와 같아야 합니다.");
+                sb.AppendLine(L.T("# 메뉴와 안내 문구의 언어: auto(운영체제의 표시 언어를 따름), ko(한국어), en(English), ja(日本語)"));
+                sb.AppendLine("language=" + Language);
+                sb.AppendLine();
+                sb.AppendLine(L.T("# Pear Desktop > 확장 > API 서버 [베타]의 호스트/포트와 같아야 합니다."));
                 sb.AppendLine("host=" + Host);
                 sb.AppendLine("port=" + Port.ToString(inv));
                 sb.AppendLine("https=" + B(Https));
                 sb.AppendLine();
-                sb.AppendLine("# 위젯을 띄울 모니터와 위치. 'widget' 뒤의 숫자는 메뉴의 '모니터 1', '모니터 2'와 같은 번호입니다.");
-                sb.AppendLine("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight,");
-                sb.AppendLine("#       또는 Custom x y bottom|top (트레이 메뉴의 '위젯 끌어서 옮기기'로 놓은 위치, 모니터 왼쪽과 아래/위 가장자리에서 떨어진 px)");
+                sb.AppendLine(L.T("# 위젯을 띄울 모니터와 위치. 'widget' 뒤의 숫자는 메뉴의 '모니터 1', '모니터 2'와 같은 번호입니다."));
+                sb.AppendLine(L.T("# 위치: TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight,"));
+                sb.AppendLine(L.T("#       또는 Custom x y bottom|top (트레이 메뉴의 '위젯 끌어서 옮기기'로 놓은 위치, 모니터 왼쪽과 아래/위 가장자리에서 떨어진 px)"));
                 foreach (var w in Widgets) sb.AppendLine("widget" + (w.Monitor + 1).ToString(inv) + "=" + w.Spec());
-                sb.AppendLine("# 위젯마다 표시 여부(false면 꺼 두고 설정만 보관), 크기 배율(1.0 = 기본), 투명도(0 = 불투명, 최대 0.8, 글자까지 함께 투명해짐)");
+                sb.AppendLine(L.T("# 위젯마다 표시 여부(false면 꺼 두고 설정만 보관), 크기 배율(1.0 = 기본), 투명도(0 = 불투명, 최대 0.8, 글자까지 함께 투명해짐)"));
                 foreach (var w in Widgets)
                 {
                     var n = "widget" + (w.Monitor + 1).ToString(inv);
@@ -244,49 +251,49 @@ namespace PearNowPlaying
                     sb.AppendLine(n + "Scale=" + w.Scale.ToString("0.##", inv));
                     sb.AppendLine(n + "Transparency=" + w.Transparency.ToString("0.##", inv));
                 }
-                sb.AppendLine("# 화면 가장자리로부터의 여백(px, Custom이 아닌 위치에 적용)");
+                sb.AppendLine(L.T("# 화면 가장자리로부터의 여백(px, Custom이 아닌 위치에 적용)"));
                 sb.AppendLine("marginX=" + MarginX.ToString(inv));
                 sb.AppendLine("marginY=" + MarginY.ToString(inv));
-                sb.AppendLine("# 크기 배율 (1.0 = 기본). 위의 widgetNScale이 없는 위젯에 적용됩니다.");
+                sb.AppendLine(L.T("# 크기 배율 (1.0 = 기본). 위의 widgetNScale이 없는 위젯에 적용됩니다."));
                 sb.AppendLine("scale=" + Scale.ToString("0.##", inv));
-                sb.AppendLine("# 곡 카드와 가사 카드의 너비(px, 배율 적용 전)");
+                sb.AppendLine(L.T("# 곡 카드와 가사 카드의 너비(px, 배율 적용 전)"));
                 sb.AppendLine("panelWidth=" + PanelWidth.ToString(inv));
-                sb.AppendLine("# 곡이 바뀌었을 때 표시하는 시간(초)");
+                sb.AppendLine(L.T("# 곡이 바뀌었을 때 표시하는 시간(초)"));
                 sb.AppendLine("showSeconds=" + ShowSeconds.ToString("0.##", inv));
-                sb.AppendLine("# 카드 배경의 불투명도 (0.2 ~ 1.0, 글자는 그대로)");
+                sb.AppendLine(L.T("# 카드 배경의 불투명도 (0.2 ~ 1.0, 글자는 그대로)"));
                 sb.AppendLine("opacity=" + Opacity.ToString("0.##", inv));
-                sb.AppendLine("# true면 사라지지 않고 계속 표시");
+                sb.AppendLine(L.T("# true면 사라지지 않고 계속 표시"));
                 sb.AppendLine("alwaysShow=" + B(AlwaysShow));
-                sb.AppendLine("# 일시정지/재생 시에도 잠깐 표시");
+                sb.AppendLine(L.T("# 일시정지/재생 시에도 잠깐 표시"));
                 sb.AppendLine("showOnPause=" + B(ShowOnPause));
                 sb.AppendLine("showAlbumArt=" + B(ShowAlbumArt));
-                sb.AppendLine("# 영상(MV·커버 등, 앨범 곡 제외)에 영상 제목을 표시 (false면 곡 제목, true면 Pear의 Discord 상태와 같은 영상 제목)");
+                sb.AppendLine(L.T("# 영상(MV·커버 등, 앨범 곡 제외)에 영상 제목을 표시 (false면 곡 제목, true면 Pear의 Discord 상태와 같은 영상 제목)"));
                 sb.AppendLine("videoTitle=" + B(VideoTitle));
-                sb.AppendLine("# 듣는 곡을 Discord 프로필에 '듣는 중'으로 표시");
+                sb.AppendLine(L.T("# 듣는 곡을 Discord 프로필에 '듣는 중'으로 표시"));
                 sb.AppendLine("discordPresence=" + B(DiscordPresence));
-                sb.AppendLine("# Discord의 '듣는 중'에 이 앱의 GitHub 페이지로 가는 버튼을 붙임");
+                sb.AppendLine(L.T("# Discord의 '듣는 중'에 이 앱의 GitHub 페이지로 가는 버튼을 붙임"));
                 sb.AppendLine("discordButton=" + B(DiscordButton));
                 sb.AppendLine();
-                sb.AppendLine("# 가사 (LRCLIB 싱크 가사가 있는 곡만 표시)");
+                sb.AppendLine(L.T("# 가사 (LRCLIB 싱크 가사가 있는 곡만 표시)"));
                 sb.AppendLine("showLyrics=" + B(ShowLyrics));
-                sb.AppendLine("# 커버곡 가사 표시(beta). false면 앨범 곡(공식 음원)에서만 가사를 찾아 표시 (커버·MV 등은 찾지 않음)");
+                sb.AppendLine(L.T("# 커버곡 가사 표시(beta). false면 앨범 곡(공식 음원)에서만 가사를 찾아 표시 (커버·MV 등은 찾지 않음)"));
                 sb.AppendLine("coverLyrics=" + B(CoverLyrics));
-                sb.AppendLine("# 다음 줄 가사도 작게 표시");
+                sb.AppendLine(L.T("# 다음 줄 가사도 작게 표시"));
                 sb.AppendLine("lyricsShowNext=" + B(LyricsShowNext));
-                sb.AppendLine("# 모든 곡의 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다. 곡(영상)별 보정은 lyrics-timing.json에 따로 저장하고 이 값에 더합니다.");
+                sb.AppendLine(L.T("# 모든 곡의 가사 타이밍 보정(ms). +면 가사가 더 빨리, -면 더 늦게 나옵니다. 곡(영상)별 보정은 lyrics-timing.json에 따로 저장하고 이 값에 더합니다."));
                 sb.AppendLine("lyricsOffsetMs=" + LyricsOffsetMs.ToString(inv));
                 sb.AppendLine("lyricsServer=" + LyricsServer);
-                sb.AppendLine("# YouTube Music 가사를 먼저 찾고, 실패하면 LRCLIB로 찾기 (Pear Desktop의 YTMusic 가사 제공자와 같은 방식). 메뉴에는 없는 설정입니다.");
+                sb.AppendLine(L.T("# YouTube Music 가사를 먼저 찾고, 실패하면 LRCLIB로 찾기 (Pear Desktop의 YTMusic 가사 제공자와 같은 방식). 메뉴에는 없는 설정입니다."));
                 sb.AppendLine("ytmLyrics=" + B(YtmLyrics));
-                sb.AppendLine("# YouTube Music 가사 중계 서버 (Pear Desktop이 쓰는 외부 서버)");
+                sb.AppendLine(L.T("# YouTube Music 가사 중계 서버 (Pear Desktop이 쓰는 외부 서버)"));
                 sb.AppendLine("ytmLyricsProxy=" + YtmLyricsProxy);
-                sb.AppendLine("# LRCLIB에 싱크 가사가 없으면 Kugou와 NetEase(网易云音乐)에서도 찾기. 메뉴에는 없는 설정입니다.");
+                sb.AppendLine(L.T("# LRCLIB에 싱크 가사가 없으면 Kugou와 NetEase(网易云音乐)에서도 찾기. 메뉴에는 없는 설정입니다."));
                 sb.AppendLine("moreLyrics=" + B(MoreLyrics));
                 sb.AppendLine();
-                sb.AppendLine("# 새 버전이 있는지 GitHub에서 확인 (켜 두면 시작할 때와 하루에 한 번, 설치는 메뉴에서 직접 누를 때만 함)");
+                sb.AppendLine(L.T("# 새 버전이 있는지 GitHub에서 확인 (켜 두면 시작할 때와 하루에 한 번, 설치는 메뉴에서 직접 누를 때만 함)"));
                 sb.AppendLine("checkUpdates=" + B(CheckUpdates));
                 sb.AppendLine();
-                sb.AppendLine("# 단축키 (예: Ctrl+Alt+Right, Ctrl+Shift+F9, 비워두면 사용 안 함)");
+                sb.AppendLine(L.T("# 단축키 (예: Ctrl+Alt+Right, Ctrl+Shift+F9, 비워두면 사용 안 함)"));
                 sb.AppendLine("hotkeyShow=" + HotkeyShow);
                 sb.AppendLine("hotkeyToggle=" + HotkeyToggle);
                 sb.AppendLine("hotkeyNext=" + HotkeyNext);

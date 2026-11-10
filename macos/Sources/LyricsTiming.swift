@@ -68,10 +68,10 @@ final class LyricsTiming {
 
     /// How a timing reads in the menu and messages: "기본", "0.3초 빠르게", "1초 늦게" (+ = lyrics earlier).
     static func text(_ ms: Int) -> String {
-        if ms == 0 { return "기본" }
+        if ms == 0 { return L.t("기본") }
         var seconds = String(format: "%.2f", Double(abs(ms)) / 1000)
         while seconds.hasSuffix("0") { seconds.removeLast() }
         if seconds.hasSuffix(".") { seconds.removeLast() }
-        return seconds + "초 " + (ms > 0 ? "빠르게" : "늦게")
+        return L.f(ms > 0 ? "{0}초 빠르게" : "{0}초 늦게", seconds)
     }
 }

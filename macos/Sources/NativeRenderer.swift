@@ -64,7 +64,7 @@ enum NativeTheme {
 enum NativeCardKind {
     case nowPlaying, paused, resumed, info
     var label: String {
-        switch self { case .nowPlaying, .resumed: return "재생중"; case .paused: return "일시정지됨"; case .info: return "Now Playing Widget" }
+        switch self { case .nowPlaying, .resumed: return L.t("재생중"); case .paused: return L.t("일시정지됨"); case .info: return "Now Playing Widget" }
     }
 }
 struct NativeCardLayout {
@@ -94,7 +94,7 @@ struct NativeCardLayout {
         CGRect(x: layout.textX, y: layout.textY + layout.headerH + 4, width: layout.textWidth, height: layout.titleH + 2)
     }
     static func titleText(_ client: PearClient, kind: NativeCardKind, infoText: String?) -> String {
-        kind == .info ? (infoText ?? (client.isConnected ? "재생 중인 곡이 없습니다" : client.status)) : (client.song.title.isEmpty ? "알 수 없는 곡" : client.cardTitle)
+        kind == .info ? (infoText ?? (client.isConnected ? L.t("재생 중인 곡이 없습니다") : L.shown(client.status))) : (client.song.title.isEmpty ? L.t("알 수 없는 곡") : client.cardTitle)
     }
     /// A title wider than its place scrolls (drawTitle, or the overlay's MarqueeView).
     static func titleScrolls(_ text: String, width: CGFloat) -> Bool { NativeTheme.width(text, font: titleFont) > width + 0.5 }

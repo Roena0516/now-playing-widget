@@ -102,8 +102,8 @@ namespace PearNowPlaying
         /// <summary>How a timing reads in the menu and messages: "기본", "0.3초 빠르게", "1초 늦게" (+ = lyrics earlier).</summary>
         public static string Text(int ms)
         {
-            if (ms == 0) return "기본";
-            return (Math.Abs(ms) / 1000.0).ToString("0.##", CultureInfo.InvariantCulture) + "초 " + (ms > 0 ? "빠르게" : "늦게");
+            if (ms == 0) return L.T("기본");
+            return L.F(ms > 0 ? "{0}초 빠르게" : "{0}초 늦게", (Math.Abs(ms) / 1000.0).ToString("0.##", CultureInfo.InvariantCulture));
         }
     }
 }

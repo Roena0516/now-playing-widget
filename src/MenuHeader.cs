@@ -77,11 +77,11 @@ namespace PearNowPlaying
         {
             switch (state)
             {
-                case UpdateButton.Checking: return "확인 중…";
-                case UpdateButton.UpToDate: return "최신 버전";
-                case UpdateButton.Install: return newVersion + " 설치";
-                case UpdateButton.Installing: return "설치 중…";
-                default: return "업데이트 확인";
+                case UpdateButton.Checking: return L.T("확인 중…");
+                case UpdateButton.UpToDate: return L.T("최신 버전");
+                case UpdateButton.Install: return L.F("{0} 설치", newVersion);
+                case UpdateButton.Installing: return L.T("설치 중…");
+                default: return L.T("업데이트 확인");
             }
         }
 
@@ -103,7 +103,7 @@ namespace PearNowPlaying
             }
         }
 
-        static string VersionText { get { return "버전 " + AppInfo.Version; } }
+        static string VersionText { get { return L.F("버전 {0}", AppInfo.Version); } }
 
         public static Rectangle ButtonRect(Rectangle bounds, Font font, UpdateButton state, string newVersion)
         {

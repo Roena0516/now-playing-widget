@@ -4,7 +4,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 
 - 저장소: `Roena0516/now-playing-widget`(이전 이름 `pear-now-playing`, GitHub가 예전 주소를 넘겨 줍니다)
 - 이전 이름을 그대로 두는 것: 설정·로그·캐시 폴더(`PearNowPlaying`, `PearNowPlaying-macOS`), 맥 번들 ID(`io.github.pdh0128.pear-now-playing.macos`), Pear 인증 ID(`pear-now-playing`, `pear-now-playing-macos`: 바꾸면 Pear가 허용 창을 다시 띄웁니다), Windows 단일 실행 뮤텍스, C# 네임스페이스(`PearNowPlaying`). 업데이트한 사용자의 설정, 권한, 저장된 가사가 이어지게 하기 위해서입니다.
-- 사용자 문서: `README.md`(영어), `README.ko.md`(한국어, 합니다체), `README.ja.md`(일본어, です・ます体). 세 파일은 구성이 같으며, 내용을 고칠 때는 세 파일을 함께 고칩니다. 앱의 메뉴와 상태 문구는 한국어뿐이므로, 영어와 일본어 문서에서는 번역 옆에 실제 한국어 문구를 그대로 적습니다.
+- 사용자 문서: `README.md`(영어), `README.ko.md`(한국어, 합니다체), `README.ja.md`(일본어, です・ます体). 세 파일은 구성이 같으며, 내용을 고칠 때는 세 파일을 함께 고칩니다. 영어와 일본어 문서에서 메뉴와 상태 문구를 인용할 때는 번역 표(`src/Strings.cs`, `macos/Sources/L.swift`)에 있는 그 언어의 문구를 그대로 옮깁니다.
 - 버전: 올리는 기준과 고칠 곳은 `VERSIONING.md`에 있습니다. Windows는 `src/Program.cs`의 AssemblyVersion(현재 2.0.6.0, User-Agent도 이 값을 읽음)이고, macOS는 `macos/Sources/Models.swift`의 `appVersion`에 적혀 있습니다. `macos/build.sh`는 이 값을 읽어서 Info.plist와 DMG 파일 이름에 넣습니다.
 - macOS 버전: `macos/` 폴더에 있습니다(Swift/AppKit, pdh0128의 PR #1에서 시작했습니다). **맥 버전은 웬만하면 Windows 버전을 따라갑니다**(사용자 방침): 메뉴 구성과 이름, 상태·안내 문구, 기본값, 설정 키(단축키 문자열 형식 `Ctrl+Alt+Up` 포함), 로그 파일 이름과 형식, 동작 규칙을 Windows와 같게 맞추고, 플랫폼 차이 때문에 어쩔 수 없을 때만 다르게 합니다. 지금 남아 있는 차이: 설정 파일 형식(Windows `config.ini`, 맥 `config.json`), 여백 기본값과 단위(Windows 40/140px, 맥 Dock과 메뉴 막대를 뺀 영역 기준 24/24pt), 맥의 "Pear Desktop 연결 요청"이 음악 앱의 `config.json`에서 API 서버를 켜 주는 기능(PR #1에서 온 것), 맥 버전에 없는 `https` 설정, Windows의 안내 풍선(맥은 안내 카드로 대신함), 맥에만 있는 "Liquid Glass 배경(beta)"(Windows에는 Liquid Glass가 없음, 사용자 결정 2026-10-28). 가사를 찾는 순서는 Windows 버전과 똑같이 맞춰 두었습니다. 가사 관련 코드를 고칠 때는 양쪽을 함께 고칩니다(`src/Lyrics.cs` ↔ `LyricsFinder.swift`·`LyricsProvider.swift`, `YtmLyrics.cs` ↔ `YTMusicProvider.swift`, `CoverLyrics.cs` ↔ `CoverLyrics.swift`, `MoreLyrics.cs` ↔ `MoreLyrics.swift`).
 
@@ -63,6 +63,7 @@ Windows:
 | `src/Config.cs` | config.ini 읽기/쓰기, 예전 ETS2NowPlaying 설정 이전(`MigrateOldConfig`), 토큰 저장 |
 | `src/LyricsTiming.cs` | 영상별 가사 타이밍(`lyrics-timing.json`) 읽기/쓰기. 맥은 `LyricsTiming.swift`이고, 닫히지 않는 메뉴 항목은 `MenuRow.swift`입니다 |
 | `src/Hotkeys.cs`, `src/Native.cs`, `src/Theme.cs` | 전역 단축키, Win32 P/Invoke, 색 토큰과 폰트 로딩 |
+| `src/Strings.cs` | 메뉴와 안내 문구의 언어(`L`): 한국어 문구를 키로 하는 영어·일본어 번역 표(아래 "언어"). 맥은 `L.swift`입니다. |
 
 ## 브라우저 연동 (`BrowserSource`)
 
@@ -85,6 +86,18 @@ Windows:
 - Discord의 요청 제한(20초에 5번 정도) 때문에, 곡이 바뀌거나 재생 상태가 바뀌거나 탐색해서 시작 시각이 3초 넘게 달라질 때만 보내고, 보내는 사이에 4초를 둡니다. 위치는 1초마다 다시 계산하지만 같은 내용이면 보내지 않습니다. Discord가 꺼져 있으면 15초마다 다시 연결해 봅니다.
 - Discord 데스크톱 앱이 있어야 합니다. 브라우저에서 여는 Discord(웹)에는 로컬 IPC가 없어서 표시할 방법이 없습니다(Pear의 Discord 플러그인도 같습니다).
 - 테스트: 맥은 `macos/Tests/mock_discord.py`(가짜 Discord 소켓, 앱의 `--discord-test <폴더>`)입니다. Windows는 Mono 테스트로 JSON만 확인했고, 파이프 연결은 Windows에서 확인해야 합니다.
+
+## 언어 (`L`)
+
+- 메뉴와 안내 문구를 한국어, 영어, 일본어로 보여 줍니다(사용자 요청, 2026-11-10). 설정 `language`는 `auto`(기본), `ko`, `en`, `ja` 중 하나이며, 메뉴의 "언어"에서 바꿉니다. `auto`는 운영체제의 언어를 따르고, 한국어와 일본어가 아니면 영어로 보여 줍니다(Windows는 `CultureInfo.CurrentUICulture`, 맥은 `Locale.preferredLanguages`).
+- 코드에는 한국어 문구를 그대로 적고 `L.T("…")`(맥은 `L.t`)로 감쌉니다. 한국어 문구가 번역 표의 키입니다. 값이 들어가는 문구는 `L.F("새 버전 {0}이 나왔습니다. …", 값)`(맥은 `L.f`)처럼 `{0}`으로 적습니다. 언어마다 어순이 다르므로 문구를 이어 붙이지 않습니다. 표에 없는 문구는 한국어 그대로 나옵니다.
+- 번역 표는 `src/Strings.cs`와 `macos/Sources/L.swift`에 같은 내용으로 들어 있습니다. 문구를 추가하거나 고칠 때는 두 표를 함께 고칩니다.
+- 가사 출처("YouTube Music · 원곡")는 디스크 캐시에 저장되고 가사를 찾는 과정에서 비교되므로 한국어 그대로 두고, 메뉴에 보여 줄 때만 `L.Source`(맥은 `L.source`)로 바꿉니다.
+- 맥의 `PearClient`는 상태와 안내 문구를 한국어 그대로 둡니다. 상태 문구끼리 비교하고, 테스트가 그 문구를 확인하기 때문입니다. 문구를 보여 주는 곳(메뉴, 안내 카드, 곡 카드)에서 `L.shown`으로 바꿉니다. `L.shown`은 "문구 (세부)" 형식(브라우저 이름, 가사 출처, 다시 시도한 횟수)도 처리합니다.
+- Windows는 메뉴를 시작할 때 한 번만 만들기 때문에, 언어가 바뀌면 앱을 다시 시작합니다(`TrayApp.Restart`, 업데이트와 같은 `--wait-for` 방식). 맥은 메뉴를 매번 새로 만들기 때문에 바로 바뀝니다.
+- 맥의 테스트와 README 그림(`--self-test`, `--lyrics-tests`, `--render-demo`처럼 `--preview`를 뺀 모든 `--` 실행)은 한국어로 고정합니다(`main.swift`). GitHub Actions의 맥은 영어이기 때문입니다.
+- 아직 한국어로만 나오는 것: 맥의 자동화 권한 설명(`NSAppleEventsUsageDescription`), DMG 배경의 설치 안내, Windows 파일 속성의 설명(`AssemblyDescription`).
+- 번역 문구의 말투: 일본어는 です・ます体로 쓰고, 영어는 메뉴 항목의 첫 글자만 대문자로 씁니다.
 
 ## 가사를 찾는 순서 (`LyricsProvider.Find`)
 
