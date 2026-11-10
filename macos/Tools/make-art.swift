@@ -106,6 +106,13 @@ precondition(iconutil.terminationStatus == 0, "iconutil failed")
 
 // ---- DMG background (640 x 400 pt; icons sit at (160, 200) and (480, 200), see macos/dmg-settings.py) ---------
 
+func text(_ string: String, size: CGFloat, medium: Bool = false, color: NSColor, centerX: CGFloat, top: CGFloat) {
+    let font = NSFont(name: medium ? "PretendardJP-Medium" : "PretendardJP-Regular", size: size) ?? .systemFont(ofSize: size)
+    let attributed = NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: color])
+    let width = attributed.size().width
+    attributed.draw(at: CGPoint(x: centerX - width / 2, y: top))
+}
+
 // Light on purpose: Finder draws the icon names in black over a background picture, even in Dark Mode.
 func drawBackground() {
     let size = CGSize(width: 640, height: 400)
@@ -124,7 +131,16 @@ func drawBackground() {
     head.lineWidth = 5; head.lineCapStyle = .round; head.lineJoinStyle = .round
     head.move(to: CGPoint(x: 362, y: 186)); head.line(to: CGPoint(x: 378, y: 200)); head.line(to: CGPoint(x: 362, y: 214))
     head.stroke()
-    // no text: the picture is the same in every language (the README says what to do if the app doesn't open)
+
+    // the same picture for everyone, so the note is there in the app's three languages
+    let notes = [
+        "If the app doesn't open the first time, go to System Settings → Privacy & Security and click 'Open Anyway'.",
+        "처음 실행할 때 열리지 않으면 시스템 설정 → 개인정보 보호 및 보안에서 '그래도 열기'를 누릅니다.",
+        "初回に開けない場合は、システム設定 → プライバシーとセキュリティ で「このまま開く」を押します。",
+    ]
+    for (index, note) in notes.enumerated() {
+        text(note, size: 11.5, color: hex("#81777d"), centerX: 320, top: 320 + CGFloat(index) * 18)
+    }
 }
 
 let bg1 = work.appendingPathComponent("bg.png"), bg2 = work.appendingPathComponent("bg@2x.png")
