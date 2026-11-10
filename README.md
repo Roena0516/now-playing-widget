@@ -89,9 +89,9 @@ If a cover's backing track is slightly off from the original, open **Lyrics → 
 
 You only do this once.
 
-1. In Pear Desktop, turn on **Plugins → API Server [Beta]**. Changing the **hostname** to `127.0.0.1` is recommended (with `0.0.0.0`, other devices on the same network can try to connect). Leave the **port** (`26538`) and the **authorization strategy** at their defaults.
+1. In Pear Desktop, turn on **Plugins → API Server [Beta]**. Changing **Hostname** to `127.0.0.1` is recommended (with `0.0.0.0`, other devices on the same network can try to connect). Leave **Port** (`26538`) and **Authorization strategy** at their defaults.
 2. In the widget's menu, click **Request Pear Desktop connection** (`Pear Desktop 연결 요청`).
-3. When Pear Desktop asks whether to allow `pear-now-playing` to access the API, click **Allow**. From then on the widget connects automatically when it starts.
+3. When Pear Desktop asks "Allow pear-now-playing ... to access the API?", click **Allow**. From then on the widget connects automatically when it starts.
 
 The widget does not ask Pear Desktop for a connection until you click the menu item in step 2. If you already connected on version 1.9.4 or earlier, you do not need to click it again.
 
