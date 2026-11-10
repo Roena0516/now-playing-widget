@@ -25,12 +25,12 @@ import Carbon
     /// nil on success (or when the spec is empty), otherwise an error message (same wording as Windows).
     func register(_ spec: String, _ action: @escaping () -> Void) -> String? {
         if spec.trimmed.isEmpty { return nil }
-        guard let (key, modifiers) = Self.parse(spec) else { return spec + " (인식할 수 없는 키)" }
+        guard let (key, modifiers) = Self.parse(spec) else { return spec + " (" + L.t("인식할 수 없는 키") + ")" }
         installHandler()
         var ref: EventHotKeyRef?
         let id = EventHotKeyID(signature: 0x504E504D, id: nextId)
         guard RegisterEventHotKey(key, modifiers, id, GetApplicationEventTarget(), 0, &ref) == noErr, let ref else {
-            return spec + " (다른 프로그램이 사용 중)"
+            return spec + " (" + L.t("다른 프로그램이 사용 중") + ")"
         }
         refs.append(ref); actions[nextId] = action; nextId += 1
         return nil

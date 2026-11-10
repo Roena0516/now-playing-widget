@@ -280,13 +280,13 @@ struct NowPlayingInfo: Equatable {
             case .failure(.denied):
                 if denied.insert(app).inserted {
                     Log.write("INFO reading \(name)'s tabs not allowed (Automation); using what macOS reports")
-                    onNotice?("\(name) 탭의 주소를 읽을 수 없어서 제목으로 곡을 찾습니다. 시스템 설정 > 개인정보 보호 및 보안 > 자동화에서 허용할 수 있습니다")
+                    onNotice?(L.f("{0} 탭의 주소를 읽을 수 없어서 제목으로 곡을 찾습니다. 시스템 설정 > 개인정보 보호 및 보안 > 자동화에서 허용할 수 있습니다", name))
                 }
             case .failure(.other(let message)) where message.contains("-1712") && !readable.contains(app):
                 // the first read waits for macOS's Automation prompt (it may open on another screen): say so, once
                 Log.write("INFO reading \(name)'s tabs timed out, probably waiting for the Automation prompt")
                 if prompted.insert(app).inserted {
-                    onNotice?("\(name) 탭의 주소를 읽기 위해 macOS가 권한을 묻고 있습니다. 화면에 나타난 창에서 '허용'을 눌러 주십시오")
+                    onNotice?(L.f("{0} 탭의 주소를 읽기 위해 macOS가 권한을 묻고 있습니다. 화면에 나타난 창에서 '허용'을 눌러 주십시오", name))
                 }
             case .failure(let error):
                 Log.write("INFO reading \(name)'s tabs failed: \(error)")

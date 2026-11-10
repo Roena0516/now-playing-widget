@@ -5,11 +5,11 @@ enum UpdateButton: Equatable {
     case check, checking, upToDate, install(String), installing
     var text: String {
         switch self {
-        case .check: return "업데이트 확인"
-        case .checking: return "확인 중…"
-        case .upToDate: return "최신 버전"
-        case .install(let version): return "\(version) 설치"
-        case .installing: return "설치 중…"
+        case .check: return L.t("업데이트 확인")
+        case .checking: return L.t("확인 중…")
+        case .upToDate: return L.t("최신 버전")
+        case .install(let version): return L.f("{0} 설치", version)
+        case .installing: return L.t("설치 중…")
         }
     }
     var busy: Bool { self == .checking || self == .installing }
@@ -30,14 +30,15 @@ final class MenuHeader: NSView {
 
     init(button: UpdateButton) {
         self.button = button
-        let widest = ["업데이트 확인", "88.88.88 설치"].map { Self.width($0, Self.buttonFont) }.max()! + 24
+        let states: [UpdateButton] = [.check, .checking, .upToDate, .install("88.88.88"), .installing]   // the widest it gets, in any language
+        let widest = states.map { Self.width($0.text, Self.buttonFont) }.max()! + 24
         let left = max(Self.width("Now Playing Widget", Self.titleFont), Self.width(Self.versionText, Self.smallFont))
         super.init(frame: NSRect(x: 0, y: 0, width: ceil(Self.inset + left + 28 + widest + 12), height: Self.height))
         autoresizingMask = [.width]
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    private static var versionText: String { "버전 \(appVersion)" }
+    private static var versionText: String { L.f("버전 {0}", appVersion) }
     private static func width(_ text: String, _ font: NSFont) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
     override var isFlipped: Bool { true }
 

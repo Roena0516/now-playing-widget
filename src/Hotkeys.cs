@@ -17,10 +17,10 @@ namespace PearNowPlaying
         {
             if (string.IsNullOrWhiteSpace(spec)) return null;
             uint mods; Keys key;
-            if (!TryParse(spec, out mods, out key)) return spec + " (인식할 수 없는 키)";
+            if (!TryParse(spec, out mods, out key)) return spec + " (" + L.T("인식할 수 없는 키") + ")";
             int id = nextId++;
             if (!Native.RegisterHotKey(Handle, id, mods | Native.MOD_NOREPEAT, (uint)key))
-                return spec + " (다른 프로그램이 사용 중)";
+                return spec + " (" + L.T("다른 프로그램이 사용 중") + ")";
             actions[id] = action;
             return null;
         }

@@ -21,6 +21,7 @@ import CoreText
     var menuOpen = false, menuDirty = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        L.use(client.settings.language)   // before any text is shown (the menu, the cards)
         Log.migrate()
         Log.info("start \(appVersion)\(Log.buildStamp)")
         registerFonts()
@@ -28,7 +29,7 @@ import CoreText
         overlay = OverlayController(client: client, preview: preview)
         client.onLyricsNotice = { [weak self] message in
             guard let self else { return }
-            if let message { self.overlay.showInfo(message) } else { self.overlay.show() }
+            if let message { self.overlay.showInfo(L.shown(message)) } else { self.overlay.show() }
         }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NativeTheme.trayIcon()
@@ -78,13 +79,13 @@ import CoreText
                 Log.info("update available: \(found.version) (\(found.assetName))")
                 if manual || found.version != announcedUpdate {
                     announcedUpdate = found.version
-                    overlay.showInfo("새 버전 \(found.version)이 나왔습니다. 메뉴에서 업데이트할 수 있습니다")
+                    overlay.showInfo(L.f("새 버전 {0}이 나왔습니다. 메뉴에서 업데이트할 수 있습니다", found.version))
                 }
-            } else if manual { overlay.showInfo("최신 버전입니다 (\(appVersion))") }
+            } else if manual { overlay.showInfo(L.f("최신 버전입니다 ({0})", appVersion)) }
             return true
         } catch {
             Log.write("INFO update check failed: \(error.localizedDescription)")
-            if manual { overlay.showInfo("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오") }
+            if manual { overlay.showInfo(L.t("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오")) }
             return false
         }
     }
@@ -116,13 +117,13 @@ import CoreText
 
     @objc func updateClicked() {
         guard let target = update else {
-            overlay.showInfo("업데이트를 확인하고 있습니다")
+            overlay.showInfo(L.t("업데이트를 확인하고 있습니다"))
             Task { await checkForUpdate(manual: true) }
             return
         }
         guard !installing else { return }
         installing = true; updateMenu()
-        overlay.showInfo("업데이트를 받고 있습니다 (\(target.version))")
+        overlay.showInfo(L.f("업데이트를 받고 있습니다 ({0})", target.version))
         Task {
             var dmg: URL?
             do {
@@ -136,7 +137,7 @@ import CoreText
                 // e.g. no permission to replace the app (another user's install, run from the DMG): install by hand
                 Log.write("WARN update to \(target.version) failed: \(error.localizedDescription)")
                 installing = false; updateMenu()
-                overlay.showInfo(dmg != nil ? "업데이트하지 못했습니다. 받은 파일을 엽니다" : "업데이트하지 못했습니다. 릴리스 페이지를 엽니다")
+                overlay.showInfo(dmg != nil ? L.t("업데이트하지 못했습니다. 받은 파일을 엽니다") : L.t("업데이트하지 못했습니다. 릴리스 페이지를 엽니다"))
                 if let dmg { NSWorkspace.shared.open(dmg) } else if let page = URL(string: target.pageURL) { NSWorkspace.shared.open(page) }
             }
         }
@@ -158,7 +159,7 @@ import CoreText
         ].compactMap { $0 }
         if !errors.isEmpty {
             Log.write("WARN hotkeys not registered: " + errors.joined(separator: ", "))
-            overlay?.showInfo("단축키를 등록하지 못했습니다: " + errors.joined(separator: ", "))
+            overlay?.showInfo(L.f("단축키를 등록하지 못했습니다: {0}", errors.joined(separator: ", ")))
         }
     }
     func applicationWillTerminate(_ notification: Notification) {
@@ -179,30 +180,32 @@ import CoreText
         entry.target = self; entry.view = top
         menu.addItem(entry); header = top
         menu.addItem(.separator())
-        add(menu, preview ? "미리보기 모드" : client.status, nil)
-        add(menu, client.lyricsStatus, nil)
+        add(menu, preview ? L.t("미리보기 모드") : L.shown(client.status), nil)
+        add(menu, L.shown(client.lyricsStatus), nil)
         menu.addItem(.separator())
-        add(menu, "지금 곡 보기", #selector(show))
+        add(menu, L.t("지금 곡 보기"), #selector(show))
         menu.addItem(.separator())
-        add(menu, "이전 곡", #selector(previous))
-        add(menu, "재생 / 일시정지", #selector(togglePlay))
-        add(menu, "다음 곡", #selector(next))
+        add(menu, L.t("이전 곡"), #selector(previous))
+        add(menu, L.t("재생 / 일시정지"), #selector(togglePlay))
+        add(menu, L.t("다음 곡"), #selector(next))
         menu.addItem(.separator())
 
         // widget (song card, where and how big) and lyrics settings live in separate submenus
         let widget = NSMenu()
-        add(widget, "곡 정보 계속 표시", #selector(togglePinned), state: client.settings.alwaysShow)
+        add(widget, L.t("곡 정보 계속 표시"), #selector(togglePinned), state: client.settings.alwaysShow)
         let titles = NSMenu()
-        add(titles, "곡 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle != "video", represented: "song")
-        add(titles, "영상 제목", #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
-        submenu(widget, "영상 곡 제목", titles)
+        add(titles, L.t("곡 제목"), #selector(videoTitle(_:)), state: client.settings.videoTitle != "video", represented: "song")
+        add(titles, L.t("영상 제목"), #selector(videoTitle(_:)), state: client.settings.videoTitle == "video", represented: "video")
+        submenu(widget, L.t("영상 곡 제목"), titles)
         // like the Windows version: 표시 picks the screens with a widget; 위치 / 크기 / 투명도 are set per widget, one
         // submenu per screen with a widget, or the choices directly when there is one widget
         let screens = NSScreen.screens
         func screenTitle(_ index: Int) -> String {
-            guard index < screens.count else { return "모니터 \(index + 1)" }
+            let name = L.f("모니터 {0}", index + 1)
+            guard index < screens.count else { return name }
             let size = screens[index].frame.size
-            return "모니터 \(index + 1) (\(index == 0 ? "주 모니터, " : "")\(Int(size.width))×\(Int(size.height)))"
+            let mark = index == 0 ? L.t("주 모니터") + ", " : ""
+            return "\(name) (\(mark)\(Int(size.width))×\(Int(size.height)))"
         }
         // 표시: which screens have a widget (only with several screens)
         if screens.count > 1 {
@@ -213,7 +216,7 @@ import CoreText
                 entry.target = self; entry.state = on ? .on : .off; entry.representedObject = index
                 display.addItem(entry)   // the last widget can't be turned off (no action = greyed out)
             }
-            submenu(widget, "표시", display)
+            submenu(widget, L.t("표시"), display)
         }
         let shown = client.settings.shownWidgets(screenCount: screens.count)
         /// Each shown widget's items: one submenu per screen, or the items directly for a single widget.
@@ -226,8 +229,8 @@ import CoreText
             }
             submenu(widget, title, menu)
         }
-        perWidget("위치") { menu, w in
-            for (value, label) in [("TopLeft", "왼쪽 위"), ("TopCenter", "가운데 위"), ("TopRight", "오른쪽 위"), ("BottomLeft", "왼쪽 아래"), ("BottomCenter", "가운데 아래"), ("BottomRight", "오른쪽 아래"), ("Custom", "직접 옮긴 위치")] {
+        perWidget(L.t("위치")) { menu, w in
+            for (value, label) in [("TopLeft", L.t("왼쪽 위")), ("TopCenter", L.t("가운데 위")), ("TopRight", L.t("오른쪽 위")), ("BottomLeft", L.t("왼쪽 아래")), ("BottomCenter", L.t("가운데 아래")), ("BottomRight", L.t("오른쪽 아래")), ("Custom", L.t("직접 옮긴 위치"))] {
                 if value == "Custom" { menu.addItem(.separator()) }
                 add(menu, label, #selector(widgetPosition(_:)), state: w.position == value, represented: "\(w.monitor)|\(value)")
             }
@@ -236,47 +239,53 @@ import CoreText
             { [unowned self] menu, w in for (v, label) in list { self.add(menu, label, action, state: abs(value(w) - v) < 0.01, represented: "\(w.monitor)|\(v)") } }
         }
         let settings = client.settings
-        perWidget("크기", choices([(0.8, "작게"), (1.0, "보통"), (1.25, "크게"), (1.5, "아주 크게")], #selector(size(_:))) { settings.placed($0).scale })
-        perWidget("투명도", choices([(0, "없음"), (0.2, "20%"), (0.4, "40%"), (0.6, "60%")], #selector(transparency(_:))) { $0.transparency ?? 0 })
+        perWidget(L.t("크기"), choices([(0.8, L.t("작게")), (1.0, L.t("보통")), (1.25, L.t("크게")), (1.5, L.t("아주 크게"))], #selector(size(_:))) { settings.placed($0).scale })
+        perWidget(L.t("투명도"), choices([(0, L.t("없음")), (0.2, "20%"), (0.4, "40%"), (0.6, "60%")], #selector(transparency(_:))) { $0.transparency ?? 0 })
         // macOS only (Windows has no Liquid Glass); greyed out before macOS 26
         if LiquidGlass.available {
             let glass = NSMenu()
-            for (value, label) in [("off", "사용 안 함"), ("regular", "Regular"), ("clear", "Clear")] {
+            for (value, label) in [("off", L.t("사용 안 함")), ("regular", "Regular"), ("clear", "Clear")] {
                 add(glass, label, #selector(liquidGlass(_:)), state: client.settings.liquidGlass == value, represented: value)
             }
-            submenu(widget, "Liquid Glass 배경(beta)", glass)
-        } else { add(widget, "Liquid Glass 배경(beta, macOS 26 이상)", nil) }
+            submenu(widget, L.t("Liquid Glass 배경(beta)"), glass)
+        } else { add(widget, L.t("Liquid Glass 배경(beta, macOS 26 이상)"), nil) }
         widget.addItem(.separator())
-        add(widget, "위젯 끌어서 옮기기", #selector(toggleMoveMode), state: overlay?.moveMode ?? false)
-        submenu(menu, "위젯", widget)
+        add(widget, L.t("위젯 끌어서 옮기기"), #selector(toggleMoveMode), state: overlay?.moveMode ?? false)
+        submenu(menu, L.t("위젯"), widget)
 
         let lyrics = NSMenu()
-        add(lyrics, "가사 표시", #selector(toggleLyrics), state: client.settings.showLyrics)
-        add(lyrics, "커버곡 가사 표시(beta)", #selector(toggleCoverLyrics), state: client.settings.coverLyrics)
-        add(lyrics, "가사 다시 찾기", #selector(findLyrics))
+        add(lyrics, L.t("가사 표시"), #selector(toggleLyrics), state: client.settings.showLyrics)
+        add(lyrics, L.t("커버곡 가사 표시(beta)"), #selector(toggleCoverLyrics), state: client.settings.coverLyrics)
+        add(lyrics, L.t("가사 다시 찾기"), #selector(findLyrics))
         // lyrics timing for this video (kept per video ID, added to the one for all songs) and for all songs
         let videoId = client.song.videoId
-        timingMenu(lyrics, "이 곡 가사 타이밍", client.timing.ms(for: videoId), enabled: !client.song.title.isEmpty && LyricsTiming.canKeep(videoId)) { [unowned self] in self.shiftSongOffset($0) }
-        timingMenu(lyrics, "모든 곡 가사 타이밍", Int(client.settings.lyricsOffsetMs - Settings.defaultLyricsOffsetMs), enabled: true) { [unowned self] in self.shiftOffset($0) }
-        submenu(menu, "가사", lyrics)
+        timingMenu(lyrics, L.t("이 곡 가사 타이밍"), client.timing.ms(for: videoId), enabled: !client.song.title.isEmpty && LyricsTiming.canKeep(videoId)) { [unowned self] in self.shiftSongOffset($0) }
+        timingMenu(lyrics, L.t("모든 곡 가사 타이밍"), Int(client.settings.lyricsOffsetMs - Settings.defaultLyricsOffsetMs), enabled: true) { [unowned self] in self.shiftOffset($0) }
+        submenu(menu, L.t("가사"), lyrics)
         let sources = NSMenu()
-        for (value, label) in [("auto", "자동 (브라우저, Pear Desktop)"), ("browser", "브라우저"), ("pear", "Pear Desktop")] {
+        for (value, label) in [("auto", L.t("자동 (브라우저, Pear Desktop)")), ("browser", L.t("브라우저")), ("pear", "Pear Desktop")] {
             add(sources, label, #selector(songSource(_:)), state: client.settings.source == value, represented: value)
         }
-        submenu(menu, "재생 앱", sources)
+        submenu(menu, L.t("재생 앱"), sources)
         let discord = NSMenu()
-        add(discord, "듣는 중 표시", #selector(toggleDiscord), state: client.settings.discordPresence)
-        add(discord, "GitHub 버튼 표시", client.settings.discordPresence ? #selector(toggleDiscordButton) : nil, state: client.settings.discordButton)
+        add(discord, L.t("듣는 중 표시"), #selector(toggleDiscord), state: client.settings.discordPresence)
+        add(discord, L.t("GitHub 버튼 표시"), client.settings.discordPresence ? #selector(toggleDiscordButton) : nil, state: client.settings.discordButton)
         submenu(menu, "Discord", discord)
+        // the menu's and messages' language: the names are shown in their own language so they can always be read
+        let languages = NSMenu()
+        for (value, label) in [("auto", L.t("자동")), ("ko", "한국어"), ("en", "English"), ("ja", "日本語")] {
+            add(languages, label, #selector(language(_:)), state: client.settings.language == value, represented: value)
+        }
+        submenu(menu, L.t("언어"), languages)
         menu.addItem(.separator())
-        if client.settings.source != "browser" { add(menu, "Pear Desktop 연결 요청", #selector(retry)) }
-        add(menu, "설정 파일 열기", #selector(openConfig))
-        add(menu, "설정 다시 불러오기", #selector(reload))
-        add(menu, "오류 기록 열기", #selector(openLog))
+        if client.settings.source != "browser" { add(menu, L.t("Pear Desktop 연결 요청"), #selector(retry)) }
+        add(menu, L.t("설정 파일 열기"), #selector(openConfig))
+        add(menu, L.t("설정 다시 불러오기"), #selector(reload))
+        add(menu, L.t("오류 기록 열기"), #selector(openLog))
         menu.addItem(.separator())
-        add(menu, "종료", #selector(quit))
+        add(menu, L.t("종료"), #selector(quit))
         item.menu = menu
-        item.button?.toolTip = client.status
+        item.button?.toolTip = L.shown(client.status)
     }
     func submenu(_ menu: NSMenu, _ title: String, _ sub: NSMenu) {
         let entry = NSMenuItem(title: title, action: nil, keyEquivalent: ""); entry.submenu = sub; menu.addItem(entry)
@@ -287,11 +296,11 @@ import CoreText
     func timingMenu(_ menu: NSMenu, _ title: String, _ value: Int, enabled: Bool, shift: @escaping (Int?) -> Int) {
         guard enabled else { add(menu, title, nil); return }
         let sub = NSMenu(); sub.autoenablesItems = false
-        let now = MenuRow("지금: " + LyricsTiming.text(value), enabled: false)
-        let reset = MenuRow("기본으로 되돌리기", enabled: value != 0)
+        let now = MenuRow(L.f("지금: {0}", LyricsTiming.text(value)), enabled: false)
+        let reset = MenuRow(L.t("기본으로 되돌리기"), enabled: value != 0)
         let apply: (Int?) -> Void = { [weak now, weak reset] step in
             let ms = shift(step)
-            now?.title = "지금: " + LyricsTiming.text(ms); reset?.isEnabled = ms != 0
+            now?.title = L.f("지금: {0}", LyricsTiming.text(ms)); reset?.isEnabled = ms != 0
         }
         sub.addRow(now)
         for step in [500, 100, -100, -500] { sub.addRow(MenuRow(LyricsTiming.text(step)) { apply(step) }) }
@@ -305,7 +314,7 @@ import CoreText
         let id = client.song.videoId
         guard LyricsTiming.canKeep(id) else { return 0 }
         let ms = client.timing.set(id, step.map { client.timing.ms(for: id) + $0 } ?? 0)
-        overlay.showInfo(ms == 0 ? "이 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "이 곡의 가사를 \(LyricsTiming.text(ms)) 표시합니다")
+        overlay.showInfo(ms == 0 ? L.t("이 곡의 가사 타이밍을 기본으로 되돌렸습니다") : L.f("이 곡의 가사를 {0} 표시합니다", LyricsTiming.text(ms)))
         return ms
     }
     /// The lyrics timing for all songs: a step (+ = lyrics earlier), or nil for the default.
@@ -314,7 +323,7 @@ import CoreText
         client.settings.lyricsOffsetMs = max(-Settings.lyricsOffsetLimit, min(Settings.lyricsOffsetLimit, ms))
         client.settings.save()
         let relative = Int(client.settings.lyricsOffsetMs - Settings.defaultLyricsOffsetMs)
-        overlay.showInfo(relative == 0 ? "모든 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "모든 곡의 가사를 \(LyricsTiming.text(relative)) 표시합니다")
+        overlay.showInfo(relative == 0 ? L.t("모든 곡의 가사 타이밍을 기본으로 되돌렸습니다") : L.f("모든 곡의 가사를 {0} 표시합니다", LyricsTiming.text(relative)))
         return relative
     }
     func save() { client.settings.save(); client.applyLyricsSources(); overlay.show(); updateMenu() }
@@ -322,18 +331,18 @@ import CoreText
     @objc func togglePinned() { client.settings.alwaysShow.toggle(); save() }
     @objc func toggleCoverLyrics() {
         client.settings.coverLyrics.toggle(); client.settings.save(); updateMenu()
-        overlay.showInfo(client.settings.coverLyrics ? "커버곡을 포함한 모든 곡에서 가사를 표시합니다" : "앨범 곡에서만 가사를 표시합니다")
+        overlay.showInfo(client.settings.coverLyrics ? L.t("커버곡을 포함한 모든 곡에서 가사를 표시합니다") : L.t("앨범 곡에서만 가사를 표시합니다"))
         client.findLyrics()   // decide again for the current song
     }
     @objc func toggleLyrics() {
         client.settings.showLyrics.toggle(); client.settings.save(); updateMenu()
         // the same messages as the Windows version's ToggleLyrics
-        if !client.settings.showLyrics { overlay.refresh(); overlay.showInfo("가사 표시를 껐습니다"); return }
+        if !client.settings.showLyrics { overlay.refresh(); overlay.showInfo(L.t("가사 표시를 껐습니다")); return }
         overlay.refresh()
-        if client.lyricsFailed { overlay.showInfo("가사 서버에 연결하지 못했습니다"); return }
+        if client.lyricsFailed { overlay.showInfo(L.t("가사 서버에 연결하지 못했습니다")); return }
         guard let outcome = client.lyricsOutcome else { return }   // still looking
         if case .synced = outcome { return }
-        overlay.showInfo("이 곡의 싱크 가사를 찾지 못했습니다")
+        overlay.showInfo(L.t("이 곡의 싱크 가사를 찾지 못했습니다"))
     }
     @objc func findLyrics() { client.findLyrics(force: true) }
     @objc func videoTitle(_ sender: NSMenuItem) { client.settings.videoTitle = sender.representedObject as! String; save() }
@@ -382,11 +391,17 @@ import CoreText
         let value = sender.representedObject as! String
         guard client.settings.source != value else { return }
         client.settings.source = value; client.settings.save(); client.start(); updateMenu()
-        overlay.showInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시합니다" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시합니다" : "브라우저와 Pear Desktop 중에서 재생 중인 곡을 표시합니다")
+        overlay.showInfo(value == "browser" ? L.t("브라우저에서 재생하는 YouTube Music을 표시합니다") : value == "pear" ? L.t("Pear Desktop에서 재생하는 곡을 표시합니다") : L.t("브라우저와 Pear Desktop 중에서 재생 중인 곡을 표시합니다"))
     }
     @objc func toggleDiscord() {
         client.settings.discordPresence.toggle(); client.settings.save(); client.syncDiscord(); updateMenu()
-        overlay.showInfo(client.settings.discordPresence ? "듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다")
+        overlay.showInfo(client.settings.discordPresence ? L.t("듣는 곡을 Discord에 표시합니다") : L.t("Discord에 듣는 곡을 표시하지 않습니다"))
+    }
+    /// The language of the menu and messages ("auto" = macOS's language). The menu is made anew each time, so it
+    /// changes in place (the Windows version, whose menu is made once, starts again).
+    @objc func language(_ sender: NSMenuItem) {
+        client.settings.language = sender.representedObject as! String
+        client.settings.save(); L.use(client.settings.language); overlay.refresh(); updateMenu()
     }
     @objc func toggleDiscordButton() { client.settings.discordButton.toggle(); client.settings.save(); client.syncDiscord(); updateMenu() }
     @objc func previous() { client.control("previous") }
@@ -406,10 +421,10 @@ import CoreText
                     try await Task.sleep(for: .milliseconds(500))
                 }
                 let alert = NSAlert()
-                alert.messageText = result.changed ? "API 서버 설정을 저장했습니다" : "음악 앱의 API 서버가 응답하지 않습니다"
-                alert.informativeText = "설정을 반영하려면 YouTube Music/Pear Desktop을 다시 시작해야 합니다. 재생 중인 음악이 잠시 멈춥니다."
-                alert.addButton(withTitle: "음악 앱 다시 시작")
-                alert.addButton(withTitle: "나중에")
+                alert.messageText = result.changed ? L.t("API 서버 설정을 저장했습니다") : L.t("음악 앱의 API 서버가 응답하지 않습니다")
+                alert.informativeText = L.t("설정을 반영하려면 YouTube Music/Pear Desktop을 다시 시작해야 합니다. 재생 중인 음악이 잠시 멈춥니다.")
+                alert.addButton(withTitle: L.t("음악 앱 다시 시작"))
+                alert.addButton(withTitle: L.t("나중에"))
                 NSApp.activate(ignoringOtherApps: true)
                 if alert.runModal() == .alertFirstButtonReturn {
                     try await restartPlayer()
@@ -418,7 +433,7 @@ import CoreText
             } catch {
                 Log.error("player setup", error)
                 let alert = NSAlert()
-                alert.messageText = "Pear 연결 설정을 적용하지 못했습니다"
+                alert.messageText = L.t("Pear 연결 설정을 적용하지 못했습니다")
                 alert.informativeText = error.localizedDescription
                 NSApp.activate(ignoringOtherApps: true)
                 alert.runModal()
@@ -441,19 +456,19 @@ import CoreText
         let candidates = ["/Applications/YouTube Music.app", "/Applications/Pear Desktop.app", NSHomeDirectory() + "/Applications/YouTube Music.app", NSHomeDirectory() + "/Applications/Pear Desktop.app"]
         guard let url = running?.bundleURL ?? candidates.first(where: { FileManager.default.fileExists(atPath: $0) }).map({ URL(fileURLWithPath: $0) }) else { throw PlayerSetup.SetupError.configNotFound }
         if let running {
-            guard running.terminate() else { throw NSError(domain: "PlayerSetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "음악 앱을 종료할 수 없습니다. 직접 종료한 뒤에 다시 실행해 주십시오."]) }
+            guard running.terminate() else { throw NSError(domain: "PlayerSetup", code: 1, userInfo: [NSLocalizedDescriptionKey: L.t("음악 앱을 종료할 수 없습니다. 직접 종료한 뒤에 다시 실행해 주십시오.")]) }
             for _ in 0..<50 {
                 if running.isTerminated { break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            guard running.isTerminated else { throw NSError(domain: "PlayerSetup", code: 2, userInfo: [NSLocalizedDescriptionKey: "음악 앱이 아직 종료되지 않았습니다. 직접 종료한 뒤에 다시 실행해 주십시오."]) }
+            guard running.isTerminated else { throw NSError(domain: "PlayerSetup", code: 2, userInfo: [NSLocalizedDescriptionKey: L.t("음악 앱이 아직 종료되지 않았습니다. 직접 종료한 뒤에 다시 실행해 주십시오.")]) }
         }
         // Some versions save in-memory preferences on quit; reapply after termination.
         _ = try PlayerSetup.apply(to: PlayerSetup.configURL(), port: client.settings.port)
         _ = try await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
     @objc func openConfig() { NSWorkspace.shared.open(Settings.file) }
-    @objc func reload() { client.reload(); registerHotkeys(); overlay.rebuildWidgets(); overlay.show(); updateMenu() }
+    @objc func reload() { client.reload(); L.use(client.settings.language); registerHotkeys(); overlay.rebuildWidgets(); overlay.show(); updateMenu() }
     @objc func quit() { NSApp.terminate(nil) }
 }
 
@@ -461,6 +476,7 @@ MainActor.assumeIsolated {
 // test and audit runs log to a scratch file, not the user's error.log
 if CommandLine.arguments.dropFirst().contains(where: { $0.hasPrefix("--") && $0 != "--preview" }) {
     Log.file = FileManager.default.temporaryDirectory.appendingPathComponent("now-playing-widget-test-\(ProcessInfo.processInfo.processIdentifier).log")
+    L.language = .ko   // the tests and the README's pictures expect the Korean texts, whatever this Mac's language
 }
 if CommandLine.arguments.contains("--ytmusic-tests") {
     Task { await runYTMusicTests() }

@@ -27,7 +27,7 @@ namespace PearNowPlaying
         LyricsTiming timing = new LyricsTiming(LyricsTiming.DefaultPath);   // this video's lyrics timing (가사 타이밍 → 이 곡)
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
-        readonly ToolStripMenuItem sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem;
+        readonly ToolStripMenuItem sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem, languageMenu;
         readonly MenuHeaderItem header;   // the app's name, version and update button, at the top of the menu
         bool checkingUpdate;      // a check from the header's button is under way
         bool upToDateShown;       // that check found nothing newer: the button says so until the menu opens again
@@ -77,6 +77,7 @@ namespace PearNowPlaying
         {
             ui = SynchronizationContext.Current;
             cfg = Config.Load();
+            L.Use(cfg.Language);   // before any text is made (the menu below, the cards)
             using (var g = Graphics.FromHwnd(IntPtr.Zero)) dpiScale = g.DpiX / 96.0;
 
             ResetWidgetWindows();
@@ -93,45 +94,52 @@ namespace PearNowPlaying
 
             // tray menu
             menu = new ContextMenuStrip();
-            statusItem = new ToolStripMenuItem("연결 준비 중") { Enabled = false };
-            lyricsInfoItem = new ToolStripMenuItem("가사: -") { Enabled = false };
-            pinItem = new ToolStripMenuItem("곡 정보 계속 표시", null, (s, e) => TogglePin());
-            lyricsItem = new ToolStripMenuItem("가사 표시", null, (s, e) => ToggleLyrics());
-            coverLyricsItem = new ToolStripMenuItem("커버곡 가사 표시(beta)", null, (s, e) => ToggleCoverLyrics());
-            retryLyricsItem = new ToolStripMenuItem("가사 다시 찾기", null, (s, e) => RetryLyrics());
+            statusItem = new ToolStripMenuItem(L.T("연결 준비 중")) { Enabled = false };
+            lyricsInfoItem = new ToolStripMenuItem(L.T("가사: -")) { Enabled = false };
+            pinItem = new ToolStripMenuItem(L.T("곡 정보 계속 표시"), null, (s, e) => TogglePin());
+            lyricsItem = new ToolStripMenuItem(L.T("가사 표시"), null, (s, e) => ToggleLyrics());
+            coverLyricsItem = new ToolStripMenuItem(L.T("커버곡 가사 표시(beta)"), null, (s, e) => ToggleCoverLyrics());
+            retryLyricsItem = new ToolStripMenuItem(L.T("가사 다시 찾기"), null, (s, e) => RetryLyrics());
             // lyrics timing for this video (kept per video ID, added to the one for all songs) and for all songs
-            songOffsetMenu = TimingMenu("이 곡 가사 타이밍", ShiftSongOffset);
-            offsetMenu = TimingMenu("모든 곡 가사 타이밍", ShiftOffset);
+            songOffsetMenu = TimingMenu(L.T("이 곡 가사 타이밍"), ShiftSongOffset);
+            offsetMenu = TimingMenu(L.T("모든 곡 가사 타이밍"), ShiftOffset);
             // filled when the menu opens (screens and widgets can change)
-            displayMenu = new ToolStripMenuItem("표시");
-            placeMenu = new ToolStripMenuItem("위치");
-            sizeMenu = new ToolStripMenuItem("크기");
-            transparencyMenu = new ToolStripMenuItem("투명도");
+            displayMenu = new ToolStripMenuItem(L.T("표시"));
+            placeMenu = new ToolStripMenuItem(L.T("위치"));
+            sizeMenu = new ToolStripMenuItem(L.T("크기"));
+            transparencyMenu = new ToolStripMenuItem(L.T("투명도"));
             foreach (var m in new[] { displayMenu, placeMenu, sizeMenu, transparencyMenu }) m.DropDownItems.Add(new ToolStripMenuItem("-"));
-            moveItem = new ToolStripMenuItem("위젯 끌어서 옮기기", null, (s, e) => SetMoveMode(!moveMode));
-            titleMenu = new ToolStripMenuItem("영상 곡 제목");
-            titleMenu.DropDownItems.Add(new ToolStripMenuItem("곡 제목", null, (s, e) => SetVideoTitle(false)) { Tag = false });
-            titleMenu.DropDownItems.Add(new ToolStripMenuItem("영상 제목", null, (s, e) => SetVideoTitle(true)) { Tag = true });
+            moveItem = new ToolStripMenuItem(L.T("위젯 끌어서 옮기기"), null, (s, e) => SetMoveMode(!moveMode));
+            titleMenu = new ToolStripMenuItem(L.T("영상 곡 제목"));
+            titleMenu.DropDownItems.Add(new ToolStripMenuItem(L.T("곡 제목"), null, (s, e) => SetVideoTitle(false)) { Tag = false });
+            titleMenu.DropDownItems.Add(new ToolStripMenuItem(L.T("영상 제목"), null, (s, e) => SetVideoTitle(true)) { Tag = true });
 
             // widget (song card, where and how big) and lyrics settings live in separate submenus
-            var widgetMenu = new ToolStripMenuItem("위젯");
+            var widgetMenu = new ToolStripMenuItem(L.T("위젯"));
             widgetMenu.DropDownItems.AddRange(new ToolStripItem[] { pinItem, titleMenu, displayMenu, placeMenu, sizeMenu, transparencyMenu, new ToolStripSeparator(), moveItem });
-            var lyricsMenu = new ToolStripMenuItem("가사");
+            var lyricsMenu = new ToolStripMenuItem(L.T("가사"));
             lyricsMenu.DropDownItems.AddRange(new ToolStripItem[] { lyricsItem, coverLyricsItem, retryLyricsItem, songOffsetMenu, offsetMenu });
             // where songs come from (same items as the macOS version's 재생 앱 menu)
-            sourceMenu = new ToolStripMenuItem("재생 앱");
-            foreach (var pair in new[] { Tuple.Create("auto", "자동 (브라우저, Pear Desktop)"), Tuple.Create("browser", "브라우저"), Tuple.Create("pear", "Pear Desktop") })
+            sourceMenu = new ToolStripMenuItem(L.T("재생 앱"));
+            foreach (var pair in new[] { Tuple.Create("auto", L.T("자동 (브라우저, Pear Desktop)")), Tuple.Create("browser", L.T("브라우저")), Tuple.Create("pear", "Pear Desktop") })
             {
                 var v = pair.Item1;
                 sourceMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item2, null, (s, e) => SetSource(v)) { Tag = v });
             }
             // Discord's "Listening to" for the browser's songs (same items as the macOS version)
-            discordItem = new ToolStripMenuItem("듣는 중 표시", null, (s, e) => { cfg.DiscordPresence = !cfg.DiscordPresence; cfg.Save(); SyncDiscord();
-                ShowInfo(cfg.DiscordPresence ? "듣는 곡을 Discord에 표시합니다" : "Discord에 듣는 곡을 표시하지 않습니다"); });
-            discordButtonItem = new ToolStripMenuItem("GitHub 버튼 표시", null, (s, e) => { cfg.DiscordButton = !cfg.DiscordButton; cfg.Save(); SyncDiscord(); });
+            discordItem = new ToolStripMenuItem(L.T("듣는 중 표시"), null, (s, e) => { cfg.DiscordPresence = !cfg.DiscordPresence; cfg.Save(); SyncDiscord();
+                ShowInfo(cfg.DiscordPresence ? L.T("듣는 곡을 Discord에 표시합니다") : L.T("Discord에 듣는 곡을 표시하지 않습니다")); });
+            discordButtonItem = new ToolStripMenuItem(L.T("GitHub 버튼 표시"), null, (s, e) => { cfg.DiscordButton = !cfg.DiscordButton; cfg.Save(); SyncDiscord(); });
             discordMenu = new ToolStripMenuItem("Discord");
             discordMenu.DropDownItems.AddRange(new ToolStripItem[] { discordItem, discordButtonItem });
-            retryAuthItem = new ToolStripMenuItem("Pear Desktop 연결 요청", null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); });
+            // the menu's and messages' language: the names are shown in their own language so they can always be read
+            languageMenu = new ToolStripMenuItem(L.T("언어"));
+            foreach (var pair in new[] { Tuple.Create("auto", L.T("자동")), Tuple.Create("ko", "한국어"), Tuple.Create("en", "English"), Tuple.Create("ja", "日本語") })
+            {
+                var v = pair.Item1;
+                languageMenu.DropDownItems.Add(new ToolStripMenuItem(pair.Item2, null, (s, e) => SetLanguage(v)) { Tag = v });
+            }
+            retryAuthItem = new ToolStripMenuItem(L.T("Pear Desktop 연결 요청"), null, (s, e) => { Config.WriteToken(null); pear.RetryAuth(); });
 
             // at the top, so a new version ("2.0.6 설치" on the button) is seen first
             header = new MenuHeaderItem { ButtonState = HeaderButton, NewVersion = () => update != null ? update.Version : "" };
@@ -141,23 +149,24 @@ namespace PearNowPlaying
             menu.Items.Add(statusItem);
             menu.Items.Add(lyricsInfoItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("지금 곡 보기", null, (s, e) => ShowNow(CurrentKind())));
+            menu.Items.Add(new ToolStripMenuItem(L.T("지금 곡 보기"), null, (s, e) => ShowNow(CurrentKind())));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("이전 곡", null, (s, e) => pear.Previous()));
-            menu.Items.Add(new ToolStripMenuItem("재생 / 일시정지", null, (s, e) => pear.TogglePlay()));
-            menu.Items.Add(new ToolStripMenuItem("다음 곡", null, (s, e) => pear.Next()));
+            menu.Items.Add(new ToolStripMenuItem(L.T("이전 곡"), null, (s, e) => pear.Previous()));
+            menu.Items.Add(new ToolStripMenuItem(L.T("재생 / 일시정지"), null, (s, e) => pear.TogglePlay()));
+            menu.Items.Add(new ToolStripMenuItem(L.T("다음 곡"), null, (s, e) => pear.Next()));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(widgetMenu);
             menu.Items.Add(lyricsMenu);
             menu.Items.Add(sourceMenu);
             menu.Items.Add(discordMenu);
+            menu.Items.Add(languageMenu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(retryAuthItem);
-            menu.Items.Add(new ToolStripMenuItem("설정 파일 열기", null, (s, e) => OpenFile(Config.FilePath)));
-            menu.Items.Add(new ToolStripMenuItem("설정 다시 불러오기", null, (s, e) => ReloadConfig()));
-            menu.Items.Add(new ToolStripMenuItem("오류 기록 열기", null, (s, e) => OpenFile(Config.LogPath)));
+            menu.Items.Add(new ToolStripMenuItem(L.T("설정 파일 열기"), null, (s, e) => OpenFile(Config.FilePath)));
+            menu.Items.Add(new ToolStripMenuItem(L.T("설정 다시 불러오기"), null, (s, e) => ReloadConfig()));
+            menu.Items.Add(new ToolStripMenuItem(L.T("오류 기록 열기"), null, (s, e) => OpenFile(Config.LogPath)));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("종료", null, (s, e) => ExitThread()));
+            menu.Items.Add(new ToolStripMenuItem(L.T("종료"), null, (s, e) => ExitThread()));
             menu.Opening += (s, e) => SyncMenuChecks();
             menu.Closed += (s, e) => menu.AutoClose = true;   // the header turns it off while the mouse is on it
 
@@ -227,17 +236,17 @@ namespace PearNowPlaying
             switch (s)
             {
                 case PearStatus.Authorizing:
-                    Balloon("Pear Desktop에 연결 요청 창이 나타났습니다. '허용'을 눌러 주십시오.");
-                    ShowInfo("Pear Desktop에서 '허용'을 눌러 주십시오");
+                    Balloon(L.T("Pear Desktop에 연결 요청 창이 나타났습니다. '허용'을 눌러 주십시오."));
+                    ShowInfo(L.T("Pear Desktop에서 '허용'을 눌러 주십시오"));
                     break;
                 case PearStatus.Denied:
-                    Balloon("Pear Desktop에서 연결이 거부되었습니다. 트레이 메뉴의 'Pear Desktop 연결 요청'으로 다시 시도할 수 있습니다.");
+                    Balloon(L.T("Pear Desktop에서 연결이 거부되었습니다. 트레이 메뉴의 'Pear Desktop 연결 요청'으로 다시 시도할 수 있습니다."));
                     break;
                 case PearStatus.Connected:
                     if (!everConnected)
                     {
                         everConnected = true;
-                        if (!pear.Current.HasData) ShowInfo("Pear Desktop에 연결되었습니다");
+                        if (!pear.Current.HasData) ShowInfo(L.T("Pear Desktop에 연결되었습니다"));
                     }
                     break;
                 case PearStatus.Waiting:
@@ -323,13 +332,13 @@ namespace PearNowPlaying
                 return;
             }
             lyrics = null;
-            lyricsInfoItem.Text = "가사: 찾는 중";
+            lyricsInfoItem.Text = L.T("가사: 찾는 중");
             lyricsWin.Dismiss();
             if (!WantsLyrics(song))
             {
                 // "커버곡 가사 표시(beta)" off: not an album track, so no lookup at all
-                lyricsInfoItem.Text = "가사: 앨범 곡이 아니라 찾지 않음";
-                if (announceKey == key) { announceKey = null; ShowInfo("앨범 곡이 아니어서 가사를 표시하지 않습니다"); }
+                lyricsInfoItem.Text = L.T("가사: 앨범 곡이 아니라 찾지 않음");
+                if (announceKey == key) { announceKey = null; ShowInfo(L.T("앨범 곡이 아니어서 가사를 표시하지 않습니다")); }
                 PrefetchNext(key);
                 return;
             }
@@ -361,7 +370,7 @@ namespace PearNowPlaying
                         {
                             int attempt = i;
                             if (shown == null)
-                                ui.Post(_ => { if (key == lyricsKey) lyricsInfoItem.Text = "가사: 연결 실패, 다시 시도 중 (" + attempt + ")"; }, null);
+                                ui.Post(_ => { if (key == lyricsKey) lyricsInfoItem.Text = L.T("가사: 연결 실패, 다시 시도 중") + " (" + attempt + ")"; }, null);
                             await Task.Delay(lyricsProvider.RetryWait, ct);
                         }
                         r = shown != null ? await lyricsProvider.Recheck(snapshot, ct) : await lyricsProvider.Find(snapshot, ct);
@@ -396,17 +405,17 @@ namespace PearNowPlaying
         {
             lyrics = result;
             lyricsLayoutKey = null;
-            lyricsInfoItem.Text = result.HasSynced ? ("가사: 싱크 가사 있음 (" + result.Source + ")")
-                                : result.Instrumental ? "가사: 연주곡"
-                                : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
+            lyricsInfoItem.Text = result.HasSynced ? (L.T("가사: 싱크 가사 있음") + " (" + L.Source(result.Source) + ")")
+                                : result.Instrumental ? L.T("가사: 연주곡")
+                                : result.Failed ? L.T("가사: 가사 서버에 연결하지 못함") : L.T("가사: 찾지 못함");
             if (!result.Failed) PrefetchNext(key);
             UpdateDisplayTitle(song);
             if (announceKey == key)
             {
                 announceKey = null;
-                if (result.Failed) ShowInfo("가사 서버에 연결하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오");
-                else if (result.Instrumental) ShowInfo("연주곡입니다");
-                else if (!result.HasSynced) ShowInfo("이 곡의 싱크 가사를 찾지 못했습니다");
+                if (result.Failed) ShowInfo(L.T("가사 서버에 연결하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오"));
+                else if (result.Instrumental) ShowInfo(L.T("연주곡입니다"));
+                else if (!result.HasSynced) ShowInfo(L.T("이 곡의 싱크 가사를 찾지 못했습니다"));
                 else ShowNow(CurrentKind());   // lyrics card appears under the song card
             }
             TickLyrics(true);
@@ -531,13 +540,13 @@ namespace PearNowPlaying
         void RetryLyrics()
         {
             var song = pear.Current;
-            if (!song.HasData) { ShowInfo("재생 중인 곡이 없습니다"); return; }
+            if (!song.HasData) { ShowInfo(L.T("재생 중인 곡이 없습니다")); return; }
             lyricsProvider.Forget(song);
             lyricsProvider.Ytm.ResetPause();
             lyricsProvider.More.ResetPause();
             lyricsKey = null;
             announceKey = song.VideoId + "|" + song.Title;
-            ShowInfo("가사를 다시 찾고 있습니다");
+            ShowInfo(L.T("가사를 다시 찾고 있습니다"));
             EnsureLyrics(song);
         }
 
@@ -551,7 +560,7 @@ namespace PearNowPlaying
         {
             cfg.CoverLyrics = !cfg.CoverLyrics;
             cfg.Save();
-            ShowInfo(cfg.CoverLyrics ? "커버곡을 포함한 모든 곡에서 가사를 표시합니다" : "앨범 곡에서만 가사를 표시합니다");
+            ShowInfo(cfg.CoverLyrics ? L.T("커버곡을 포함한 모든 곡에서 가사를 표시합니다") : L.T("앨범 곡에서만 가사를 표시합니다"));
             lyricsKey = null;   // decide again for the current song
             if (pear.Current.HasData) EnsureLyrics(pear.Current);
         }
@@ -561,9 +570,9 @@ namespace PearNowPlaying
             cfg.ShowLyrics = !cfg.ShowLyrics;
             cfg.Save();
             if (cfg.ShowLyrics) TickLyrics(true); else lyricsWin.Dismiss();
-            if (!cfg.ShowLyrics) ShowInfo("가사 표시를 껐습니다");
-            else if (lyrics != null && lyrics.Failed) ShowInfo("가사 서버에 연결하지 못했습니다");
-            else if (lyrics != null && !lyrics.HasSynced) ShowInfo("이 곡의 싱크 가사를 찾지 못했습니다");
+            if (!cfg.ShowLyrics) ShowInfo(L.T("가사 표시를 껐습니다"));
+            else if (lyrics != null && lyrics.Failed) ShowInfo(L.T("가사 서버에 연결하지 못했습니다"));
+            else if (lyrics != null && !lyrics.HasSynced) ShowInfo(L.T("이 곡의 싱크 가사를 찾지 못했습니다"));
         }
 
         static readonly int[] TimingSteps = { 500, 100, -100, -500 };
@@ -576,14 +585,14 @@ namespace PearNowPlaying
         ToolStripMenuItem TimingMenu(string title, Action<int?> shift)
         {
             var sub = new ToolStripMenuItem(title);
-            sub.DropDownItems.Add(new ToolStripMenuItem("지금: 기본") { Enabled = false });
+            sub.DropDownItems.Add(new ToolStripMenuItem(L.F("지금: {0}", LyricsTiming.Text(0))) { Enabled = false });
             foreach (var step in TimingSteps)
             {
                 var d = step;
                 sub.DropDownItems.Add(new ToolStripMenuItem(LyricsTiming.Text(d), null, (s, e) => shift(d)));
             }
             sub.DropDownItems.Add(new ToolStripSeparator());
-            sub.DropDownItems.Add(new ToolStripMenuItem("기본으로 되돌리기", null, (s, e) => shift(null)));
+            sub.DropDownItems.Add(new ToolStripMenuItem(L.T("기본으로 되돌리기"), null, (s, e) => shift(null)));
             sub.DropDown.MouseEnter += (s, e) => sub.DropDown.AutoClose = false;
             sub.DropDown.MouseLeave += (s, e) => sub.DropDown.AutoClose = true;
             sub.DropDown.Closed += (s, e) => sub.DropDown.AutoClose = true;
@@ -593,7 +602,7 @@ namespace PearNowPlaying
         /// <summary>Shows a timing (relative to the default) at the top of its submenu; back to the default only when it isn't.</summary>
         static void SyncTimingMenu(ToolStripMenuItem sub, int ms)
         {
-            sub.DropDownItems[0].Text = "지금: " + LyricsTiming.Text(ms);
+            sub.DropDownItems[0].Text = L.F("지금: {0}", LyricsTiming.Text(ms));
             sub.DropDownItems[sub.DropDownItems.Count - 1].Enabled = ms != 0;
         }
 
@@ -612,7 +621,7 @@ namespace PearNowPlaying
             if (!LyricsTiming.CanKeep(id)) return;
             int ms = timing.Set(id, step.HasValue ? timing.For(id) + step.Value : 0);
             SyncTimingMenus();
-            ShowInfo(ms == 0 ? "이 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "이 곡의 가사를 " + LyricsTiming.Text(ms) + " 표시합니다");
+            ShowInfo(ms == 0 ? L.T("이 곡의 가사 타이밍을 기본으로 되돌렸습니다") : L.F("이 곡의 가사를 {0} 표시합니다", LyricsTiming.Text(ms)));
             TickLyrics(true);
         }
 
@@ -624,7 +633,7 @@ namespace PearNowPlaying
             cfg.Save();
             SyncTimingMenus();
             int rel = cfg.LyricsOffsetMs - Config.DefaultLyricsOffsetMs;
-            ShowInfo(rel == 0 ? "모든 곡의 가사 타이밍을 기본으로 되돌렸습니다" : "모든 곡의 가사를 " + LyricsTiming.Text(rel) + " 표시합니다");
+            ShowInfo(rel == 0 ? L.T("모든 곡의 가사 타이밍을 기본으로 되돌렸습니다") : L.F("모든 곡의 가사를 {0} 표시합니다", LyricsTiming.Text(rel)));
             TickLyrics(true);
         }
 
@@ -660,17 +669,17 @@ namespace PearNowPlaying
                         if (manual || found.Version != announcedUpdate)
                         {
                             announcedUpdate = found.Version;
-                            ShowInfo("새 버전 " + found.Version + "이 나왔습니다. 메뉴에서 업데이트할 수 있습니다");
+                            ShowInfo(L.F("새 버전 {0}이 나왔습니다. 메뉴에서 업데이트할 수 있습니다", found.Version));
                         }
                     }
-                    else if (manual) ShowInfo("최신 버전입니다 (" + AppInfo.Version + ")");
+                    else if (manual) ShowInfo(L.F("최신 버전입니다 ({0})", AppInfo.Version));
                 }, null);
                 return true;
             }
             catch (Exception ex)
             {
                 Log.Write("INFO update check failed: " + (ex is OperationCanceledException ? "timeout" : ex.Message));
-                if (manual) ui.Post(_ => ShowInfo("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오"), null);
+                if (manual) ui.Post(_ => ShowInfo(L.T("업데이트를 확인하지 못했습니다. 잠시 뒤에 다시 시도해 주십시오")), null);
                 return false;
             }
         }
@@ -699,12 +708,12 @@ namespace PearNowPlaying
 
         void UpdateClicked()
         {
-            if (update == null) { ShowInfo("업데이트를 확인하고 있습니다"); Task.Run(() => CheckForUpdate(true)); return; }
+            if (update == null) { ShowInfo(L.T("업데이트를 확인하고 있습니다")); Task.Run(() => CheckForUpdate(true)); return; }
             if (installing) return;
             installing = true;
             var target = update;
             var exe = Application.ExecutablePath;
-            ShowInfo("업데이트를 받고 있습니다 (" + target.Version + ")");
+            ShowInfo(L.F("업데이트를 받고 있습니다 ({0})", target.Version));
             Task.Run(async () =>
             {
                 try
@@ -725,7 +734,7 @@ namespace PearNowPlaying
                     ui.Post(_ =>
                     {
                         installing = false;
-                        ShowInfo("업데이트하지 못했습니다. 릴리스 페이지를 엽니다");
+                        ShowInfo(L.T("업데이트하지 못했습니다. 릴리스 페이지를 엽니다"));
                         try { Process.Start(target.PageUrl); } catch (Exception e2) { Log.Error("open release page", e2); }
                     }, null);
                 }
@@ -781,7 +790,7 @@ namespace PearNowPlaying
             var song = pear.Current;
             if (!song.HasData)
             {
-                ShowInfo(pear.IsConnected ? "재생 중인 곡이 없습니다" : pear.StatusLine);
+                ShowInfo(pear.IsConnected ? L.T("재생 중인 곡이 없습니다") : pear.StatusLine);
                 return;
             }
             lastKind = kind;
@@ -1066,7 +1075,7 @@ namespace PearNowPlaying
 
 
         static readonly Tuple<string, double>[] Sizes =
-            { Tuple.Create("작게", 0.8), Tuple.Create("보통", 1.0), Tuple.Create("크게", 1.25), Tuple.Create("아주 크게", 1.5) };
+            { Tuple.Create("작게", 0.8), Tuple.Create("보통", 1.0), Tuple.Create("크게", 1.25), Tuple.Create("아주 크게", 1.5) };   // shown through L.T (Choices)
         static readonly Tuple<string, double>[] Transparencies =
             { Tuple.Create("없음", 0.0), Tuple.Create("20%", 0.2), Tuple.Create("40%", 0.4), Tuple.Create("60%", 0.6) };
 
@@ -1109,7 +1118,7 @@ namespace PearNowPlaying
         static string MonitorName(Screen[] screens, int i)
         {
             var b = screens[i].Bounds;
-            return "모니터 " + (i + 1) + " (" + (screens[i].Primary ? "주 모니터, " : "") + b.Width + "×" + b.Height + ")";
+            return L.F("모니터 {0}", i + 1) + " (" + (screens[i].Primary ? L.T("주 모니터") + ", " : "") + b.Width + "×" + b.Height + ")";
         }
 
         /// <summary>
@@ -1153,7 +1162,7 @@ namespace PearNowPlaying
             return choices.Select(c =>
             {
                 var monitor = w.Monitor; var v = c.Item2;
-                return (ToolStripItem)new ToolStripMenuItem(c.Item1, null, (s, e) => set(monitor, v)) { Checked = Math.Abs(current - v) < 0.01 };
+                return (ToolStripItem)new ToolStripMenuItem(L.T(c.Item1), null, (s, e) => set(monitor, v)) { Checked = Math.Abs(current - v) < 0.01 };
             }).ToList();
         }
 
@@ -1166,7 +1175,7 @@ namespace PearNowPlaying
             {
                 var items = itemsFor(w).ToArray();
                 if (widgets.Count == 1) { menu.DropDownItems.AddRange(items); break; }
-                var item = new ToolStripMenuItem(w.Monitor < screens.Length ? MonitorName(screens, w.Monitor) : "모니터 " + (w.Monitor + 1));
+                var item = new ToolStripMenuItem(w.Monitor < screens.Length ? MonitorName(screens, w.Monitor) : L.F("모니터 {0}", w.Monitor + 1));
                 item.DropDownItems.AddRange(items);
                 menu.DropDownItems.Add(item);
             }
@@ -1218,7 +1227,7 @@ namespace PearNowPlaying
             lyricsWin.Interactive = on;
             if (on)
             {
-                Balloon("위젯을 끌어서 원하는 곳에 놓아 주십시오. 다 옮긴 뒤에는 트레이 메뉴의 '위젯 끌어서 옮기기'를 다시 눌러 주십시오.");
+                Balloon(L.T("위젯을 끌어서 원하는 곳에 놓아 주십시오. 다 옮긴 뒤에는 트레이 메뉴의 '위젯 끌어서 옮기기'를 다시 눌러 주십시오."));
                 ShowNow(CurrentKind());
                 TickLyrics(true);
             }
@@ -1283,6 +1292,7 @@ namespace PearNowPlaying
         {
             var old = cfg;
             cfg = Config.Load();
+            if (L.Resolve(cfg.Language) != L.Lang) { Restart(); return; }   // the menu is made once, in one language
             timing = new LyricsTiming(LyricsTiming.DefaultPath);
             RegisterHotkeys();
             lyricsProvider.BaseUrl = (cfg.LyricsServer ?? "https://lrclib.net").TrimEnd('/');
@@ -1306,7 +1316,7 @@ namespace PearNowPlaying
                 hotkeys.Register(cfg.HotkeyAlwaysShow, TogglePin),
                 hotkeys.Register(cfg.HotkeyLyrics, ToggleLyrics),
             }.Where(e => e != null).ToArray();
-            if (errors.Length > 0) Balloon("단축키를 등록하지 못했습니다: " + string.Join(", ", errors));
+            if (errors.Length > 0) Balloon(L.F("단축키를 등록하지 못했습니다: {0}", string.Join(", ", errors)));
         }
 
         void SyncMenuChecks()
@@ -1321,6 +1331,7 @@ namespace PearNowPlaying
             BuildWidgetMenus();
             SyncTimingMenus();
             foreach (ToolStripMenuItem it in sourceMenu.DropDownItems) it.Checked = (string)it.Tag == cfg.Source;
+            foreach (ToolStripMenuItem it in languageMenu.DropDownItems) it.Checked = (string)it.Tag == cfg.Language;
             discordItem.Checked = cfg.DiscordPresence;
             discordButtonItem.Checked = cfg.DiscordButton;
             discordButtonItem.Enabled = cfg.DiscordPresence;
@@ -1348,20 +1359,44 @@ namespace PearNowPlaying
             cfg.Source = value;
             cfg.Save();
             pear.Reconnect(cfg);
-            ShowInfo(value == "browser" ? "브라우저에서 재생하는 YouTube Music을 표시합니다" : value == "pear" ? "Pear Desktop에서 재생하는 곡을 표시합니다" : "브라우저와 Pear Desktop 중에서 재생 중인 곡을 표시합니다");
+            ShowInfo(value == "browser" ? L.T("브라우저에서 재생하는 YouTube Music을 표시합니다") : value == "pear" ? L.T("Pear Desktop에서 재생하는 곡을 표시합니다") : L.T("브라우저와 Pear Desktop 중에서 재생 중인 곡을 표시합니다"));
+        }
+
+        /// <summary>
+        /// The language of the menu and messages: "auto" (Windows's display language), "ko", "en" or "ja". The menu is
+        /// made once at start, so a change starts the app again (like after an update); the macOS version, which makes
+        /// its menu anew each time, changes in place.
+        /// </summary>
+        void SetLanguage(string value)
+        {
+            if (cfg.Language == value) return;
+            cfg.Language = value;
+            cfg.Save();
+            if (L.Resolve(value) != L.Lang) Restart();
+        }
+
+        /// <summary>Starts the app again; the new one waits for this one to exit (the single-instance check).</summary>
+        void Restart()
+        {
+            try
+            {
+                Process.Start(Application.ExecutablePath, "--wait-for " + Process.GetCurrentProcess().Id);
+                ExitThread();
+            }
+            catch (Exception ex) { Log.Error("restart", ex); }
         }
 
         static string PositionName(OverlayPosition p)
         {
             switch (p)
             {
-                case OverlayPosition.TopLeft: return "왼쪽 위";
-                case OverlayPosition.TopCenter: return "가운데 위";
-                case OverlayPosition.TopRight: return "오른쪽 위";
-                case OverlayPosition.BottomLeft: return "왼쪽 아래";
-                case OverlayPosition.BottomCenter: return "가운데 아래";
-                case OverlayPosition.Custom: return "직접 옮긴 위치";
-                default: return "오른쪽 아래";
+                case OverlayPosition.TopLeft: return L.T("왼쪽 위");
+                case OverlayPosition.TopCenter: return L.T("가운데 위");
+                case OverlayPosition.TopRight: return L.T("오른쪽 위");
+                case OverlayPosition.BottomLeft: return L.T("왼쪽 아래");
+                case OverlayPosition.BottomCenter: return L.T("가운데 아래");
+                case OverlayPosition.Custom: return L.T("직접 옮긴 위치");
+                default: return L.T("오른쪽 아래");
             }
         }
 

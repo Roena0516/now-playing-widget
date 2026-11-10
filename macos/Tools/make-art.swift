@@ -132,8 +132,15 @@ func drawBackground() {
     head.move(to: CGPoint(x: 362, y: 186)); head.line(to: CGPoint(x: 378, y: 200)); head.line(to: CGPoint(x: 362, y: 214))
     head.stroke()
 
-    text("처음 실행할 때 열리지 않으면 시스템 설정 → 개인정보 보호 및 보안에서 '그래도 열기'를 누릅니다.",
-         size: 11.5, color: hex("#81777d"), centerX: 320, top: 348)
+    // the same picture for everyone, so the note is there in the app's three languages
+    let notes = [
+        "If the app doesn't open the first time, go to System Settings → Privacy & Security and click 'Open Anyway'.",
+        "처음 실행할 때 열리지 않으면 시스템 설정 → 개인정보 보호 및 보안에서 '그래도 열기'를 누릅니다.",
+        "初回に開けない場合は、システム設定 → プライバシーとセキュリティ で「このまま開く」を押します。",
+    ]
+    for (index, note) in notes.enumerated() {
+        text(note, size: 11.5, color: hex("#81777d"), centerX: 320, top: 320 + CGFloat(index) * 18)
+    }
 }
 
 let bg1 = work.appendingPathComponent("bg.png"), bg2 = work.appendingPathComponent("bg@2x.png")

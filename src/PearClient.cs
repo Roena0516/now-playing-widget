@@ -240,7 +240,7 @@ namespace PearNowPlaying
                         {
                             Log.Info("Pear link requested, but its API server doesn't answer at " + cfg.BaseHttp);
                             SetStatus(PearStatus.NotLinked);
-                            Post(() => { var h = Notice; if (h != null) h("Pear Desktop에 연결하지 못했습니다. Pear Desktop이 실행 중이고 API 서버 플러그인이 켜져 있는지 확인해 주십시오"); });
+                            Post(() => { var h = Notice; if (h != null) h(L.T("Pear Desktop에 연결하지 못했습니다. Pear Desktop이 실행 중이고 API 서버 플러그인이 켜져 있는지 확인해 주십시오")); });
                             continue;
                         }
                         if (result == AuthResult.Denied)
@@ -548,18 +548,18 @@ namespace PearNowPlaying
             get
             {
                 var name = BrowserName;
-                if (name != null && (Source == SongSource.Browser || Status != PearStatus.Connected)) return "브라우저 YouTube Music에 연결됨 (" + name + ")";
-                if (cfg.Source == "browser") return "브라우저의 YouTube Music 기다리는 중";
-                if (cfg.Source == "auto" && Status == PearStatus.Waiting) return "YouTube Music 기다리는 중 (브라우저, Pear Desktop)";
-                if (cfg.Source == "auto" && Status == PearStatus.NotLinked) return "브라우저의 YouTube Music 기다리는 중";
+                if (name != null && (Source == SongSource.Browser || Status != PearStatus.Connected)) return L.T("브라우저 YouTube Music에 연결됨") + " (" + name + ")";
+                if (cfg.Source == "browser") return L.T("브라우저의 YouTube Music 기다리는 중");
+                if (cfg.Source == "auto" && Status == PearStatus.Waiting) return L.T("YouTube Music 기다리는 중 (브라우저, Pear Desktop)");
+                if (cfg.Source == "auto" && Status == PearStatus.NotLinked) return L.T("브라우저의 YouTube Music 기다리는 중");
                 switch (Status)
                 {
-                    case PearStatus.Waiting: return "Pear Desktop 기다리는 중 (API 서버 확인)";
-                    case PearStatus.Authorizing: return "Pear Desktop에서 허용 대기 중";
-                    case PearStatus.Denied: return "Pear Desktop에서 연결 거부됨";
-                    case PearStatus.Connected: return "Pear Desktop에 연결됨";
-                    case PearStatus.NotLinked: return "Pear Desktop 연결 안 됨 (메뉴에서 연결 요청)";
-                    default: return "연결 준비 중";
+                    case PearStatus.Waiting: return L.T("Pear Desktop 기다리는 중 (API 서버 확인)");
+                    case PearStatus.Authorizing: return L.T("Pear Desktop에서 허용 대기 중");
+                    case PearStatus.Denied: return L.T("Pear Desktop에서 연결 거부됨");
+                    case PearStatus.Connected: return L.T("Pear Desktop에 연결됨");
+                    case PearStatus.NotLinked: return L.T("Pear Desktop 연결 안 됨 (메뉴에서 연결 요청)");
+                    default: return L.T("연결 준비 중");
                 }
             }
         }

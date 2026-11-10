@@ -24,6 +24,8 @@ struct Settings: Codable {
     /// where songs come from: "auto" (a web browser and Pear Desktop, whichever started playing last),
     /// "browser" (YouTube Music in a web browser only) or "pear" (Pear Desktop only)
     var source = "auto"
+    /// the language of the menu and messages: "auto" (macOS's language), "ko", "en" or "ja" (see L)
+    var language = "auto"
     var host = "127.0.0.1"
     var port = 26538
     var position = "BottomLeft"
@@ -94,6 +96,8 @@ struct Settings: Codable {
         func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) throws -> T { try c.decodeIfPresent(T.self, forKey: key) ?? fallback }
         source = try value(.source, source)
         if !["auto", "browser", "pear"].contains(source) { source = "auto" }
+        language = try value(.language, language)
+        if !["ko", "en", "ja"].contains(language) { language = "auto" }
         host = try value(.host, host); port = try value(.port, port); position = try value(.position, position)
         marginX = try value(.marginX, marginX); marginY = try value(.marginY, marginY)
         scale = try value(.scale, scale); panelWidth = try value(.panelWidth, panelWidth); monitor = try value(.monitor, monitor)

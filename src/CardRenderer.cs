@@ -37,7 +37,7 @@ namespace PearNowPlaying
             int gap = artSize > 0 ? R(14 * s) : 0;
             int minText = kind == CardKind.Info ? R(140 * s) : R(220 * s), maxText = R(380 * s);
 
-            string title = kind == CardKind.Info ? infoText : (song != null && song.Title.Length > 0 ? song.Title : "알 수 없는 곡");
+            string title = kind == CardKind.Info ? infoText : (song != null && song.Title.Length > 0 ? song.Title : L.T("알 수 없는 곡"));
             string sub = kind == CardKind.Info ? "" : Subtitle(song);
             string label = LabelText(kind);
             string time = kind == CardKind.Info || song == null ? "" : TimeText(song);
@@ -270,9 +270,9 @@ namespace PearNowPlaying
         {
             switch (kind)
             {
-                case CardKind.Paused: return "일시정지됨";
+                case CardKind.Paused: return L.T("일시정지됨");
                 case CardKind.Info: return "Now Playing Widget";
-                default: return "재생중";   // also when playback resumes
+                default: return L.T("재생중");   // also when playback resumes
             }
         }
 
