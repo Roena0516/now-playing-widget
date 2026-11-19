@@ -23,6 +23,8 @@ enum LrclibRecheck { @TaskLocal static var only = false }
     var useMore = true
     /// Lyrics found on LRCLIB, Kugou or NetEase kept between runs; nil = memory only.
     let disk: LyricsDiskCache?
+    /// Which YouTube Music track's lyrics a video got before; nil = found again every run.
+    let links: LyricsLinks?
     private let log: (String) -> Void
     private var cache: [String: LyricsLookup] = [:]
     private var prefetched: [String: LyricsLookup] = [:]
@@ -31,8 +33,9 @@ enum LrclibRecheck { @TaskLocal static var only = false }
     /// When LRCLIB was last asked about a song whose lyrics came from Kugou / NetEase (by videoId, this run).
     private var lrclibChecked: [String: Date] = [:]
 
-    init(lrclib: LyricsProvider, ytm: YTMusicProvider, more: MoreLyrics? = nil, disk: LyricsDiskCache? = nil, log: @escaping (String) -> Void = { _ in }) {
-        self.lrclib = lrclib; self.ytm = ytm; self.more = more; self.disk = disk; self.log = log
+    init(lrclib: LyricsProvider, ytm: YTMusicProvider, more: MoreLyrics? = nil, disk: LyricsDiskCache? = nil, links: LyricsLinks? = nil,
+         log: @escaping (String) -> Void = { _ in }) {
+        self.lrclib = lrclib; self.ytm = ytm; self.more = more; self.disk = disk; self.links = links; self.log = log
     }
 
     private static func key(_ song: Song) -> String { song.videoId + "|" + song.title }
@@ -72,6 +75,9 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         if !LrclibRecheck.only { standIns.remove(Self.id(song)) }
         log("INFO \(LrclibRecheck.only ? "asking LRCLIB again: " : "")looking up lyrics: \(song.artist) - \(song.title) [\(song.mediaType.isEmpty ? "type?" : song.mediaType), \(song.videoId), \(Int(song.duration))s]")
 
+        // 0) the YouTube Music track whose lyrics this video got before (a cover's original, an MV's official audio)
+        if let linked = try await linkedLyrics(song) { return remember(key, linked) }
+
         // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
         // the usual case for covers: ask for it alongside the first lookups instead of after them.
         // (not tied to the lyrics relay: the description and the original's title/length come from YouTube directly)
@@ -95,7 +101,8 @@ enum LrclibRecheck { @TaskLocal static var only = false }
                     // a music video: YouTube Music has timed lyrics only on the official audio track
                     if let audio = try await audioTrackLyrics(info) {
                         log("INFO lyrics found via the official audio track on YouTube Music: \(song.artist) - \(song.title)")
-                        return remember(key, .synced(audio, source: "YouTube Music · 공식 음원"))
+                        links?.set(song.videoId, from: audio.id, source: "YouTube Music · 공식 음원")
+                        return remember(key, .synced(audio.lines, source: "YouTube Music · 공식 음원"))
                     }
                 } catch {
                     if Task.isCancelled { throw CancellationError() }
@@ -108,6 +115,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         // 2) covers: the original song linked in the description, if the music wasn't changed
         // (uses YouTube only for the description and the original's title/length, so it runs even with ytmLyrics off)
         if coverCandidate, let original = try await fromOriginal(song, description) {
+            links?.set(song.videoId, from: original.from, source: original.lookup.sourceName)   // the original's YouTube Music lyrics only
             if original.standIn { standIns.insert(Self.id(song)) }
             return original.standIn ? remember(key, original.lookup) : keep(key, song, original.lookup)
         }
@@ -135,6 +143,28 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         var lookup: LyricsLookup
         var unsure = false
         var standIn = false
+        /// YouTube Music lyrics: the video they are the timed lyrics of (LyricsLinks); "" for other sources.
+        var from = ""
+    }
+
+    /// The lyrics of the YouTube Music track this video got its lyrics from before (LyricsLinks), asked for directly:
+    /// one lookup instead of finding the track again. Nil when there is no link, or YouTube Music can't be asked (the
+    /// usual lookup follows); a link whose track has no timed lyrics any more is dropped. Same as src/Lyrics.cs.
+    private func linkedLyrics(_ song: Song) async throws -> LyricsLookup? {
+        guard let links, useYtm, !LrclibRecheck.only, !ytm.paused, !song.videoId.isEmpty, let link = links.get(song.videoId) else { return nil }
+        do {
+            let track = try await ytm.lookup(link.from)
+            if !track.lines.isEmpty {
+                log("INFO lyrics found via the saved link to \(link.from) (\(link.source)): \(song.artist) - \(song.title)")
+                return .synced(track.lines, source: link.source)
+            }
+            log("INFO the saved link to \(link.from) has no timed lyrics now, looking up again: \(song.artist) - \(song.title)")
+            links.forget(song.videoId)
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            log("INFO the saved link to \(link.from) failed (\(error.localizedDescription)), looking up again")
+        }
+        return nil
     }
 
     /// Remembered for this run, and on disk when it came from LRCLIB, Kugou or NetEase.
@@ -213,6 +243,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         cache.removeValue(forKey: Self.key(song)); prefetched.removeValue(forKey: song.videoId); standIns.remove(Self.id(song))
         ytm.forget(song.videoId)
         disk?.forget(song.videoId)
+        links?.forget(song.videoId)
     }
 
     /// Synced lyrics of the original song for a cover: follow the YouTube links in the cover's description, take
@@ -290,7 +321,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         if diff > CoverLyrics.maxLengthDiff { log("INFO cover: candidate \(label) differs from the cover by \(Int(diff))s, skipped"); return .tooLong(orig) }
         if !orig.lines.isEmpty {
             log("INFO lyrics found via original \(label) on YouTube Music: \(song.artist) - \(song.title)")
-            return .used(Synced(lookup: .synced(orig.lines, source: "YouTube Music · 원곡")))
+            return .used(Synced(lookup: .synced(orig.lines, source: "YouTube Music · 원곡"), from: orig.videoId))
         }
         if ytmLyrics {
             // the link is usually the original's music video; its official audio track has the timed lyrics
@@ -298,7 +329,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
             let coverName = CoverLyrics.guessOriginal(song, description: desc?.text).title
             if let audio = try await audioTrackLyrics(orig, otherNames: [coverName]) {
                 log("INFO lyrics found via original \(label)'s official audio on YouTube Music: \(song.artist) - \(song.title)")
-                return .used(Synced(lookup: .synced(audio, source: "YouTube Music · 원곡")))
+                return .used(Synced(lookup: .synced(audio.lines, source: "YouTube Music · 원곡"), from: audio.id))
             }
         }
         if !orig.title.isEmpty {
@@ -419,12 +450,12 @@ enum LrclibRecheck { @TaskLocal static var only = false }
 
     /// For a music video / upload: find the official audio track (artist page -> single/album) and get its
     /// YouTube Music lyrics. Nil when there is none or it has no timed lyrics. Failures are logged, not thrown.
-    private func audioTrackLyrics(_ video: TrackInfo, otherNames: [String] = []) async throws -> [LyricLine]? {
+    private func audioTrackLyrics(_ video: TrackInfo, otherNames: [String] = []) async throws -> (id: String, lines: [LyricLine])? {
         if video.videoType == "MUSIC_VIDEO_TYPE_ATV" { return nil }
         do {
             guard let audioId = try await ytm.findAudioTrack(video, otherNames: otherNames), audioId != video.videoId else { return nil }
             let audio = try await ytm.lookup(audioId)
-            return audio.lines.isEmpty ? nil : audio.lines
+            return audio.lines.isEmpty ? nil : (audioId, audio.lines)
         } catch {
             if Task.isCancelled { throw CancellationError() }
             log("INFO official audio lookup failed for \(video.videoId): \(error.localizedDescription)")

@@ -34,6 +34,8 @@ namespace PearNowPlaying
         /// to disk, so the next run asks LRCLIB again (it may have the song).</summary>
         public bool StandIn;
         public string Source = "";
+        /// <summary>YouTube Music lyrics: the video they are the timed lyrics of (LyricsLinks); "" for other sources.</summary>
+        public string FromVideo = "";
         public bool HasSynced { get { return Lines != null && Lines.Count > 0; } }
 
         /// <summary>Index of the line that is active at the given time, or -1 before the first line.</summary>
@@ -195,6 +197,10 @@ namespace PearNowPlaying
             Log.Info((lrclibOnly.Value ? "asking LRCLIB again: " : "") + "looking up lyrics: " + song.Artist + " - " + song.Title + " [" + (string.IsNullOrEmpty(song.MediaType) ? "type?" : song.MediaType)
                      + ", " + song.VideoId + ", " + (int)song.Duration + "s]");
 
+            // 0) the YouTube Music track whose lyrics this video got before (a cover's original, an MV's official audio)
+            var linked = await LinkedLyrics(song, ct);
+            if (linked != null) { lock (gate) cache[key] = linked; return linked; }
+
             // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
             // the usual case for covers: ask for it alongside the first lookups instead of after them.
             // (not tied to the lyrics relay: the description and the original's title/length come from YouTube directly)
@@ -226,6 +232,7 @@ namespace PearNowPlaying
                         {
                             audio.Source = "YouTube Music · 공식 음원";
                             Log.Info("lyrics found via the official audio track on YouTube Music: " + song.Artist + " - " + song.Title);
+                            if (Links != null) Links.Set(song.VideoId, audio);
                             lock (gate) cache[key] = audio;
                             return audio;
                         }
@@ -248,6 +255,7 @@ namespace PearNowPlaying
                 if (original != null && original.Failed) return original;   // LRCLIB busy: retried later, not cached
                 if (original != null)
                 {
+                    if (Links != null) Links.Set(song.VideoId, original);   // the original's YouTube Music lyrics only
                     Keep(key, song, original);
                     return original;
                 }
@@ -261,6 +269,33 @@ namespace PearNowPlaying
             if (!result.Failed && (result.HasSynced || result.Instrumental || (cacheMisses && !ytmError && !result.Unsure)))
                 Keep(key, song, result);
             return result;
+        }
+
+        /// <summary>
+        /// The lyrics of the YouTube Music track this video got its lyrics from before (LyricsLinks), asked for directly:
+        /// one lookup instead of finding the track again. Null when there is no link, or YouTube Music can't be asked
+        /// (the usual lookup follows); a link whose track has no timed lyrics any more is dropped.
+        /// </summary>
+        async Task<LyricsResult> LinkedLyrics(SongInfo song, CancellationToken ct)
+        {
+            if (Links == null || Ytm == null || !UseYtm || lrclibOnly.Value || Ytm.Paused || string.IsNullOrEmpty(song.VideoId)) return null;
+            var link = Links.Get(song.VideoId);
+            if (link == null) return null;
+            try
+            {
+                var track = await Ytm.Lookup(link.From, ct);
+                if (track.Lyrics != null && track.Lyrics.HasSynced)
+                {
+                    track.Lyrics.Source = link.Source;
+                    Log.Info("lyrics found via the saved link to " + link.From + " (" + link.Source + "): " + song.Artist + " - " + song.Title);
+                    return track.Lyrics;
+                }
+                Log.Info("the saved link to " + link.From + " has no timed lyrics now, looking up again: " + song.Artist + " - " + song.Title);
+                Links.Forget(song.VideoId);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { Log.Write("INFO the saved link to " + link.From + " failed (" + (ex is OperationCanceledException ? "timeout" : ex.Message) + "), looking up again"); }
+            return null;
         }
 
         /// <summary>
@@ -729,10 +764,13 @@ namespace PearNowPlaying
         {
             lock (gate) { cache.Remove(song.VideoId + "|" + song.Title); prefetched.Remove(song.VideoId ?? ""); }
             if (Disk != null) Disk.Forget(song.VideoId);
+            if (Links != null) Links.Forget(song.VideoId);
         }
 
         /// <summary>Lyrics found on LRCLIB, Kugou or NetEase kept between runs; null = memory only.</summary>
         public LyricsDiskCache Disk;
+        /// <summary>Which YouTube Music track's lyrics a video got before; null = found again every run.</summary>
+        public LyricsLinks Links;
 
         void Keep(string key, SongInfo song, LyricsResult r)
         {

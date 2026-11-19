@@ -236,6 +236,7 @@ Now Playing Widget은 YouTube Music에서 재생 중인 곡을 화면 위에 표
 <summary>가사 저장과 LRCLIB 요청 규칙</summary>
 
 - LRCLIB, Kugou, NetEase에서 찾은 가사는 컴퓨터에 저장해 두고(`%LocalAppData%\PearNowPlaying\lyrics-cache`, macOS는 `~/Library/Caches/PearNowPlaying-macOS/lyrics`), 같은 곡을 다시 재생하면 바로 표시합니다. 90일이 지난 가사는 다시 찾고, 3,000곡을 넘으면 오래된 것부터 지웁니다. 저장된 가사가 잘못되었다면 **가사 다시 찾기**를 누릅니다.
+- 커버곡이나 MV에 원곡·공식 음원의 YouTube Music 가사를 썼다면, 가사는 저장하지 않고 "어느 곡의 가사를 썼는지"만 `lyrics-links.json`(Windows `%LocalAppData%\PearNowPlaying`, macOS `~/Library/Caches/PearNowPlaying-macOS`)에 저장합니다. 다음에 같은 영상을 재생하면 원곡을 다시 찾지 않고 그 곡의 가사만 받으므로 3–6초 걸리던 것이 1초 안팎으로 줄어듭니다. 90일이 지나면 지우고, 1만 곡까지 저장합니다.
 - Kugou나 NetEase에서 찾은 곡은 그사이 LRCLIB에 가사가 올라왔을 수 있으므로, 다시 재생할 때 LRCLIB에 다시 묻습니다(같은 실행 안에서는 하루에 한 번).
 - LRCLIB의 [API 문서](https://lrclib.net/docs)가 정한 규칙을 따릅니다. 요청은 하나씩 보내고 사이에 0.3초 이상 간격을 두며, 1분에 60번을 넘기지 않습니다.
 - LRCLIB가 `502`, `503`, `504`(바쁨)로 답하면 `Retry-After` 헤더의 시간(없으면 1초)에 0–30%의 무작위 시간을 더한 만큼 쉬고 다시 묻습니다. 곡이 재생되는 동안 최대 10분까지 계속 다시 묻습니다.
@@ -298,6 +299,7 @@ Windows 버전은 C# 7.3, .NET Framework 4.8, WinForms로 만들었으며, 외�
 | `src/LyricsView.cs` | 스크롤되는 가사 목록과 전환 애니메이션 |
 | `src/Lyrics.cs` | 가사를 찾는 순서, LRCLIB 검색(Pear와 같은 대조 방식), LRC 파서 |
 | `src/MoreLyrics.cs` | Kugou와 NetEase 가사 검색, 결과 대조, 작사·작곡 표기 줄 지우기 |
+| `src/LyricsLinks.cs` | 커버곡·MV가 어느 YouTube Music 곡의 가사를 썼는지 저장(`lyrics-links.json`) |
 | `src/CaptionTiming.cs` | 영상 자막과 가사를 맞대어 커버곡의 가사 타이밍 재기, 잰 값 저장(`caption-timing.json`) |
 | `src/YtmLyrics.cs` | YouTube Music 가사(Pear의 YTMusic 가사 제공자와 같은 방식), 공식 음원 찾기, 영상 설명란 읽기, YouTube 검색 |
 | `src/CoverLyrics.cs` | 커버곡 설명란에서 원곡 링크 고르기, 검색 결과에서 원곡 고르기, 편곡·리믹스 걸러내기 |

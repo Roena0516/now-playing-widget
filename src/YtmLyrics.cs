@@ -127,7 +127,7 @@ namespace PearNowPlaying
             {
                 VideoId = t.VideoId, Title = t.Title, Artist = t.Artist, ArtistId = t.ArtistId, VideoType = t.VideoType, Duration = t.Duration,
                 Thumbnail = t.Thumbnail, CounterpartId = t.CounterpartId,
-                Lyrics = t.Lyrics == null ? null : new LyricsResult { Lines = t.Lyrics.Lines, Instrumental = t.Lyrics.Instrumental, Source = t.Lyrics.Source },
+                Lyrics = t.Lyrics == null ? null : new LyricsResult { Lines = t.Lyrics.Lines, Instrumental = t.Lyrics.Instrumental, Source = t.Lyrics.Source, FromVideo = t.VideoId },
             };
         }
 

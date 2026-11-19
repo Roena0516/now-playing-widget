@@ -62,6 +62,7 @@ Windows:
 | `src/TrayApp.cs` | 트레이 메뉴(위젯·가사 하위 메뉴, 위젯별 위치·크기·투명도), 곡 카드·정보 카드의 표시 시점, 위젯 끌어서 옮기기 모드, 가사 재시도 루프, 다음 곡 미리 받기 |
 | `src/Config.cs` | config.ini 읽기/쓰기, 예전 ETS2NowPlaying 설정 이전(`MigrateOldConfig`), 토큰 저장 |
 | `src/LyricsTiming.cs` | 영상별 가사 타이밍(`lyrics-timing.json`) 읽기/쓰기. 맥은 `LyricsTiming.swift`이고, 닫히지 않는 메뉴 항목은 `MenuRow.swift`입니다 |
+| `src/LyricsLinks.cs` | 영상이 어느 YouTube Music 트랙의 가사를 썼는지(`lyrics-links.json`) 저장. 맥은 `LyricsLinks.swift` |
 | `src/CaptionTiming.cs` | 영상 자막으로 커버곡 가사 타이밍 재기(`CaptionTiming`, 순수 함수 `Estimate`)와 잰 값 저장(`CaptionTimingStore`, `caption-timing.json`). 자막 요청은 `YtmLyrics.CaptionTracks`/`CaptionLines`. 맥은 `CaptionTiming.swift`, `YTMusicProvider.captionTracks`/`captionLines` |
 | `src/Hotkeys.cs`, `src/Native.cs`, `src/Theme.cs` | 전역 단축키, Win32 P/Invoke, 색 토큰과 폰트 로딩 |
 
@@ -91,6 +92,7 @@ Windows:
 ## 가사를 찾는 순서 (`LyricsProvider.Find`)
 
 1. 메모리 캐시, 미리 받아 둔 결과(videoId 기준), 디스크 캐시(`LyricsDiskCache`)를 차례로 확인합니다.
+   - 그다음 **저장된 연결**(`LyricsLinks`, `LinkedLyrics`/`linkedLyrics`)을 봅니다. 영상이 전에 다른 YouTube Music 트랙의 가사(출처 "YouTube Music · 원곡" 또는 "· 공식 음원")를 썼다면, 그 트랙의 videoId와 출처만 `lyrics-links.json`(Windows `%LocalAppData%\PearNowPlaying`, 맥 `~/Library/Caches/PearNowPlaying-macOS`, `{"version":1,"videos":[{"id","from","source","day"}]}`)에 저장해 두고, 다음에는 그 트랙의 가사만 바로 요청합니다. 원곡 찾기와 공식 음원 찾기에 요청이 5–10번(3–12초) 들던 것이 요청 2번(약 1–1.5초)으로 줄었습니다(2026-11-20 측정, 사용자 요청: 2,648곡 재생목록을 셔플로 들을 때). YouTube Music 가사 자체는 지금처럼 디스크에 저장하지 않습니다. 그 트랙에 싱크 가사가 없어졌으면 연결을 지우고 아래 순서대로 찾고, 요청이 실패하면 연결은 두고 아래 순서대로 찾습니다. 90일이 지난 연결은 버리고 1만 개까지 둡니다. "가사 다시 찾기"는 연결도 지웁니다. Windows는 `LyricsResult.FromVideo`(YtmLyrics의 `Copy`가 채움), 맥은 `Synced.from`과 `audioTrackLyrics`가 돌려주는 트랙 ID로 어느 트랙의 가사인지 압니다.
 2. **YouTube Music**에서 찾습니다(`ytmLyrics=true`이고 서킷 브레이커가 대기 중이 아닐 때만 찾습니다).
    - 먼저 그 영상 자체의 싱크 가사를 찾습니다.
    - 없으면 같은 아티스트의 앨범에서 공식 음원(ATV)을 찾아 그 가사를 사용합니다(출처는 "YouTube Music · 공식 음원"으로 표시합니다).

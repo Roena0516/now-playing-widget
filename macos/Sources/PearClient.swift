@@ -75,7 +75,7 @@ struct PlayerState {
     private var socket: URLSessionWebSocketTask?
     private var token: String?
     let lyrics = LyricsFinder(lrclib: LyricsProvider(log: Log.write), ytm: YTMusicProvider(log: Log.write), more: MoreLyrics(log: Log.write),
-                              disk: LyricsDiskCache(log: Log.write), log: Log.write)
+                              disk: LyricsDiskCache(log: Log.write), links: LyricsLinks(log: Log.write), log: Log.write)
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.connectionProxyDictionary = [:]

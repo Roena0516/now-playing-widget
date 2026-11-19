@@ -184,7 +184,20 @@ import CoreGraphics
     try! Data(#"{"version":1,"videos":[{"id":"MFEaIgMkR_0","lyrics":"5:0:9","ms":null,"day":\#(Int(Date().timeIntervalSince1970 / 86400))}]}"#.utf8).write(to: captionFile)
     precondition(CaptionTimingStore(file: captionFile).get("MFEaIgMkR_0", "5:0:9") == .some(nil), "the Windows version's null")
     try? FileManager.default.removeItem(at: captionFile)
-    precondition(Settings().captionTiming && !(try! JSONDecoder().decode(Settings.self, from: Data(#"{"captionTiming":false}"#.utf8))).captionTiming)
+    // which YouTube Music track's lyrics a video got (LyricsLinks): only another video's, kept between runs
+    let linksFile = FileManager.default.temporaryDirectory.appendingPathComponent("links-test-\(UUID().uuidString).json")
+    let links = LyricsLinks(file: linksFile)
+    links.set("k5B3SwExcks", from: "OoGkKXRpI7g", source: "YouTube Music · 원곡")
+    links.set("BI9Ue6JwJic", from: "4ZUPu4n_PYU", source: "YouTube Music · 공식 음원")
+    links.set("mDeizEp_GtU", from: "aaaaaaaaaaa", source: "NetEase · 원곡")         // not YouTube Music's
+    links.set("zzzzzzzzzzz", from: "zzzzzzzzzzz", source: "YouTube Music · 원곡")   // its own lyrics
+    let linksReread = LyricsLinks(file: linksFile)
+    precondition(linksReread.get("k5B3SwExcks")?.from == "OoGkKXRpI7g" && linksReread.get("BI9Ue6JwJic")?.source == "YouTube Music · 공식 음원"
+                 && linksReread.get("mDeizEp_GtU") == nil && linksReread.get("zzzzzzzzzzz") == nil, "links: YouTube Music, another video")
+    linksReread.forget("k5B3SwExcks")
+    precondition(LyricsLinks(file: linksFile).get("k5B3SwExcks") == nil, "a link forgotten")
+    try? FileManager.default.removeItem(at: linksFile)
+    precondition(Settings().captionTiming &&!(try! JSONDecoder().decode(Settings.self, from: Data(#"{"captionTiming":false}"#.utf8))).captionTiming)
     // "Liquid Glass 배경(beta)": off by default and for unknown values; the glass only where macOS has it (26 and later)
     precondition(Settings().liquidGlass == "off")
     precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"liquidGlass":"clear"}"#.utf8)).liquidGlass == "clear")
