@@ -197,7 +197,7 @@ import CoreGraphics
     linksReread.forget("k5B3SwExcks")
     precondition(LyricsLinks(file: linksFile).get("k5B3SwExcks") == nil, "a link forgotten")
     try? FileManager.default.removeItem(at: linksFile)
-    precondition(Settings().captionTiming &&!(try! JSONDecoder().decode(Settings.self, from: Data(#"{"captionTiming":false}"#.utf8))).captionTiming)
+    precondition(Settings().captionTiming && !(try! JSONDecoder().decode(Settings.self, from: Data(#"{"captionTiming":false}"#.utf8))).captionTiming)
     // "Liquid Glass 배경(beta)": off by default and for unknown values; the glass only where macOS has it (26 and later)
     precondition(Settings().liquidGlass == "off")
     precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"liquidGlass":"clear"}"#.utf8)).liquidGlass == "clear")
