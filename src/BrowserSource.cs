@@ -457,14 +457,19 @@ namespace PearNowPlaying
             return PlayingTab(tabs, now.Title);
         }
 
-        /// <summary>The tab named like what Windows reports; else the only video tab, or the only YouTube Music tab.</summary>
+        /// <summary>
+        /// The tab named like what Windows reports; else the only video tab, or the only YouTube Music tab with a song.
+        /// A tab titled just "YouTube Music" (its home or a list, playing nothing) isn't one: with it open, a YouTube video
+        /// playing in another tab was taken for its song (2026-11-19).
+        /// </summary>
         internal static Tab PlayingTab(List<Tab> tabs, string title)
         {
             var named = tabs.FirstOrDefault(t => SameSong(title, TabSongTitle(t.Title), ""));
             if (named != null) return named;
-            var videos = tabs.Where(t => WatchParameters(t.Url).Item1.Length > 0).ToList();
+            var songs = tabs.Where(t => WatchParameters(t.Url).Item1.Length > 0 || TabSongTitle(t.Title).Length > 0).ToList();
+            var videos = songs.Where(t => WatchParameters(t.Url).Item1.Length > 0).ToList();
             if (videos.Count == 1) return videos[0];
-            return tabs.Count == 1 ? tabs[0] : null;
+            return songs.Count == 1 ? songs[0] : null;
         }
 
         /// <summary>"アイドル - Idol | YouTube Music - Google Chrome" -> "アイドル - Idol" ("" for "YouTube Music" alone).</summary>
@@ -612,7 +617,9 @@ namespace PearNowPlaying
                         SameSong(now.Title, e.Title, "") && (now.Duration <= 0 || Math.Abs(e.Duration - now.Duration) <= 3));
                     if (entry != null) return entry.VideoId;
                 }
-                return await ytm.FindVideo(tabSong.Length > 0 ? tabSong : now.Title, now.Artist, now.Duration, ct) ?? "";
+                // the tab's title is the original one: a video only as long as the song isn't needed then (it took another
+                // song by the same singer, 2026-11-19)
+                return await ytm.FindVideo(tabSong.Length > 0 ? tabSong : now.Title, now.Artist, now.Duration, ct, tabSong.Length == 0) ?? "";
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { Log.Write("INFO YouTube search failed: " + ex.Message); return ""; }

@@ -146,6 +146,45 @@ import CoreGraphics
     timed.stop()
     try? FileManager.default.removeItem(at: timingDir)
     precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"lyricsOffsetMs":99999}"#.utf8)).lyricsOffsetMs == 10000)
+    // caption timing (CaptionTiming): a cover's lyrics timed by its captions; the same cases as the Windows test
+    precondition(String(String.UnicodeScalarView(CaptionTiming.norm("[音楽] カタカナ、Ａｂc!"))) == "かたかなabc", "norm")
+    precondition(CaptionTiming.language([LyricLine(id: 0, time: 0, text: "こんにちは世界")]) == "ja" && CaptionTiming.language([LyricLine(id: 0, time: 0, text: "안녕하세요")]) == "ko"
+                 && CaptionTiming.language([LyricLine(id: 0, time: 0, text: "hello world")]) == "en" && CaptionTiming.language([LyricLine(id: 0, time: 0, text: "你好世界")]) == "zh")
+    func cue(_ pairs: [(Int, String)]) -> [LyricLine] { pairs.enumerated().map { LyricLine(id: $0.offset, time: Double($0.element.0) / 1000, text: $0.element.1) } }
+    let sung = cue([(10000, "あいうえおかきくけこ"), (15000, "さしすせそたちつてと"), (20000, "なにぬねのはひふへほ"),
+                      (25000, "まみむめもやゆよらり"), (30000, "るれろわをんがぎぐげ"), (35000, "ござじずぜぞだぢづで")])
+    let heard = cue([(1000, "[音楽]"), (10600, "あいうえおかきくけこ"), (15620, "さしすせそたちつてと"), (20580, "なにぬねのはひふへほ"),
+                       (25600, "まみむめもやゆよらり"), (30610, "ぜんぜんちがうことば"), (35590, "ござじずぜぞだぢづで")])
+    precondition(CaptionTiming.estimate(sung, heard) == 600, "captions 0.6 s later")
+    precondition(CaptionTiming.estimate(sung, heard.map { LyricLine(id: $0.id, time: $0.time - 1.5, text: $0.text) }) == -900, "captions 0.9 s earlier")
+    precondition(CaptionTiming.estimate(sung, Array(heard.prefix(4))) == nil, "3 matches are too few")
+    precondition(CaptionTiming.estimate(sung, cue([(13000, "あいうえおかきくけこ"), (13500, "さしすせそたちつてと"), (19000, "まみむめもやゆよらり"), (25000, "なにぬねのはひふへほ")])) == nil,
+                 "disagreeing matches settle nothing")
+    precondition(CaptionTiming.estimate(sung, cue([(10600, "あいうえおかきくけこ"), (15620, "さしすせそたちつてと"), (20580, "なにぬねのはひふへほ"), (25600, "まみむめもやゆよらり"),
+                                                    (29000, "るれろわをんがぎぐげ"), (33000, "ござじずぜぞだぢづで")])) == 600, "the agreeing majority wins")
+    precondition(CaptionTiming.applies(.synced(sung, source: "LRCLIB · 원곡")) && CaptionTiming.applies(.synced(sung, source: "YouTube Music · 공식 음원"))
+                 && !CaptionTiming.applies(.synced(sung, source: "LRCLIB")) && !CaptionTiming.applies(.synced([], source: "LRCLIB · 원곡")) && !CaptionTiming.applies(nil))
+    precondition(CaptionTiming.isCover(.synced(sung, source: "LRCLIB · 원곡")) && CaptionTiming.isCover(.synced(sung, source: "LRCLIB · 원곡 검색"))
+                 && !CaptionTiming.isCover(.synced(sung, source: "YouTube Music · 공식 음원")) && !CaptionTiming.isCover(.synced(sung, source: "LRCLIB")),
+                 "covers go without the default lead")
+    precondition(CaptionTiming.withoutLead(.synced(sung, source: "YouTube Music"), timedByCaptions: false)
+                 && CaptionTiming.withoutLead(.synced(sung, source: "YouTube Music · 원곡"), timedByCaptions: true)
+                 && CaptionTiming.withoutLead(.synced(sung, source: "LRCLIB · 원곡"), timedByCaptions: false)
+                 && !CaptionTiming.withoutLead(.synced(sung, source: "LRCLIB · 원곡"), timedByCaptions: true)
+                 && !CaptionTiming.withoutLead(.synced(sung, source: "LRCLIB"), timedByCaptions: false)
+                 && !CaptionTiming.withoutLead(.synced(sung, source: "NetEase · 원곡 검색"), timedByCaptions: true),
+                 "the default lead: not for YouTube Music's lyrics, nor untimed covers")
+    let captionFile = FileManager.default.temporaryDirectory.appendingPathComponent("caption-test-\(UUID().uuidString).json")
+    CaptionTimingStore(file: captionFile).set("k5B3SwExcks", "61:1:2", 229)
+    let captionStore = CaptionTimingStore(file: captionFile)
+    captionStore.set("ItRQlqj4sys", "83:1:2", nil)
+    let captionReread = CaptionTimingStore(file: captionFile)
+    precondition(captionReread.get("k5B3SwExcks", "61:1:2") == .some(229) && captionReread.get("ItRQlqj4sys", "83:1:2") == .some(nil)
+                 && captionReread.get("k5B3SwExcks", "60:1:2") == nil, "kept, \"none\" kept, other lyrics not")
+    try! Data(#"{"version":1,"videos":[{"id":"MFEaIgMkR_0","lyrics":"5:0:9","ms":null,"day":\#(Int(Date().timeIntervalSince1970 / 86400))}]}"#.utf8).write(to: captionFile)
+    precondition(CaptionTimingStore(file: captionFile).get("MFEaIgMkR_0", "5:0:9") == .some(nil), "the Windows version's null")
+    try? FileManager.default.removeItem(at: captionFile)
+    precondition(Settings().captionTiming && !(try! JSONDecoder().decode(Settings.self, from: Data(#"{"captionTiming":false}"#.utf8))).captionTiming)
     // "Liquid Glass 배경(beta)": off by default and for unknown values; the glass only where macOS has it (26 and later)
     precondition(Settings().liquidGlass == "off")
     precondition(try! JSONDecoder().decode(Settings.self, from: Data(#"{"liquidGlass":"clear"}"#.utf8)).liquidGlass == "clear")
@@ -450,6 +489,19 @@ func testCustomPlacement() {
     precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(localized), title: "Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "the one official video of that length")
     precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(localized), title: "アイドル - Idol", artist: "요아소비", duration: 226) == "ZRtdQ81jPUQ", "an official channel naming the song")
     precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(localized), title: "Idol", artist: "요아소비", duration: 230) == nil)
+    // with the tab's (original) title, no video by its length alone: it took another song by the same singer (2026-11-19)
+    precondition(YTMusicProvider.pickVideo(YTMusicProvider.searchHits(localized), title: "Idol", artist: "요아소비", duration: 226, byLength: false) == nil, "not by length alone")
+    // searched by the title alone: the one video titled so, or the singer's one of several
+    let byTitle: [String: Any] = ["contents": ["sectionListRenderer": ["contents": [["itemSectionRenderer": ["contents": [
+        result("whUl1WRuljI", "インドア系ならトラックメイカー・Cover Yangnari", "ヤン・ナリ / Yang Nari 【にじさんじ】", "3:17"),
+        result("rZ6JSwVQ1tM", "インドア系ならトラックメイカー/covered #ござやよ", "本間ひまわり - Himawari Honma -", "3:17")]]]]]]]
+    precondition(YTMusicProvider.pickByTitleOnly(YTMusicProvider.searchHits(byTitle), title: "インドア系ならトラックメイカー・Cover Yangnari",
+                                                 artist: "ヤン・ナリ / Yang Nari 【にじさんじ】", duration: 197) == "whUl1WRuljI", "the one video titled so")
+    let sameTitles: [String: Any] = ["contents": ["sectionListRenderer": ["contents": [["itemSectionRenderer": ["contents": [
+        result("aaaaaaaaaaa", "secret base ~君がくれたもの~", "Someone", "5:07"),
+        result("bbbbbbbbbbb", "secret base ~君がくれたもの~", "Another", "5:08")]]]]]]]
+    precondition(YTMusicProvider.pickByTitleOnly(YTMusicProvider.searchHits(sameTitles), title: "secret base ~君がくれたもの~", artist: "莉犬", duration: 307) == nil,
+                 "several uploads titled so, none the singer's")
 }
 
 /// A cover's original from YouTube's search for the song's name (results recorded 2026-10-20, hl=ja).

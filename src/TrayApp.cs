@@ -25,6 +25,10 @@ namespace PearNowPlaying
         readonly ContextMenuStrip menu;
         readonly ToolStripMenuItem statusItem, pinItem, lyricsItem, coverLyricsItem, retryLyricsItem, lyricsInfoItem, songOffsetMenu, offsetMenu, sizeMenu, displayMenu, placeMenu, transparencyMenu, moveItem, titleMenu;
         LyricsTiming timing = new LyricsTiming(LyricsTiming.DefaultPath);   // this video's lyrics timing (가사 타이밍 → 이 곡)
+        readonly CaptionTimingStore captionStore = new CaptionTimingStore(CaptionTimingStore.DefaultPath);
+        int? captionOffset;   // how much later (ms) the video sings than its lyrics' times, by its captions (CaptionTiming); null: not settled
+        CancellationTokenSource captionCts;
+        readonly ToolStripMenuItem captionTimingItem = new ToolStripMenuItem { Enabled = false, Visible = false };
         readonly HttpClient artHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         readonly Updater updater = new Updater();
         readonly ToolStripMenuItem sourceMenu, retryAuthItem, discordMenu, discordItem, discordButtonItem;
@@ -101,6 +105,7 @@ namespace PearNowPlaying
             retryLyricsItem = new ToolStripMenuItem("가사 다시 찾기", null, (s, e) => RetryLyrics());
             // lyrics timing for this video (kept per video ID, added to the one for all songs) and for all songs
             songOffsetMenu = TimingMenu("이 곡 가사 타이밍", ShiftSongOffset);
+            songOffsetMenu.DropDownItems.Insert(1, captionTimingItem);   // "자막으로 맞춤: …" when the captions timed it
             offsetMenu = TimingMenu("모든 곡 가사 타이밍", ShiftOffset);
             // filled when the menu opens (screens and widgets can change)
             displayMenu = new ToolStripMenuItem("표시");
@@ -310,6 +315,7 @@ namespace PearNowPlaying
             if (key == lyricsKey) return;
             lyricsKey = key;
             lyricsLayoutKey = null;
+            MeasureCaptions(key, song, null);
             if (lyricsCts != null) lyricsCts.Cancel();
             if (prefetchCts != null) prefetchCts.Cancel();
             // already known (fetched ahead, cached): swap the lyrics in place, so the lyrics card doesn't close and
@@ -396,6 +402,7 @@ namespace PearNowPlaying
         {
             lyrics = result;
             lyricsLayoutKey = null;
+            MeasureCaptions(key, song, result);
             lyricsInfoItem.Text = result.HasSynced ? ("가사: 싱크 가사 있음 (" + result.Source + ")")
                                 : result.Instrumental ? "가사: 연주곡"
                                 : result.Failed ? "가사: 가사 서버에 연결하지 못함" : "가사: 찾지 못함";
@@ -411,6 +418,40 @@ namespace PearNowPlaying
             }
             TickLyrics(true);
             Reposition();   // the new lyrics may be taller or shorter than the last song's
+        }
+
+        /// <summary>
+        /// Times lyrics from another recording (a cover's original) by the video's captions: from what was measured
+        /// before, or measured now in the background (the lyrics show untimed until then). null lyrics just stop it.
+        /// </summary>
+        void MeasureCaptions(string key, SongInfo song, LyricsResult result)
+        {
+            if (captionCts != null) captionCts.Cancel();
+            captionCts = null;
+            captionOffset = null;
+            var id = song.VideoId;
+            if (!cfg.CaptionTiming || !CaptionTiming.Applies(result) || !LyricsTiming.CanKeep(id)) return;
+            var lk = CaptionTiming.LyricsKey(result);
+            int? known;
+            if (captionStore.TryGet(id, lk, out known)) { captionOffset = known; return; }
+            var cts = captionCts = new CancellationTokenSource();
+            var ct = cts.Token;
+            var yt = lyricsProvider.Ytm;
+            Task.Run(async () =>
+            {
+                int? ms;
+                try { ms = await CaptionTiming.Find(yt, id, result, ct); }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) { Log.Info("caption timing " + id + " failed: " + ex.Message); return; }   // asked again next time
+                captionStore.Set(id, lk, ms);
+                ui.Post(_ =>
+                {
+                    if (ct.IsCancellationRequested || key != lyricsKey || lyrics != result || !ms.HasValue) return;
+                    captionOffset = ms.Value;
+                    SyncTimingMenus();
+                    TickLyrics(true);
+                }, null);
+            });
         }
 
         void TickLyrics(bool force = false)
@@ -437,7 +478,9 @@ namespace PearNowPlaying
                 force = true;
             }
 
-            int ms = (int)Math.Round(PlaybackPosition * 1000) + cfg.LyricsOffsetMs + timing.For(pear.Current.VideoId);
+            // YouTube Music's lyrics, and a cover's original's the captions didn't time, go without the default 0.3 s lead
+            int lead = CaptionTiming.WithoutLead(lyrics, captionOffset.HasValue) ? cfg.LyricsOffsetMs - Config.DefaultLyricsOffsetMs : cfg.LyricsOffsetMs;
+            int ms = (int)Math.Round(PlaybackPosition * 1000) + lead + timing.For(pear.Current.VideoId) - (captionOffset ?? 0);
             int entry = MainView.EntryFor(lyrics.IndexAt(ms));
             bool paused = !pear.IsPlaying;
 
@@ -533,6 +576,7 @@ namespace PearNowPlaying
             var song = pear.Current;
             if (!song.HasData) { ShowInfo("재생 중인 곡이 없습니다"); return; }
             lyricsProvider.Forget(song);
+            captionStore.Forget(song.VideoId);
             lyricsProvider.Ytm.ResetPause();
             lyricsProvider.More.ResetPause();
             lyricsKey = null;
@@ -602,6 +646,9 @@ namespace PearNowPlaying
             var id = pear.Current.VideoId;
             songOffsetMenu.Enabled = pear.Current.HasData && LyricsTiming.CanKeep(id);
             SyncTimingMenu(songOffsetMenu, timing.For(id));
+            // shown apart from "지금": the steps and "기본으로 되돌리기" change only the user's own timing, added to this
+            captionTimingItem.Visible = captionOffset.HasValue && captionOffset.Value != 0;
+            captionTimingItem.Text = "자막으로 맞춤: " + LyricsTiming.Text(-(captionOffset ?? 0));
             SyncTimingMenu(offsetMenu, cfg.LyricsOffsetMs - Config.DefaultLyricsOffsetMs);
         }
 

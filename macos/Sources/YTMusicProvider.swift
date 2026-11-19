@@ -241,12 +241,39 @@ struct VideoDescription {
 
     /// A video for a song known only by its title, artist and length (the browser source when the tab's address
     /// can't be read): YouTube's search for "artist title", picked by pickVideo. Nil when none is that sure.
-    func findVideo(title: String, artist: String, duration: Double) async throws -> String? {
+    /// `byLength`: also take the one official video as long as the song (the title may be a translation).
+    /// Same as YtmLyrics.FindVideo in src/YtmLyrics.cs.
+    func findVideo(title: String, artist: String, duration: Double, byLength: Bool = true) async throws -> String? {
         guard !title.trimmed.isEmpty, duration > 0 else { return nil }
-        let query = (artist.trimmed.isEmpty ? "" : artist + " ") + title
-        let found = Self.pickVideo(try await search(query), title: title, artist: artist, duration: duration)
+        // "-word" excludes the word in YouTube's search ("-Cover- ウォルピスカーター" found nothing of it)
+        let query = title.replacingOccurrences(of: #"(^|\s)-+(?=\S)"#, with: "$1", options: .regularExpression)
+        var found = Self.pickVideo(try await search((artist.trimmed.isEmpty ? "" : artist + " ") + query), title: title, artist: artist,
+                                   duration: duration, byLength: byLength)
+        // a channel name in the query can push the video off the page ("ヤン・ナリ / Yang Nari 【にじさんじ】 …", none at all
+        // for "日南めいHinami Mei …"), and the browser may name an odd artist ("歌"): the title alone, then
+        if found == nil && !artist.trimmed.isEmpty {
+            found = Self.pickByTitleOnly(try await search(query), title: title, artist: artist, duration: duration)
+        }
         log("INFO YouTube search for \(artist) - \(title) (\(Int(duration))s): \(found ?? "no video of that length and title")")
         return found
+    }
+
+    /// pickVideo for a search by the title alone, where other singers' uploads of the same song come up too: a video
+    /// titled exactly like the song and as long (±2 s) only when it is the one such video, or the one of them on the
+    /// artist's channel; else pickVideo's other rules. Same as YtmLyrics.PickByTitleOnly in src/YtmLyrics.cs.
+    static func pickByTitleOnly(_ hits: [SearchHit], title: String, artist: String, duration: Double) -> String? {
+        let wanted = CoverLyrics.norm(title)
+        let exact = hits.filter { $0.length > 0 && abs($0.length - duration) <= 2 && !wanted.isEmpty && CoverLyrics.norm($0.title) == wanted }
+        if exact.count == 1 { return exact[0].videoId }
+        if exact.count > 1 {
+            let singer = CoverLyrics.norm(artist)
+            let mine = exact.filter { h in
+                let owner = CoverLyrics.norm(h.owner.replacingOccurrences(of: " - Topic", with: ""))
+                return !singer.isEmpty && !owner.isEmpty && (owner.contains(singer) || singer.contains(owner))
+            }
+            return mine.count == 1 ? mine[0].videoId : nil
+        }
+        return pickVideo(hits, title: title, artist: artist, duration: duration, byLength: false)
     }
 
     /// The search result that is this song, in order: as long as the song (±2 s) and titled exactly like it (a
@@ -254,8 +281,10 @@ struct VideoDescription {
     /// song ("YOASOBI「ハルジオン」Official Music Video" for "ハルジオン (Halzion)"). Failing those, the one official
     /// result within a second of the length: the browser may name the artist and song in the player's language
     /// ("요아소비", "Idol"), which the video's title doesn't use. Fan uploads of the same length are never taken.
+    /// `byLength` false: not the official video by length alone (the title is the original's, so a video named otherwise
+    /// is another song: 莉犬's 「Subtitle」 for his 「secret base」, both 5:07, 2026-11-19).
     /// Same as YtmLyrics.PickVideo in src/YtmLyrics.cs.
-    static func pickVideo(_ hits: [SearchHit], title: String, artist: String, duration: Double) -> String? {
+    static func pickVideo(_ hits: [SearchHit], title: String, artist: String, duration: Double, byLength: Bool = true) -> String? {
         let wanted = CoverLyrics.norm(title)
         let names = CoverLyrics.titleNames(title, artist: artist).map(CoverLyrics.norm).filter { $0.count >= 2 }
         let singer = CoverLyrics.norm(artist)
@@ -268,7 +297,7 @@ struct VideoDescription {
             if (byArtist || h.official) && names.contains(where: { t.contains($0) }) { return h.videoId }
             if h.official && abs(h.length - duration) <= 1 { official.append(h.videoId) }
         }
-        return official.count == 1 ? official[0] : nil
+        return byLength && official.count == 1 ? official[0] : nil
     }
 
     /// The largest of a renderer's thumbnails; album covers (lh3.googleusercontent.com, "=w60-h60-…") are asked
@@ -434,6 +463,60 @@ struct VideoDescription {
         var d = VideoDescription(text: Self.path(desc, "content") as? String ?? "")
         if let desc { Self.collectWatchIds(desc, into: &d.linkedIds) }
         return d.text.isEmpty && d.linkedIds.isEmpty ? nil : d
+    }
+
+    // ---- captions (only to time a cover's lyrics: CaptionTiming) -------------------------------------
+
+    struct CaptionTrack { var url: String; var language: String; var auto: Bool }
+
+    /// The video's caption tracks. Asked as the iOS app: the web clients get no captions without a proof-of-origin
+    /// token (2026-11-15: WEB/MWEB "UNPLAYABLE", ANDROID_VR "LOGIN_REQUIRED", IOS lists them and serves json3).
+    /// Same as YtmLyrics.CaptionTracks in src/YtmLyrics.cs.
+    func captionTracks(_ videoId: String) async throws -> [CaptionTrack] {
+        let body: [String: Any] = ["videoId": videoId, "context": ["client": ["clientName": "IOS", "clientVersion": "20.10.4", "deviceMake": "Apple",
+                                                                              "deviceModel": "iPhone16,2", "hl": "ja"]]]
+        let player = try await post(youtubeBase.trimmed("/") + "/youtubei/v1/player?prettyPrint=false", body: body, label: "player (captions)")
+        return (Self.path(player, "captions", "playerCaptionsTracklistRenderer", "captionTracks") as? [Any] ?? []).compactMap { t in
+            // only ever fetched from YouTube itself
+            guard let url = Self.path(t, "baseUrl") as? String, let u = URL(string: url), u.scheme == "https",
+                  u.host == "www.youtube.com" || u.host == "youtube.com" else { return nil }
+            return CaptionTrack(url: url, language: Self.path(t, "languageCode") as? String ?? "", auto: Self.path(t, "kind") as? String == "asr")
+        }
+    }
+
+    /// A track's lines (json3). Auto captions start each line at its first word.
+    func captionLines(_ track: CaptionTrack) async throws -> [LyricLine] {
+        try Task.checkCancellation()
+        var request = URLRequest(url: URL(string: track.url + "&fmt=json3")!)
+        request.timeoutInterval = 12; request.httpShouldHandleCookies = false
+        request.setValue("NowPlayingWidget-macOS/\(appVersion)", forHTTPHeaderField: "User-Agent")
+        let data: Data, response: HTTPURLResponse
+        if let transport { (data, response) = try await transport(request) }
+        else {
+            let result = try await session.data(for: request)
+            guard let http = result.1 as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            (data, response) = (result.0, http)
+        }
+        try Task.checkCancellation()
+        guard (200...299).contains(response.statusCode) else {
+            throw NSError(domain: "YTMusic", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "YouTube captions \(response.statusCode)"])
+        }
+        guard !data.isEmpty, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        var lines: [LyricLine] = []
+        for e in json["events"] as? [Any] ?? [] {
+            guard let segs = Self.path(e, "segs") as? [Any], !segs.isEmpty else { continue }
+            let text = segs.map { Self.path($0, "utf8") as? String ?? "" }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let start = Self.number(Self.path(e, "tStartMs")) + (track.auto ? Self.number(Self.path(segs[0], "tOffsetMs")) : 0)
+            lines.append(LyricLine(id: lines.count, time: start / 1000, text: text))
+        }
+        return lines
+    }
+
+    private static func number(_ v: Any?) -> Double {
+        if let n = v as? NSNumber { return n.doubleValue }
+        if let s = v as? String { return Double(s) ?? 0 }
+        return 0
     }
 
     static func collectWatchIds(_ node: Any, into ids: inout [String], depth: Int = 0) {

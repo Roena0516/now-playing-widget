@@ -137,12 +137,13 @@ Windows 버전의 `src/Theme.cs`, `src/CardRenderer.cs`, `src/LyricsView.cs`에 
 | `coverLyrics` | `true` | 메뉴의 "커버곡 가사 표시(beta)"입니다. `false`이면 앨범 곡(공식 음원)에서만 가사를 찾아 표시하고, 커버·MV·일반 업로드 영상에서는 찾지 않습니다. 2.0.2까지의 `"lyricsAlbumOnly": true`(앨범 곡만 가사 표시)는 `"coverLyrics": false`로 이어집니다. |
 | `liquidGlass` | `off` | 메뉴의 "Liquid Glass 배경(beta)"입니다. `regular` 또는 `clear`이면 카드의 어두운 배경 대신 macOS 26의 Liquid Glass를 씁니다. `clear`가 더 투명합니다. 글자가 밝은 화면에서도 보이도록 유리 위에 어두운 색을 조금 깔며, 그 정도는 `opacity`를 따릅니다. macOS 26보다 낮은 버전에서는 메뉴에서 고를 수 없고, Windows 버전에는 없는 설정입니다. |
 | `videoTitle` | `song` | 앨범 곡이 아닌 영상에 표시할 제목입니다. `song`은 곡 제목, `video`는 영상 제목(Pear의 Discord 상태와 같은 제목)입니다. |
-| `lyricsOffsetMs` | `300` | 모든 곡의 가사 타이밍 보정값(ms)입니다. 양수이면 가사가 더 빨리 표시됩니다. 메뉴의 **모든 곡 가사 타이밍**에서 0.1초나 0.5초씩 바꾸며, 메뉴에는 기본값(300)과의 차이로 표시됩니다. 영상마다 맞춘 값(**이 곡 가사 타이밍**)은 같은 폴더의 `lyrics-timing.json`에 저장되고, 이 값에 더해집니다. |
+| `lyricsOffsetMs` | `300` | 모든 곡의 가사 타이밍 보정값(ms)입니다. 양수이면 가사가 더 빨리 표시됩니다. 메뉴의 **모든 곡 가사 타이밍**에서 0.1초나 0.5초씩 바꾸며, 메뉴에는 기본값(300)과의 차이로 표시됩니다. YouTube Music에서 받은 가사와, 커버곡(원곡의 가사를 쓰는 곡) 중 자막으로 타이밍을 맞추지 못한 곡에는 기본값 300을 뺀 나머지만 적용됩니다. 영상마다 맞춘 값(**이 곡 가사 타이밍**)은 같은 폴더의 `lyrics-timing.json`에 저장되고, 이 값에 더해집니다. |
 | `hotkey...` | 위 단축키 표 참고 | 단축키입니다. 값을 비워 두면 그 단축키를 사용하지 않습니다. |
 | `ytmLyrics` | `true` | YouTube Music 가사를 먼저 찾을지 정합니다. `false`이면 LRCLIB에서만 찾습니다. 메뉴에는 없는 설정입니다. |
 | `ytmLyricsProxy` | `https://ytmbrowseproxy.zvz.be/` | YouTube Music 가사 중계 서버의 주소입니다. |
 | `lyricsServer` | `https://lrclib.net` | LRCLIB 서버의 주소입니다. |
 | `moreLyrics` | `true` | LRCLIB에 싱크 가사가 없을 때 Kugou와 NetEase에서도 찾을지 정합니다. 메뉴에는 없는 설정입니다. |
+| `captionTiming` | `true` | 커버곡처럼 다른 녹음의 가사를 쓸 때 영상 자막으로 가사 타이밍을 자동으로 맞출지 정합니다. 자막 글자는 저장하지 않고, 영상 ID와 맞춘 값만 `~/Library/Caches/PearNowPlaying-macOS/caption-timing.json`에 저장합니다. 메뉴에는 없는 설정입니다. |
 
 설정 파일의 키 이름은 바꾸지 않아야 합니다. 값을 읽을 수 없거나 허용 범위를 벗어나는 설정은 기본값으로 바뀝니다. 이전 버전에서 만든 설정 파일에 없는 키는 기본값으로 채웁니다. 연결 토큰은 같은 폴더의 `token.txt`에 저장하며, Windows 버전의 설정과 토큰은 가져오지 않습니다.
 
@@ -153,7 +154,7 @@ Windows 버전의 `src/Theme.cs`, `src/CardRenderer.cs`, `src/LyricsView.cs`에 
 - 곡의 앨범 아트 주소(HTTPS). Discord 상태를 켰다면 Discord도 이 주소의 이미지를 받아 갑니다.
 - `music.youtube.com`: 곡 정보와 가사 ID를 받고, 공식 음원을 찾을 때는 아티스트 페이지와 앨범 페이지를 받습니다.
 - `ytmbrowseproxy.zvz.be`: Pear의 YTMusic 가사 제공자가 사용하는 중계 서버입니다. 현재는 `b-ytmbrowseproxy.zvz.be`로 리다이렉트됩니다. 이 서버에는 browseId와 클라이언트 식별값만 보냅니다.
-- `www.youtube.com`: 커버곡의 원곡을 찾을 때 영상 설명란을 읽고, 원곡 링크가 없으면 곡 이름으로 검색합니다. 브라우저에서 듣는 곡의 탭 주소를 읽지 못했을 때는 제목과 아티스트로 검색합니다.
+- `www.youtube.com`: 커버곡의 원곡을 찾을 때 영상 설명란을 읽고, 원곡 링크가 없으면 곡 이름으로 검색합니다. 브라우저에서 듣는 곡의 탭 주소를 읽지 못했을 때는 제목과 아티스트로 검색합니다. 커버곡처럼 다른 녹음의 가사를 쓸 때는 가사 타이밍을 맞추기 위해 영상의 자막을 받습니다(`captionTiming`).
 - `lrclib.net`: 곡 제목, 아티스트, 앨범, 길이를 보냅니다.
 - `lyrics.kugou.com`, `music.163.com`(`moreLyrics`가 켜져 있고 LRCLIB에서 싱크 가사를 찾지 못했을 때만): 곡 제목, 아티스트, 길이를 보내고 가사를 받습니다. 각 서비스의 앱이 사용하는 비공식 경로이며, 로그인 정보는 보내지 않습니다.
 - `api.github.com`, `github.com`: 새 버전을 확인하고, 업데이트를 설치할 때 릴리스 파일을 받습니다. 앱 버전 외의 정보는 보내지 않습니다.

@@ -91,8 +91,42 @@ struct PlayerState {
         timing = LyricsTiming(file: directory.appendingPathComponent("lyrics-timing.json"))
         applyLyricsSources()
     }
-    /// The lyrics timing for the song now in seconds (+ = lyrics earlier): the one for all songs plus this video's.
-    var lyricsOffset: Double { (settings.lyricsOffsetMs + Double(timing.ms(for: song.videoId))) / 1000 }
+    /// The lyrics timing for the song now in seconds (+ = lyrics earlier): the one for all songs plus this video's,
+    /// less how much later the video sings than its lyrics' times by its captions (CaptionTiming). YouTube Music's lyrics,
+    /// and a cover's original's the captions didn't time, go without the default 0.3 s lead (only the user's change to
+    /// it stays; CaptionTiming.withoutLead). Same as TrayApp.TickLyrics.
+    var lyricsOffset: Double {
+        let lead = CaptionTiming.withoutLead(lyricsOutcome, timedByCaptions: captionOffset != nil) ? settings.lyricsOffsetMs - Settings.defaultLyricsOffsetMs : settings.lyricsOffsetMs
+        return (lead + Double(timing.ms(for: song.videoId)) - Double(captionOffset ?? 0)) / 1000
+    }
+    /// How much later (ms) the video sings than its lyrics' times, by its captions; nil when not measured or not settled.
+    @Published private(set) var captionOffset: Int?
+    private var captionTask: Task<Void, Never>?
+    let captionStore = CaptionTimingStore(file: CaptionTimingStore.defaultFile)
+
+    /// Times lyrics from another recording (a cover's original) by the video's captions: from what was measured
+    /// before, or measured now in the background (the lyrics show untimed until then). nil just stops it.
+    private func measureCaptions(_ track: Song, _ result: LyricsLookup?) {
+        captionTask?.cancel(); captionTask = nil
+        if captionOffset != nil { captionOffset = nil }
+        let id = track.videoId
+        guard settings.captionTiming, loadRemoteAssets, CaptionTiming.applies(result), LyricsTiming.canKeep(id),
+              case .synced(let lines, _)? = result else { return }
+        let key = CaptionTiming.lyricsKey(lines)
+        if let known = captionStore.get(id, key) { captionOffset = known; return }
+        let ytm = lyrics.ytm, store = captionStore
+        captionTask = Task {
+            let ms: Int?
+            do { ms = try await CaptionTiming.find(ytm, id, lines) }
+            catch {
+                if !Task.isCancelled { Log.info("caption timing \(id) failed: \(error.localizedDescription)") }   // asked again next time
+                return
+            }
+            store.set(id, key, ms)
+            guard !Task.isCancelled, song.videoId == id, case .synced(let now, _)? = lyricsOutcome, now == lines, let ms else { return }
+            captionOffset = ms
+        }
+    }
     func applyLyricsSources() {
         lyrics.useYtm = settings.ytmLyrics
         lyrics.useMore = settings.moreLyrics
@@ -318,6 +352,7 @@ struct PlayerState {
         lyricTask?.cancel(); prefetchTask?.cancel()
         nextLines = []
         let track = song
+        measureCaptions(track, nil)
         // already known (fetched ahead, cached): swap the lyrics in place, so the lyrics card doesn't close and
         // reopen (which made the song card drop down and come back up)
         if !force, !track.title.isEmpty, wantsLyrics(track), let known = lyrics.known(track) {
@@ -335,7 +370,7 @@ struct PlayerState {
             prefetchNext(after: track)
             return
         }
-        if force { lyrics.forget(track); lyrics.ytm.resetPause(); lyrics.more?.resetPause(); onLyricsNotice?("가사를 다시 찾고 있습니다") }
+        if force { lyrics.forget(track); captionStore.forget(track.videoId); lyrics.ytm.resetPause(); lyrics.more?.resetPause(); onLyricsNotice?("가사를 다시 찾고 있습니다") }
         lookUp(track, force: force, shown: nil)
     }
 
@@ -393,6 +428,7 @@ struct PlayerState {
     /// A lookup's result for the current song: lines, status line, look-ahead and title.
     private func apply(_ result: LyricsLookup, for track: Song, force: Bool) {
         lyricsOutcome = result; lyricsFailed = false
+        measureCaptions(track, result)
         switch result {
         case .synced(let found, let source): lines = found; lyricsStatus = "가사: 싱크 가사 있음 (\(source))"
         case .instrumental: lines = []; lyricsStatus = "가사: 연주곡"

@@ -449,7 +449,10 @@ struct NowPlayingInfo: Equatable {
            let entry = entries.first(where: { Self.sameSong(info.title, title: $0.title, tabTitle: "") && (info.duration <= 0 || abs($0.duration - info.duration) <= 3) }) {
             return entry.videoId
         }
-        do { return try await ytm.findVideo(title: tabSong.isEmpty ? info.title : tabSong, artist: info.artist, duration: info.duration) ?? "" }
+        // the tab's title is the original one: a video only as long as the song isn't needed then (it took another song by
+        // the same singer, 2026-11-19)
+        do { return try await ytm.findVideo(title: tabSong.isEmpty ? info.title : tabSong, artist: info.artist, duration: info.duration,
+                                            byLength: tabSong.isEmpty) ?? "" }
         catch { Log.write("INFO YouTube search failed: \(error.localizedDescription)"); return "" }
     }
 

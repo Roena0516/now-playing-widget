@@ -44,6 +44,8 @@ import CoreText
             }
         }.store(in: &subscriptions)
         client.$lines.sink { [weak self] _ in DispatchQueue.main.async { guard let self else { return }; self.overlay.refresh() } }.store(in: &subscriptions)
+        // the captions timed this cover: its 가사 타이밍 menu says so (the overlay reads lyricsOffset on each tick)
+        client.$captionOffset.removeDuplicates().dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.updateMenu(); self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$nextLines.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$titleRevision.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
         client.$artwork.sink { [weak self] _ in DispatchQueue.main.async { self?.overlay?.refresh() } }.store(in: &subscriptions)
@@ -256,7 +258,9 @@ import CoreText
         add(lyrics, "가사 다시 찾기", #selector(findLyrics))
         // lyrics timing for this video (kept per video ID, added to the one for all songs) and for all songs
         let videoId = client.song.videoId
-        timingMenu(lyrics, "이 곡 가사 타이밍", client.timing.ms(for: videoId), enabled: !client.song.title.isEmpty && LyricsTiming.canKeep(videoId)) { [unowned self] in self.shiftSongOffset($0) }
+        // the captions' timing is shown apart from "지금": the steps and "기본으로 되돌리기" change only the user's own, added to it
+        let byCaptions = client.captionOffset.map { $0 != 0 ? "자막으로 맞춤: " + LyricsTiming.text(-$0) : nil } ?? nil
+        timingMenu(lyrics, "이 곡 가사 타이밍", client.timing.ms(for: videoId), enabled: !client.song.title.isEmpty && LyricsTiming.canKeep(videoId), note: byCaptions) { [unowned self] in self.shiftSongOffset($0) }
         timingMenu(lyrics, "모든 곡 가사 타이밍", Int(client.settings.lyricsOffsetMs - Settings.defaultLyricsOffsetMs), enabled: true) { [unowned self] in self.shiftOffset($0) }
         submenu(menu, "가사", lyrics)
         let sources = NSMenu()
@@ -284,7 +288,7 @@ import CoreText
     /// A 가사 타이밍 submenu like the Windows version's: the timing now (relative to the default), 0.5 s and 0.1 s steps
     /// either way, and back to the default. Its rows (MenuRow) don't close the menu, so a step can be clicked several
     /// times in a row while the lyrics move. shift gets a step, or nil for the default, and returns the timing it set.
-    func timingMenu(_ menu: NSMenu, _ title: String, _ value: Int, enabled: Bool, shift: @escaping (Int?) -> Int) {
+    func timingMenu(_ menu: NSMenu, _ title: String, _ value: Int, enabled: Bool, note: String? = nil, shift: @escaping (Int?) -> Int) {
         guard enabled else { add(menu, title, nil); return }
         let sub = NSMenu(); sub.autoenablesItems = false
         let now = MenuRow("지금: " + LyricsTiming.text(value), enabled: false)
@@ -294,6 +298,7 @@ import CoreText
             now?.title = "지금: " + LyricsTiming.text(ms); reset?.isEnabled = ms != 0
         }
         sub.addRow(now)
+        if let note { sub.addRow(MenuRow(note, enabled: false)) }
         for step in [500, 100, -100, -500] { sub.addRow(MenuRow(LyricsTiming.text(step)) { apply(step) }) }
         sub.addItem(.separator())
         reset.perform = { apply(nil) }

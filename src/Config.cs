@@ -119,6 +119,8 @@ namespace PearNowPlaying
         public string YtmLyricsProxy = PearNowPlaying.YtmLyrics.DefaultProxy;
         /// <summary>Ask Kugou and NetEase when LRCLIB has no synced lyrics.</summary>
         public bool MoreLyrics = true;
+        /// <summary>Time a cover's (original's) lyrics to the video by its captions (CaptionTiming).</summary>
+        public bool CaptionTiming = true;
 
         // Hotkeys ("없음" or empty = disabled)
         public string HotkeyLyrics = "Ctrl+Alt+L";
@@ -203,6 +205,7 @@ namespace PearNowPlaying
                 c.YtmLyrics = GetBool(map, "ytmLyrics", c.YtmLyrics);
                 c.YtmLyricsProxy = Get(map, "ytmLyricsProxy", c.YtmLyricsProxy);
                 c.MoreLyrics = GetBool(map, "moreLyrics", c.MoreLyrics);
+                c.CaptionTiming = GetBool(map, "captionTiming", c.CaptionTiming);
                 c.HotkeyLyrics = Get(map, "hotkeyLyrics", c.HotkeyLyrics);
                 c.HotkeyShow = Get(map, "hotkeyShow", c.HotkeyShow);
                 c.HotkeyToggle = Get(map, "hotkeyToggle", c.HotkeyToggle);
@@ -282,6 +285,8 @@ namespace PearNowPlaying
                 sb.AppendLine("ytmLyricsProxy=" + YtmLyricsProxy);
                 sb.AppendLine("# LRCLIB에 싱크 가사가 없으면 Kugou와 NetEase(网易云音乐)에서도 찾기. 메뉴에는 없는 설정입니다.");
                 sb.AppendLine("moreLyrics=" + B(MoreLyrics));
+                sb.AppendLine("# 커버곡처럼 다른 녹음의 가사를 쓸 때 영상 자막으로 가사 타이밍을 자동으로 맞추기. 자막 글자는 저장하지 않습니다. 메뉴에는 없는 설정입니다.");
+                sb.AppendLine("captionTiming=" + B(CaptionTiming));
                 sb.AppendLine();
                 sb.AppendLine("# 새 버전이 있는지 GitHub에서 확인 (켜 두면 시작할 때와 하루에 한 번, 설치는 메뉴에서 직접 누를 때만 함)");
                 sb.AppendLine("checkUpdates=" + B(CheckUpdates));

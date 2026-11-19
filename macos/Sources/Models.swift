@@ -65,6 +65,8 @@ struct Settings: Codable {
     var ytmLyricsProxy = YTMusicProvider.defaultProxy
     /// ask Kugou and NetEase when LRCLIB has no synced lyrics
     var moreLyrics = true
+    /// time a cover's (original's) lyrics to the video by its captions (CaptionTiming)
+    var captionTiming = true
     var lyricsServer = "https://lrclib.net"
     // hotkeys, same format as the Windows config ("Ctrl" = Control, "Alt" = Option); empty = off
     var hotkeyShow = "Ctrl+Alt+Up"
@@ -115,6 +117,7 @@ struct Settings: Codable {
         checkUpdates = try value(.checkUpdates, checkUpdates)
         ytmLyrics = try value(.ytmLyrics, ytmLyrics); ytmLyricsProxy = try value(.ytmLyricsProxy, ytmLyricsProxy)
         moreLyrics = try value(.moreLyrics, moreLyrics)
+        captionTiming = try value(.captionTiming, captionTiming)
         lyricsServer = try value(.lyricsServer, lyricsServer)
         positionLayoutVersion = try c.decodeIfPresent(Int.self, forKey: .positionLayoutVersion)
         // one widget per screen; 1.6 configs have none and carry their single widget over
