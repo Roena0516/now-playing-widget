@@ -81,8 +81,11 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
         // the usual case for covers: ask for it alongside the first lookups instead of after them.
         // (not tied to the lyrics relay: the description and the original's title/length come from YouTube directly)
-        let coverCandidate = !song.videoId.isEmpty && song.duration > 0 && CoverLyrics.mayBeCover(song)
-        let description = coverCandidate && !CoverLyrics.looksArranged(song.title) && !CoverLyrics.looksArranged(song.alternativeTitle)
+        // Without a video (a browser song found by title only) there is no description: the original is then found by
+        // searching for the name the title gives. Same as src/Lyrics.cs.
+        let coverCandidate = (!song.videoId.isEmpty || song.mediaType == "UNKNOWN") && song.duration > 0 && CoverLyrics.mayBeCover(song)
+        let description = coverCandidate && !song.videoId.isEmpty
+            && !CoverLyrics.looksArranged(song.title) && !CoverLyrics.looksArranged(song.alternativeTitle)
             ? descriptionTask(song.videoId) : nil
         defer { description?.cancel() }
 
@@ -259,7 +262,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
             let desc = await description?.value
             try Task.checkCancellation()
             let (ids, hinted) = CoverLyrics.originalCandidates(desc, ownId: song.videoId)
-            if ids.isEmpty { log("INFO cover: no YouTube links in the description of \(song.videoId)") }
+            if ids.isEmpty { log(song.videoId.isEmpty ? "INFO cover: video not known, finding the original by its name" : "INFO cover: no YouTube links in the description of \(song.videoId)") }
             // the original's YouTube Music lyrics need the relay; while it is down (paused or failing) the original
             // is still identified (music.youtube.com) and looked up on LRCLIB
             var ytmLyrics = useYtm && !ytm.paused

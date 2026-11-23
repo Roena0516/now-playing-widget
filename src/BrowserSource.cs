@@ -168,6 +168,49 @@ namespace PearNowPlaying
             return info;
         }
 
+        static readonly Type streamReferenceType = Type.GetType("Windows.Storage.Streams.IRandomAccessStreamReference, Windows.Storage, ContentType=WindowsRuntime");
+        static readonly Type streamType = Type.GetType("Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage, ContentType=WindowsRuntime");
+        static readonly MethodInfo asStreamForRead = FindAsStreamForRead();
+
+        static MethodInfo FindAsStreamForRead()
+        {
+            try
+            {
+                var ext = Type.GetType("System.IO.WindowsRuntimeStreamExtensions, System.Runtime.WindowsRuntime, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089");
+                return ext == null ? null : ext.GetMethods().FirstOrDefault(m => m.Name == "AsStreamForRead" && m.GetParameters().Length == 1);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// The picture Windows shows for the browser's song (its media flyout's thumbnail, the page's artwork), or null.
+        /// Used when the song's video isn't known, so there is no thumbnail address to load (2026-11-23).
+        /// </summary>
+        public async Task<byte[]> Thumbnail()
+        {
+            if (streamReferenceType == null || streamType == null || asStreamForRead == null) return null;
+            var session = await BrowserSession();
+            if (session == null) return null;
+            var props = await WinRt.Await(WinRt.Call(sessionType, session, "TryGetMediaPropertiesAsync"), propertiesType);
+            var reference = props != null ? WinRt.Get(propertiesType, props, "Thumbnail") : null;
+            if (reference == null) return null;
+            var stream = await WinRt.Await(streamReferenceType.GetMethod("OpenReadAsync").Invoke(reference, null), streamType);
+            if (stream == null) return null;
+            using (var s = (System.IO.Stream)asStreamForRead.Invoke(null, new[] { stream }))
+            using (var ms = new System.IO.MemoryStream())
+            {
+                var buf = new byte[81920];
+                int n;
+                while ((n = await s.ReadAsync(buf, 0, buf.Length).ConfigureAwait(false)) > 0)
+                {
+                    ms.Write(buf, 0, n);
+                    if (ms.Length > 8 * 1024 * 1024) return null;   // not a thumbnail
+                }
+                (stream as IDisposable)?.Dispose();
+                return ms.Length > 0 ? ms.ToArray() : null;
+            }
+        }
+
         /// <summary>Every session Windows lists ("app id: status"), the current one first: for the probe.</summary>
         public async Task<List<string>> Describe()
         {
@@ -446,30 +489,43 @@ namespace PearNowPlaying
                 if ((DateTime.UtcNow - addressChanged).TotalSeconds <= 5 || address.Length == 0) address = BrowserWindows.Address(w.Handle) ?? "";
                 tabs.Add(new Tab { Url = address.Contains("music.youtube.com") ? address : "", Title = w.Title });
             }
+            // while the song shown isn't what Windows names (a song change), every 2 seconds: a tab behind others may
+            // still carry the last song's name, or just "YouTube Music", for a moment
             var wanted = now.Title + "|" + string.Join("|", windows.Select(w => w.Handle.ToString()));
-            if (wanted != stripKey || (DateTime.UtcNow - stripRead).TotalSeconds >= 10)
+            if (wanted != stripKey || (DateTime.UtcNow - stripRead).TotalSeconds >= (Shown() ? 10 : 2))
             {
                 stripKey = wanted; stripRead = DateTime.UtcNow;
-                stripTitles = windows.SelectMany(w => BrowserWindows.TabTitles(w.Handle)).Where(t => t.Contains("YouTube Music")).ToList();
+                var all = windows.SelectMany(w => BrowserWindows.TabTitles(w.Handle)).ToList();
+                stripTitles = all.Where(t => t.Contains("YouTube Music")).ToList();
+                // another site's tab named like what plays (a YouTube video): then it isn't YouTube Music's song.
+                // Only compared here, never kept or logged.
+                var playing = CoverLyrics.Norm(now.Title);
+                otherSite = playing.Length >= 2 && all.Any(t => !t.Contains("YouTube Music") && CoverLyrics.Norm(t).Contains(playing));
             }
             foreach (var t in stripTitles)
                 if (!tabs.Any(x => TabSongTitle(x.Title) == TabSongTitle(t))) tabs.Add(new Tab { Title = t });
-            return PlayingTab(tabs, now.Title);
+            return PlayingTab(tabs, now.Title, !otherSite);
         }
+
+        /// <summary>Another site's tab (not YouTube Music's) is named like what Windows says plays: read with the tab strips.</summary>
+        bool otherSite;
 
         /// <summary>
         /// The tab named like what Windows reports; else the only video tab, or the only YouTube Music tab with a song.
-        /// A tab titled just "YouTube Music" (its home or a list, playing nothing) isn't one: with it open, a YouTube video
-        /// playing in another tab was taken for its song (2026-11-19).
+        /// A tab titled just "YouTube Music" only counts when no other site's tab is named like what plays
+        /// (<paramref name="blankOk"/>): with such a tab open (its home, playing nothing), a YouTube video playing in
+        /// another tab was taken for its song (2026-11-19); but a playing tab behind others is also titled just
+        /// "YouTube Music" for a moment when the song changes, and 2.1.0 then took the song for stopped (2026-11-23).
         /// </summary>
-        internal static Tab PlayingTab(List<Tab> tabs, string title)
+        internal static Tab PlayingTab(List<Tab> tabs, string title, bool blankOk = false)
         {
             var named = tabs.FirstOrDefault(t => SameSong(title, TabSongTitle(t.Title), ""));
             if (named != null) return named;
             var songs = tabs.Where(t => WatchParameters(t.Url).Item1.Length > 0 || TabSongTitle(t.Title).Length > 0).ToList();
             var videos = songs.Where(t => WatchParameters(t.Url).Item1.Length > 0).ToList();
             if (videos.Count == 1) return videos[0];
-            return songs.Count == 1 ? songs[0] : null;
+            if (songs.Count == 1) return songs[0];
+            return songs.Count == 0 && blankOk && tabs.Count == 1 ? tabs[0] : null;
         }
 
         /// <summary>"アイドル - Idol | YouTube Music - Google Chrome" -> "アイドル - Idol" ("" for "YouTube Music" alone).</summary>
@@ -519,7 +575,10 @@ namespace PearNowPlaying
             if (tabSong.Length > 0 && !SameSong(info.Title, tabSong, ""))
             {
                 if (!Mismatched()) { TickPosition(); return; }
-                if (info.Album.Length == 0) { NotYouTubeMusic(); return; }
+                // Without an album it is another site's video, unless the tab still names the song shown (a tab behind
+                // others can keep the last song's name: YouTube Music moved on) and no other site's tab names it
+                bool stale = !otherSite && songKey.Length > 0 && SameSong(tabSong, title, "");
+                if (info.Album.Length == 0 && !stale) { NotYouTubeMusic(); return; }
                 id = ""; tabSong = "";
             }
             var key = id.Length > 0 ? id : "|" + info.Title + "|" + info.Artist;
@@ -636,7 +695,13 @@ namespace PearNowPlaying
                 { "title", now.Title }, { "artist", now.Artist }, { "album", now.Album }, { "songDuration", now.Duration },
                 { "videoId", id }, { "mediaType", id.Length == 0 ? "UNKNOWN" : "" },
             };
-            if (id.Length == 0) return song;
+            if (id.Length == 0)
+            {
+                // no video, so no thumbnail to load: the picture Windows has for it (Artwork)
+                var art = await ArtworkKey();
+                if (art != null) song["imageSrc"] = art;
+                return song;
+            }
             try
             {
                 var track = await ytm.Lookup(id, ct, false);
@@ -656,6 +721,30 @@ namespace PearNowPlaying
                 if (now.Title.Length == 0 && tabSong.Length > 0) song["title"] = tabSong;
             }
             return song;
+        }
+
+        // ---- the picture Windows has for a song without a known video ----
+
+        public const string ArtworkScheme = "smtc:";
+        static readonly object artGate = new object();
+        static string artKey;
+        static byte[] artBytes;
+
+        /// <summary>The picture behind an "smtc:" image address (the latest one only), or null.</summary>
+        public static byte[] Artwork(string key) { lock (artGate) return key == artKey ? artBytes : null; }
+
+        /// <summary>An "smtc:" address for Windows' picture of the song now (by its content), or null when there is none.</summary>
+        async Task<string> ArtworkKey()
+        {
+            byte[] bytes;
+            try { bytes = await smtc.Thumbnail(); }
+            catch (Exception ex) { Log.Write("INFO browser thumbnail unreadable: " + (ex.InnerException ?? ex).Message); return null; }
+            if (bytes == null) return null;
+            uint hash = 2166136261;
+            foreach (var b in bytes) hash = (hash ^ b) * 16777619;
+            var key = ArtworkScheme + bytes.Length + "-" + hash.ToString("x8");
+            lock (artGate) { artKey = key; artBytes = bytes; }
+            return key;
         }
 
         /// <summary>Pear's MediaType for YouTube Music's musicVideoType.</summary>

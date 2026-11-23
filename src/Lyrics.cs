@@ -204,9 +204,12 @@ namespace PearNowPlaying
             // A cover's description is only needed when YouTube Music has no lyrics for the video itself, which is
             // the usual case for covers: ask for it alongside the first lookups instead of after them.
             // (not tied to the lyrics relay: the description and the original's title/length come from YouTube directly)
-            bool coverCandidate = Ytm != null && !string.IsNullOrEmpty(song.VideoId) && song.Duration > 0
+            // Without a video (a browser song found by title only, its search came back empty) there is no description:
+            // the original is then found by searching for the name the title gives (2026-11-23; it got no lyrics before)
+            bool coverCandidate = Ytm != null && (!string.IsNullOrEmpty(song.VideoId) || song.MediaType == "UNKNOWN") && song.Duration > 0
                                   && CoverLyrics.MayBeCover(song);
-            Task<VideoDescription> description = coverCandidate && !CoverLyrics.LooksArranged(song.Title) && !CoverLyrics.LooksArranged(song.AltTitle)
+            Task<VideoDescription> description = coverCandidate && !string.IsNullOrEmpty(song.VideoId)
+                && !CoverLyrics.LooksArranged(song.Title) && !CoverLyrics.LooksArranged(song.AltTitle)
                 ? DescriptionOrNull(song.VideoId, ct) : null;
 
             // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
@@ -316,7 +319,8 @@ namespace PearNowPlaying
                 var desc = description != null ? await description : null;
                 HashSet<string> hinted;
                 var ids = CoverLyrics.OriginalCandidates(desc, song.VideoId, out hinted);
-                if (ids.Count == 0) Log.Info("cover: no YouTube links in the description of " + song.VideoId);
+                if (ids.Count == 0) Log.Info(string.IsNullOrEmpty(song.VideoId) ? "cover: video not known, finding the original by its name"
+                                                                                : "cover: no YouTube links in the description of " + song.VideoId);
                 // the original's YouTube Music lyrics need the relay; while it is down (paused or failing) the
                 // original is still identified (music.youtube.com) and looked up on LRCLIB
                 var ytmLyrics = new Switch { On = UseYtm && !Ytm.Paused };

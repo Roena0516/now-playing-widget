@@ -181,7 +181,7 @@ namespace PearNowPlaying
             lyricsProvider = new LyricsProvider(cfg.LyricsServer) { Ytm = new YtmLyrics(), More = new MoreLyrics(), Disk = new LyricsDiskCache(LyricsDiskCache.DefaultDir),
                                                 Links = new LyricsLinks(LyricsLinks.DefaultPath) };
             ApplyLyricsSources();
-            lyricsTimer.Tick += (s, e) => TickLyrics();
+            lyricsTimer.Tick += (s, e) => { TickLyrics(); TickCardSecond(); };
             lyricsTimer.Start();
             frameTimer.Tick += (s, e) => LyricsFrame();
             cardFrameTimer.Tick += (s, e) => CardFrameTick();
@@ -294,7 +294,18 @@ namespace PearNowPlaying
             // a fractional value comes from a seek.
             SyncClock(pos + (pos == Math.Floor(pos) ? 0.05 : 0), pear.IsPlaying);
             SyncDiscord();
-            int sec = (int)pos;
+            TickCardSecond();
+        }
+
+        /// <summary>
+        /// The card's time, redrawn as the local clock passes a second (every 0.1 s by lyricsTimer). Not only when a
+        /// position arrives: the browser source sends one each second at any point within it, so the time shown lagged
+        /// by up to a second (2026-11-23). Pear's come right as the second ticks over.
+        /// </summary>
+        void TickCardSecond()
+        {
+            if (!pear.Current.HasData) return;
+            int sec = (int)PlaybackPositionFor(pear.Current);
             if (sec == lastShownSecond) return;
             lastShownSecond = sec;
             if (cardWin.IsShowing) Rerender();
@@ -1086,7 +1097,9 @@ namespace PearNowPlaying
             {
                 try
                 {
-                    var bytes = await artHttp.GetByteArrayAsync(url);
+                    // a browser song without a known video: the picture Windows has for it
+                    var bytes = url.StartsWith(BrowserSource.ArtworkScheme, StringComparison.Ordinal) ? BrowserSource.Artwork(url) : await artHttp.GetByteArrayAsync(url);
+                    if (bytes == null) return;
                     Bitmap bmp;
                     using (var ms = new MemoryStream(bytes))
                     using (var img = Image.FromStream(ms)) bmp = new Bitmap(img);
