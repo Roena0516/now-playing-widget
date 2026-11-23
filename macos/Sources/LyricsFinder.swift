@@ -84,9 +84,7 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         // Without a video (a browser song found by title only) there is no description: the original is then found by
         // searching for the name the title gives. Same as src/Lyrics.cs.
         let coverCandidate = (!song.videoId.isEmpty || song.mediaType == "UNKNOWN") && song.duration > 0 && CoverLyrics.mayBeCover(song)
-        let description = coverCandidate && !song.videoId.isEmpty
-            && !CoverLyrics.looksArranged(song.title) && !CoverLyrics.looksArranged(song.alternativeTitle)
-            ? descriptionTask(song.videoId) : nil
+        let description = coverCandidate && !song.videoId.isEmpty ? descriptionTask(song.videoId) : nil
         defer { description?.cancel() }
 
         // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
@@ -251,13 +249,10 @@ enum LrclibRecheck { @TaskLocal static var only = false }
 
     /// Synced lyrics of the original song for a cover: follow the YouTube links in the cover's description, take
     /// the first linked video whose length is within a few seconds of the cover, and use its YouTube Music
-    /// lyrics (or LRCLIB with the original's title/artist). Covers that say they are remixes/arrangements and
-    /// candidates whose length differs are skipped, since the timing would drift. Nil = not usable.
+    /// lyrics (or LRCLIB with the original's title/artist). Candidates whose length differs are skipped, since the
+    /// timing would drift. A cover that says it is a remix / arrangement is looked up too (until 2.1.1 it wasn't), and
+    /// may take a remix as its original. Nil = not usable.
     private func fromOriginal(_ song: Song, _ description: Task<VideoDescription?, Never>?) async throws -> Synced? {
-        if CoverLyrics.looksArranged(song.title) || CoverLyrics.looksArranged(song.alternativeTitle) {
-            log("INFO cover: title says arranged/remixed, original's lyrics not used: \(song.title)")
-            return nil
-        }
         do {
             let desc = await description?.value
             try Task.checkCancellation()
@@ -317,7 +312,9 @@ enum LrclibRecheck { @TaskLocal static var only = false }
         }
         let label = "\(id) (\(orig.artist) - \(orig.title), \(Int(orig.duration))s)"
         if orig.duration <= 0 { log("INFO cover: original candidate \(id) has no known length, skipped"); return .skipped }
-        if CoverLyrics.looksArranged(orig.title) { log("INFO cover: candidate \(label) is an arrangement, skipped"); return .skipped }
+        // an arrangement isn't the original of a plain cover; for a remix / arrangement cover it may be its very source
+        let arrangedCover = CoverLyrics.looksArranged(song.title) || CoverLyrics.looksArranged(song.alternativeTitle)
+        if !arrangedCover && CoverLyrics.looksArranged(orig.title) { log("INFO cover: candidate \(label) is an arrangement, skipped"); return .skipped }
         // links without an "原曲 / original" label are often the singer's other videos: the title must fit
         if !hinted && !CoverLyrics.titleMatchesCover(song, orig) { log("INFO cover: candidate \(label) is a different song, skipped"); return .skipped }
         let diff = abs(orig.duration - song.duration)

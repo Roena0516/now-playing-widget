@@ -43,6 +43,8 @@ extension Array where Element: Hashable {
 /// original's synced lyrics would drift. Port of src/CoverLyrics.cs; keep the two in step.
 enum CoverLyrics {
     /// Allowed length difference between cover and original, in seconds.
+    /// How far (s) an original's length may be from the cover's, remixes / arrangements included (until 2.1.1 a remix or
+    /// arrangement cover got no original's lyrics at all; user's request, 2026-11-23). Same as src/CoverLyrics.cs.
     static let maxLengthDiff: Double = 10
 
     static let videoLink = Rx(#"(?:youtu\.be/|youtube\.com/(?:watch\?(?:[^\s]*&)?v=|shorts/|embed/|live/|v/))([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])"#, ignoreCase: true)
@@ -312,9 +314,10 @@ enum CoverLyrics {
         let name = norm(songName), uploader = norm(cover.artist)
         guard name.count >= 2, cover.duration > 0 else { return nil }
         func artist(_ h: SearchHit) -> String { norm(h.owner.replacingOccurrences(of: " - Topic", with: "")) }
+        let arranged = looksArranged(cover.title) || looksArranged(cover.alternativeTitle)   // its source may be a remix itself
         let candidates = hits.filter { h in
             h.official && h.videoId != cover.videoId && h.length > 0 && abs(h.length - cover.duration) <= 30
-                && norm(h.title).contains(name) && !coverTitle.matches(h.title) && !looksArranged(h.title)
+                && norm(h.title).contains(name) && !coverTitle.matches(h.title) && (arranged || !looksArranged(h.title))
                 && !artist(h).isEmpty && artist(h) != uploader
         }.sorted { abs($0.length - cover.duration) < abs($1.length - cover.duration) }
         func artists(_ list: [SearchHit]) -> Int {

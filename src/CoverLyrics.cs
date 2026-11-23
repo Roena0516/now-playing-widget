@@ -13,6 +13,11 @@ namespace PearNowPlaying
     internal static class CoverLyrics
     {
         /// <summary>Allowed length difference between cover and original, in seconds.</summary>
+        /// <summary>
+        /// How far (s) an original's length may be from the cover's, remixes / arrangements included: about the same
+        /// length means about the same tempo, and caption timing corrects what's left (until 2.1.1 a remix or
+        /// arrangement cover got no original's lyrics at all; user's request, 2026-11-23).
+        /// </summary>
         public const double MaxLengthDiff = 10;
 
         static readonly Regex VideoLink = new Regex(
@@ -361,8 +366,9 @@ namespace PearNowPlaying
             string name = Norm(songName), uploader = Norm(cover.Artist);
             if (name.Length < 2 || cover.Duration <= 0) return null;
             Func<SearchHit, string> artist = h => Norm(h.Owner.Replace(" - Topic", ""));
+            bool arranged = LooksArranged(cover.Title) || LooksArranged(cover.AltTitle);   // its source may be a remix itself
             var candidates = hits.Where(h => h.Official && h.VideoId != cover.VideoId && h.Length > 0 && Math.Abs(h.Length - cover.Duration) <= 30
-                                             && Norm(h.Title).Contains(name) && !CoverTitle.IsMatch(h.Title) && !LooksArranged(h.Title)
+                                             && Norm(h.Title).Contains(name) && !CoverTitle.IsMatch(h.Title) && (arranged || !LooksArranged(h.Title))
                                              && artist(h).Length > 0 && artist(h) != uploader)
                                  .OrderBy(h => Math.Abs(h.Length - cover.Duration)).ToList();
             Func<IEnumerable<SearchHit>, int> artists = list =>

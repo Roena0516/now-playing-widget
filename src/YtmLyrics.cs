@@ -498,8 +498,10 @@ namespace PearNowPlaying
             var releases = new List<Tuple<string, string>>();   // (browseId, title)
             CollectReleases(artistPage, releases, 0);
             // the closest titles first: "メズマライザー" before "Mesmerizer (Official English Version)" (OrderBy keeps the page's order otherwise)
+            // a remix's own release is one too when the video is that remix (the track's length decides then)
+            bool arranged = CoverLyrics.LooksArranged(video.Title);
             Func<List<Tuple<string, string>>> namedReleases = () => releases
-                .Where(r => !CoverLyrics.LooksArranged(r.Item2))
+                .Where(r => arranged || !CoverLyrics.LooksArranged(r.Item2))
                 .Where(r => named(r.Item2))
                 .OrderBy(r => CoverLyrics.TitleCloseness(r.Item2, names)).ToList();
             Func<List<string>> match = () => namedReleases().Select(r => r.Item1).Distinct().Take(2).ToList();

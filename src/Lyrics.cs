@@ -209,7 +209,6 @@ namespace PearNowPlaying
             bool coverCandidate = Ytm != null && (!string.IsNullOrEmpty(song.VideoId) || song.MediaType == "UNKNOWN") && song.Duration > 0
                                   && CoverLyrics.MayBeCover(song);
             Task<VideoDescription> description = coverCandidate && !string.IsNullOrEmpty(song.VideoId)
-                && !CoverLyrics.LooksArranged(song.Title) && !CoverLyrics.LooksArranged(song.AltTitle)
                 ? DescriptionOrNull(song.VideoId, ct) : null;
 
             // 1) YouTube Music's own synced lyrics; on any failure (relay down, rate limit) fall back to LRCLIB
@@ -304,16 +303,12 @@ namespace PearNowPlaying
         /// <summary>
         /// Synced lyrics of the original song for a cover: follow the YouTube links in the cover's description, take
         /// the first linked video whose length is within a few seconds of the cover, and use its YouTube Music
-        /// lyrics (or LRCLIB with the original's title/artist). Covers that say they are remixes/arrangements and
-        /// candidates whose length differs are skipped, since the timing would drift. Null = not usable.
+        /// lyrics (or LRCLIB with the original's title/artist). Candidates whose length differs are skipped, since the
+        /// timing would drift. A cover that says it is a remix / arrangement is looked up too (until 2.1.1 it wasn't),
+        /// and may take a remix as its original. Null = not usable.
         /// </summary>
         async Task<LyricsResult> FromOriginal(SongInfo song, Task<VideoDescription> description, CancellationToken ct)
         {
-            if (CoverLyrics.LooksArranged(song.Title) || CoverLyrics.LooksArranged(song.AltTitle))
-            {
-                Log.Info("cover: title says arranged/remixed, original's lyrics not used: " + song.Title);
-                return null;
-            }
             try
             {
                 var desc = description != null ? await description : null;
@@ -389,7 +384,10 @@ namespace PearNowPlaying
             var label = id + " (" + orig.Artist + " - " + orig.Title + ", " + (int)orig.Duration + "s)";
             var skipped = new OriginalTry { Outcome = Outcome.Skipped, Track = orig };
             if (orig.Duration <= 0) { Log.Info("cover: original candidate " + id + " has no known length, skipped"); return skipped; }
-            if (CoverLyrics.LooksArranged(orig.Title)) { Log.Info("cover: candidate " + label + " is an arrangement, skipped"); return skipped; }
+            // an arrangement isn't the original of a plain cover; for a remix / arrangement cover it may be its very source
+            // (命に嫌われている。 (akuta renri Remix) covers link that remix, the same length)
+            bool arrangedCover = CoverLyrics.LooksArranged(song.Title) || CoverLyrics.LooksArranged(song.AltTitle);
+            if (!arrangedCover && CoverLyrics.LooksArranged(orig.Title)) { Log.Info("cover: candidate " + label + " is an arrangement, skipped"); return skipped; }
             // links without an "原曲 / original" label are often the singer's other videos: the title must fit
             if (!hinted && !CoverLyrics.TitleMatchesCover(song, orig))
             {

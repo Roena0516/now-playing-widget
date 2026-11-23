@@ -340,8 +340,10 @@ struct VideoDescription {
         var releases: [(id: String, title: String)] = []
         Self.collectReleases(artistPage, into: &releases)
         // the closest titles first: "メズマライザー" before "Mesmerizer (Official English Version)", the page's order otherwise
+        // a remix's own release is one too when the video is that remix (the track's length decides then)
+        let arranged = CoverLyrics.looksArranged(video.title)
         func namedReleases() -> [(id: String, title: String)] {
-            releases.enumerated().filter { !CoverLyrics.looksArranged($0.element.title) && named($0.element.title) }
+            releases.enumerated().filter { (arranged || !CoverLyrics.looksArranged($0.element.title)) && named($0.element.title) }
                 .map { (CoverLyrics.titleCloseness($0.element.title, names), $0.offset, $0.element) }
                 .sorted { ($0.0, $0.1) < ($1.0, $1.1) }.map(\.2)
         }

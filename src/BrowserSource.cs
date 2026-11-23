@@ -270,8 +270,9 @@ namespace PearNowPlaying
         // ---- UI Automation by reflection ----
         static readonly bool uia;
         static readonly MethodInfo fromHandle, findFirst, findAll, propertyValue;
-        static readonly ConstructorInfo propertyCondition;
-        static readonly object controlTypeProperty, nameProperty, valueProperty, edit, tab, tabItem, descendants, children;
+        static readonly ConstructorInfo propertyCondition, andCondition;
+        static readonly Type conditionType;
+        static readonly object controlTypeProperty, nameProperty, valueProperty, classNameProperty, edit, tab, tabItem, descendants, children;
 
         static BrowserWindows()
         {
@@ -289,8 +290,11 @@ namespace PearNowPlaying
                 findAll = element.GetMethod("FindAll", new[] { scope, condition });
                 propertyValue = element.GetMethod("GetCurrentPropertyValue", new[] { property });
                 propertyCondition = client.GetType("System.Windows.Automation.PropertyCondition", true).GetConstructor(new[] { property, typeof(object) });
+                conditionType = condition;
+                andCondition = client.GetType("System.Windows.Automation.AndCondition", true).GetConstructor(new[] { condition.MakeArrayType() });
                 controlTypeProperty = element.GetField("ControlTypeProperty").GetValue(null);
                 nameProperty = element.GetField("NameProperty").GetValue(null);
+                classNameProperty = element.GetField("ClassNameProperty").GetValue(null);
                 valueProperty = client.GetType("System.Windows.Automation.ValuePattern", true).GetField("ValueProperty").GetValue(null);
                 edit = controlType.GetField("Edit").GetValue(null);
                 tab = controlType.GetField("Tab").GetValue(null);
@@ -304,20 +308,41 @@ namespace PearNowPlaying
 
         static object Kind(object controlType) { return propertyCondition.Invoke(new[] { controlTypeProperty, controlType }); }
 
-        /// <summary>The address bar's text: the window's first edit field (the toolbar comes before the page). Null when unreadable.</summary>
+        /// <summary>A control of this kind and UI class (the browser's own, not the page's), or the first of the kind.</summary>
+        static object FindBrowserPart(object window, object controlType, string className)
+        {
+            if (andCondition != null && classNameProperty != null)
+            {
+                var both = Array.CreateInstance(conditionType, 2);
+                both.SetValue(Kind(controlType), 0);
+                both.SetValue(propertyCondition.Invoke(new[] { classNameProperty, className }), 1);
+                var own = findFirst.Invoke(window, new[] { descendants, andCondition.Invoke(new object[] { both }) });
+                if (own != null) return own;
+            }
+            return findFirst.Invoke(window, new[] { descendants, Kind(controlType) });
+        }
+
+        /// <summary>
+        /// The address bar's text: Chromium's omnibox ("OmniboxViewViews"), else the window's first edit field. Null when
+        /// unreadable. (A page's search box can come first in the tree.)
+        /// </summary>
         public static string Address(IntPtr hwnd)
         {
             if (!uia) return null;
             try
             {
                 var window = fromHandle.Invoke(null, new object[] { hwnd });
-                var box = window == null ? null : findFirst.Invoke(window, new[] { descendants, Kind(edit) });
+                var box = window == null ? null : FindBrowserPart(window, edit, "OmniboxViewViews");
                 return box == null ? null : propertyValue.Invoke(box, new[] { valueProperty }) as string;
             }
             catch (Exception ex) { Log.Write("INFO reading a browser's address bar failed: " + (ex.InnerException ?? ex).Message); return null; }
         }
 
-        /// <summary>The titles in the window's tab strip (its first tab list, before any in the page).</summary>
+        /// <summary>
+        /// The titles in the window's tab strip: Chromium's ("TabContainerImpl"), else the first tab list. A page's own
+        /// tab lists come first in the tree: with YouTube in front, its filter chips ("전체", "Shorts" …) were read as
+        /// the tabs, the YouTube Music tab behind wasn't seen, and its song was taken for stopped (2026-11-23).
+        /// </summary>
         public static List<string> TabTitles(IntPtr hwnd)
         {
             var titles = new List<string>();
@@ -325,7 +350,7 @@ namespace PearNowPlaying
             try
             {
                 var window = fromHandle.Invoke(null, new object[] { hwnd });
-                var strip = window == null ? null : findFirst.Invoke(window, new[] { descendants, Kind(tab) });
+                var strip = window == null ? null : FindBrowserPart(window, tab, "TabContainerImpl");
                 if (strip == null) return titles;
                 foreach (var item in (IEnumerable)findAll.Invoke(strip, new[] { children, Kind(tabItem) }))
                 {
